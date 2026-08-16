@@ -1,0 +1,13 @@
+{
+	"name": "conformita-core",
+	"private": true,
+	"description": "Ambiente di sviluppo del plugin Conformita Core.",
+	"license": "GPL-3.0-or-later",
+	"devDependencies": {
+		"@wordpress/env": "^10.0.0"
+	},
+	"scripts": {
+		"env:start": "wp-env start",
+		"env:stop": "wp-env stop"
+	}
+}
