@@ -1,0 +1,92 @@
+# Descrittore per il catalogo del riuso, secondo lo standard publiccode.yml.
+# Da validare con il validatore ufficiale di Developers Italia prima della submission.
+publiccodeYmlVersion: "0.4"
+
+name: Conformita Core
+applicationSuite: WordPress
+url: "https://github.com/sitoalpasso/wp-conformita-core"
+landingURL: "https://github.com/sitoalpasso/wp-conformita-core"
+
+softwareVersion: "0.1.0-alpha"
+releaseDate: "2026-08-16"
+
+platforms:
+  - web
+
+categories:
+  - content-management
+  - document-management
+
+developmentStatus: development
+softwareType: softwareAddon
+
+description:
+  it:
+    shortDescription: >-
+      Meccanismi comuni per i componenti di conformità WordPress per la pubblica
+      amministrazione italiana.
+    longDescription: |
+      Conformita Core fornisce i meccanismi condivisi dai componenti WordPress che
+      attuano obblighi di pubblicazione e pubblicità legale per i soggetti dell'art.
+      2-bis del d.lgs. 14 marzo 2013, n. 33. Il componente non contiene politiche
+      proprie: ogni meccanismo richiede la politica come parametro esplicito e rifiuta
+      di attivarsi se la politica non è dichiarata, perché componenti diversi applicano
+      regole opposte sulla stessa materia e un valore predefinito farebbe ereditare in
+      silenzio quella sbagliata.
+
+      I meccanismi forniti sono il motore di scadenza dei contenuti a tre strati, il
+      controllo dell'indicizzazione, la consegna degli allegati da endpoint applicativo
+      con cartella protetta, il registro delle modifiche in sola aggiunta, il
+      verificatore dei collegamenti e lo scheletro dei tipi di contenuto con capability
+      dedicate ed esposizione REST dichiarata esplicitamente.
+
+      La scadenza è trattata come proprietà del dato letto e non come evento
+      pianificato: il filtro agisce su tutti i percorsi di lettura pubblici anche
+      quando il compito pianificato non viene eseguito. I requisiti sono derivati dalla
+      normativa applicabile, indipendentemente dallo specifico ente, e nessun valore
+      che possa variare fra amministrazioni è cablato nel codice.
+
+      Il componente è in sviluppo e non è ancora destinato all'esercizio.
+    features:
+      - Motore di scadenza dei contenuti a tre strati
+      - Controllo dell'indicizzazione con politica esplicita obbligatoria
+      - Consegna degli allegati da endpoint applicativo con cartella protetta
+      - Registro delle modifiche in sola aggiunta
+      - Verificatore dei collegamenti
+      - Tipi di contenuto con capability dedicate ed esposizione REST esplicita
+    documentation: "https://github.com/sitoalpasso/wp-conformita-core#readme"
+
+legal:
+  license: GPL-3.0-or-later
+  mainCopyrightOwner: sitoalpasso
+  repoOwner: sitoalpasso
+
+maintenance:
+  type: internal
+  contacts:
+    - name: sitoalpasso
+
+localisation:
+  localisationReady: true
+  availableLanguages:
+    - it
+
+it:
+  countryExtensionVersion: "1.0"
+  riuso:
+    # Lasciato vuoto deliberatamente: il campo dichiara la pubblica amministrazione
+    # titolare del software. Questo componente è pubblicato in licenza aperta da un
+    # soggetto privato e non è di titolarità di alcuna amministrazione.
+    codiceIPA: ""
+  conforme:
+    # Autodichiarazioni tenute a false finché il componente è in sviluppo: si
+    # aggiornano solo dopo la verifica corrispondente.
+    lineeGuidaDesign: false
+    modelloInteroperabilita: false
+    misureMinimeSicurezza: false
+    gdpr: false
+  piattaforme:
+    spid: false
+    cie: false
+    anpr: false
+    pagopa: false
