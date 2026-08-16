@@ -62,6 +62,7 @@ legal:
 
 organisation:
   name: sitoalpasso
+  uri: "https://github.com/sitoalpasso"
 
 maintenance:
   type: internal
