@@ -1,6 +1,6 @@
 # Descrittore per il catalogo del riuso, secondo lo standard publiccode.yml.
 # Da validare con il validatore ufficiale di Developers Italia prima della submission.
-publiccodeYmlVersion: "0.4"
+publiccodeYmlVersion: "0"
 
 name: Conformita Core
 applicationSuite: WordPress
@@ -18,7 +18,7 @@ categories:
   - document-management
 
 developmentStatus: development
-softwareType: softwareAddon
+softwareType: addon
 
 description:
   it:
@@ -59,7 +59,9 @@ description:
 legal:
   license: GPL-3.0-or-later
   mainCopyrightOwner: sitoalpasso
-  repoOwner: sitoalpasso
+
+organisation:
+  name: sitoalpasso
 
 maintenance:
   type: internal
@@ -71,20 +73,13 @@ localisation:
   availableLanguages:
     - it
 
-it:
+IT:
   countryExtensionVersion: "1.0"
   riuso:
     # Lasciato vuoto deliberatamente: il campo dichiara la pubblica amministrazione
     # titolare del software. Questo componente è pubblicato in licenza aperta da un
     # soggetto privato e non è di titolarità di alcuna amministrazione.
     codiceIPA: ""
-  conforme:
-    # Autodichiarazioni tenute a false finché il componente è in sviluppo: si
-    # aggiornano solo dopo la verifica corrispondente.
-    lineeGuidaDesign: false
-    modelloInteroperabilita: false
-    misureMinimeSicurezza: false
-    gdpr: false
   piattaforme:
     spid: false
     cie: false
