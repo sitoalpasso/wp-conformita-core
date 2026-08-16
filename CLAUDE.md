@@ -11,8 +11,15 @@ supportato.
 ## Comandi
 
 - Ambiente: `npx wp-env start` (configurazione in `.wp-env.json`)
+- Attivazione: `npx wp-env run cli wp plugin activate conformita-core`
 - Test: `composer test` (PHPUnit sulla suite di test di WordPress)
 - Standard: `composer lint` (PHPCS, WordPress Coding Standards)
+
+La cartella del plugin è montata con `mappings`, che monta senza attivare: dopo
+`wp-env start` l'attivazione è un passaggio esplicito. Non aggiungere `plugins`
+accanto a `mappings`: monterebbe lo stesso codice in due percorsi e WordPress
+vedrebbe due plugin gemelli. Il percorso di montaggio è `conformita-core`, cioè
+lo slug, non il nome del repository: c'è un test che lo verifica.
 
 ## Regole di lavoro
 

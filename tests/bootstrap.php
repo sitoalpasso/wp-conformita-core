@@ -22,4 +22,18 @@ if ( ! file_exists( $conformita_core_tests_dir . '/includes/functions.php' ) ) {
 }
 
 require_once $conformita_core_tests_dir . '/includes/functions.php';
+
+/**
+ * Carica il file principale del plugin dentro l'installazione di prova.
+ *
+ * Senza questo passaggio la suite gira su un WordPress in cui il plugin non
+ * esiste: i test resterebbero verdi non perché il codice funziona, ma perché
+ * non c'è niente da verificare. È il difetto che non produce nessun segnale.
+ */
+function conformita_core_carica_plugin() {
+	require dirname( __DIR__ ) . '/conformita-core.php';
+}
+
+tests_add_filter( 'muplugins_loaded', 'conformita_core_carica_plugin' );
+
 require $conformita_core_tests_dir . '/includes/bootstrap.php';

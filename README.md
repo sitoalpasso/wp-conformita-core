@@ -54,7 +54,7 @@ plugin non ammette valori predefiniti.
 
 ## Sviluppo
 
-- Ambiente: `npx wp-env start`
+- Ambiente: `npx wp-env start`, poi `npx wp-env run cli wp plugin activate conformita-core`
 - Test: `composer test`
 - Standard: `composer lint`
 

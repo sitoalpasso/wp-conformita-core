@@ -85,7 +85,7 @@ jobs:
         run: npx wp-env start
 
       - name: Esegui PHPUnit
-        run: npx wp-env run tests-cli --env-cwd=wp-content/plugins/wp-conformita-core vendor/bin/phpunit
+        run: npx wp-env run tests-cli --env-cwd=wp-content/plugins/conformita-core vendor/bin/phpunit
 
       - name: Diagnostica in caso di errore
         if: failure()

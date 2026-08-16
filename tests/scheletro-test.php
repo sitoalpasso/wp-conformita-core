@@ -46,4 +46,33 @@ class Conformita_Core_Scheletro_Test extends WP_UnitTestCase {
 	public function test_fuso_orario_dal_sito() {
 		$this->assertInstanceOf( DateTimeZone::class, wp_timezone() );
 	}
+
+	/**
+	 * La cartella in cui il plugin è montato corrisponde allo slug dichiarato.
+	 *
+	 * Dentro il contenitore questo è il percorso di montaggio, non il nome del
+	 * clone: se il montaggio tornasse a seguire il nome del repository, il
+	 * plugin girerebbe con uno slug diverso da quello pubblicato e la cosa non
+	 * darebbe nessun altro segnale.
+	 */
+	public function test_cartella_del_plugin_corrisponde_allo_slug() {
+		$this->assertSame( 'conformita-core', basename( dirname( __DIR__ ) ) );
+	}
+
+	/**
+	 * Il file principale del plugin è stato caricato dall'avvio della suite.
+	 *
+	 * Chiude l'altro modo di avere test verdi e vuoti: una suite che gira su un
+	 * WordPress dove il plugin non è mai stato incluso.
+	 */
+	public function test_file_principale_del_plugin_caricato() {
+		$principale = realpath( dirname( __DIR__ ) . '/conformita-core.php' );
+
+		$this->assertNotFalse( $principale, 'File principale del plugin non trovato.' );
+		$this->assertContains(
+			$principale,
+			get_included_files(),
+			'Il file principale non risulta caricato: la suite girerebbe senza il plugin.'
+		);
+	}
 }
