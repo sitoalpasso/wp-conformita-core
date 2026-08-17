@@ -433,11 +433,11 @@ class Conformita_Core_Tipi_Test extends WP_UnitTestCase {
 	 */
 	public function identificativi_non_validi() {
 		return array(
-			'stringa vuota'     => array( '' ),
-			'soli spazi'        => array( '   ' ),
-			'ventuno caratteri' => array( 'prova_tipo_lunghissimo' ),
-			'spazi interni'     => array( 'prova atto' ),
-			'lettere maiuscole' => array( 'Prova_Atto' ),
+			'stringa vuota'       => array( '' ),
+			'soli spazi'          => array( '   ' ),
+			'oltre venti lettere' => array( 'prova_tipo_lunghissimo' ),
+			'spazi interni'       => array( 'prova atto' ),
+			'lettere maiuscole'   => array( 'Prova_Atto' ),
 		);
 	}
 
