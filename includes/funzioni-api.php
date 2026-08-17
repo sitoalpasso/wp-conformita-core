@@ -63,6 +63,93 @@ if ( ! function_exists( 'conformita_core_sezioni_registrate' ) ) {
 	}
 }
 
+if ( ! function_exists( 'conformita_core_registra_tipo' ) ) {
+	/**
+	 * Registra un tipo di contenuto dentro una sezione già registrata.
+	 *
+	 * Il tipo si registra sempre da qui e mai direttamente con WordPress: la
+	 * politica sta sulla sezione, quindi un tipo registrato fuori da una sezione
+	 * sarebbe un contenuto pubblicato che nessuna regola governa. Se la sezione
+	 * non risulta registrata la funzione rifiuta, e il tipo non arriva a
+	 * WordPress.
+	 *
+	 * La definizione dichiara la sezione e la scelta su `show_in_rest`, che è
+	 * obbligatoria in entrambi i sensi e non ha valore predefinito. Gli altri
+	 * argomenti di registrazione si passano in `argomenti` e arrivano a
+	 * WordPress come sono, tolti quelli che core impone.
+	 *
+	 * @param string $tipo        Identificativo del tipo.
+	 * @param array  $definizione Definizione: `sezione`, `show_in_rest`, `argomenti`.
+	 * @return true|WP_Error Vero se il tipo è registrato, errore altrimenti.
+	 */
+	function conformita_core_registra_tipo( $tipo, array $definizione ) {
+		return Conformita_Core_Tipi::registra( $tipo, $definizione );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_tipo_registrato' ) ) {
+	/**
+	 * Il tipo è registrato attraverso core, quindi ha una sezione.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return bool
+	 */
+	function conformita_core_tipo_registrato( $tipo ) {
+		return Conformita_Core_Tipi::registrato( $tipo );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_sezione_del_tipo' ) ) {
+	/**
+	 * Sezione che governa un tipo registrato.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return string|WP_Error Identificativo della sezione, oppure errore.
+	 */
+	function conformita_core_sezione_del_tipo( $tipo ) {
+		return Conformita_Core_Tipi::sezione( $tipo );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_politica_tipo' ) ) {
+	/**
+	 * Politica che governa un tipo registrato.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return Conformita_Core_Politica|WP_Error Politica dichiarata, oppure errore.
+	 */
+	function conformita_core_politica_tipo( $tipo ) {
+		return Conformita_Core_Tipi::politica( $tipo );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_capacita_tipo' ) ) {
+	/**
+	 * Capability dedicate a un tipo registrato.
+	 *
+	 * Core le registra e non le assegna a nessun ruolo: appena registrato, il
+	 * tipo non è visibile né modificabile da nessuno. Assegnarle è compito del
+	 * componente, che è l'unico a sapere a quali ruoli spetta la sua sezione.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return array<string, string>|WP_Error Mappa delle capability, oppure errore.
+	 */
+	function conformita_core_capacita_tipo( $tipo ) {
+		return Conformita_Core_Tipi::capacita( $tipo );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_tipi_registrati' ) ) {
+	/**
+	 * Identificativi dei tipi registrati, nell'ordine di registrazione.
+	 *
+	 * @return array<int, string>
+	 */
+	function conformita_core_tipi_registrati() {
+		return Conformita_Core_Tipi::identificativi();
+	}
+}
+
 if ( ! function_exists( 'conformita_core_versione_api' ) ) {
 	/**
 	 * Versione dell'API esposta da core.
