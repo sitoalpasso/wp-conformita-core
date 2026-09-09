@@ -85,8 +85,11 @@ incorporate o nell'interfaccia informatica pubblica. Con `irraggiungibile` il co
 scaduto resta raggiungibile **solo da una schermata di amministrazione dedicata**, che non è
 questa unità.
 
-**L'albo dichiarerà `irraggiungibile`**, coerentemente con ALBO-21: l'atto defisso esce dalla
-vista e l'archivio è una schermata riservata, non un indirizzo che continua a rispondere.
+**L'albo dichiarerà `irraggiungibile`**, coerentemente con **ALBO-05** ("atto defisso,
+utente anonimo, tutti i percorsi C-10..C-21: irraggiungibile; in archivio solo con capability
+dedicata"): l'atto defisso esce dalla vista e l'archivio è una schermata riservata, non un
+indirizzo che continua a rispondere. *La stesura precedente citava ALBO-21, che invece
+riguarda la scadenza nei giorni dei cambi d'ora: riferimento sbagliato, decisione giusta.*
 
 La riga C-91 collauda esattamente quella casella, nei due sensi: con `irraggiungibile`
 l'autorizzato riceve "non trovato"; con `archivio` riceve il contenuto, e un anonimo riceve
@@ -196,11 +199,24 @@ dall'interfaccia pubblica.**
 
 **Come si avvia davvero.**
 
-| Momento | Cosa succede |
-|---|---|
-| Caricamento del file di core | Il motore registra i propri filtri. Aggiungere un filtro non richiede che esista nulla, quindi non dipende dall'ordine di caricamento dei plugin né dall'ordine alfabetico delle cartelle |
-| `plugins_loaded`, priorità **5** | Core emette l'azione `conformita_core_pronto` |
-| `plugins_loaded`, priorità 10 in poi, oppure `init` | I componenti registrano sezioni e tipi, agganciandosi a `conformita_core_pronto` |
+| Quando | Chi | Cosa succede |
+|---|---|---|
+| Caricamento del file di **core** | core | Il motore registra i propri filtri. Aggiungere un filtro non richiede che esista nulla, quindi non dipende dall'ordine di caricamento dei plugin né dall'ordine alfabetico delle cartelle |
+| Caricamento del file del **componente**, cioè prima che `plugins_loaded` parta | componente | `add_action( 'conformita_core_pronto', ... )`. **Qui, non dopo**: l'azione viene emessa durante `plugins_loaded`, quindi un aggancio aggiunto a priorità 10 arriverebbe a cose fatte |
+| `plugins_loaded`, priorità **5** | core | Completa l'avvio ed emette `conformita_core_pronto` |
+| Subito dopo, dentro l'azione | componente | La funzione agganciata registra sezione e tipo |
+
+**Correzione di un errore della stesura precedente**, segnalato in revisione. La tabella
+diceva che i componenti si agganciano a `conformita_core_pronto` "a `plugins_loaded` priorità
+10 in poi, oppure `init`": è sbagliato, perché a quel punto l'azione è già passata e il
+callback non verrebbe mai chiamato. L'aggancio si aggiunge al caricamento del file del
+componente.
+
+**Un solo modello, non due.** L'alternativa legittima sarebbe eliminare l'azione e far
+lavorare i componenti direttamente su `plugins_loaded` a priorità successiva alla 5. È
+altrettanto valida, ma le due non si mescolano: si sceglie l'azione dedicata, perché rende
+esplicito il momento in cui core è pronto invece di affidarlo a un numero di priorità che
+qualcuno prima o poi cambierà.
 
 **Idempotente**: l'avvio è protetto da una guardia interna. Invocato due volte non aggiunge i
 filtri due volte e non produce errori.

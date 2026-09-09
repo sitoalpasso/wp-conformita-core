@@ -27,6 +27,22 @@ final class Conformita_Core_Sezioni {
 	/**
 	 * Registra una sezione con la sua politica.
 	 *
+	 * L'insieme dei caratteri ammessi nell'identificativo è lo stesso dei tipi di
+	 * contenuto: lettere minuscole, cifre e trattino basso. È una **restrizione
+	 * decisa prima del rilascio**, non la correzione di un difetto: senza
+	 * normalizzazione `sezione-a` e `sezione_a` produrrebbero capability diverse,
+	 * quindi non collidono. Il vincolo esiste per tre ragioni. Una regola sola
+	 * invece di due, perché chi scrive un componente non deve ricordarne una per
+	 * i tipi e una per le sezioni. La convenzione dei nomi di capability in
+	 * WordPress, che assume l'insieme `[a-z_]`. E il fatto che una
+	 * normalizzazione futura, per esempio con `sanitize_key`, riaprirebbe
+	 * davvero la collisione della riga C-86: vietare adesso il carattere che la
+	 * produrrebbe costa zero, mentre toglierlo dopo costerebbe una migrazione.
+	 *
+	 * Da qui deriveranno le capability di archivio della politica di scadenza,
+	 * ed è la ragione per cui il vincolo entra adesso e non più avanti. Riga di
+	 * collaudo C-95.
+	 *
 	 * @param string $sezione   Identificativo della sezione.
 	 * @param array  $politica  Politiche dichiarate dal componente.
 	 * @return true|WP_Error Vero se la sezione è attiva, errore altrimenti.
@@ -38,6 +54,13 @@ final class Conformita_Core_Sezioni {
 			return new WP_Error(
 				'conformita_core_sezione_non_valida',
 				__( 'Identificativo di sezione mancante: una sezione senza identificativo non è registrabile.', 'conformita-core' )
+			);
+		}
+
+		if ( ! preg_match( '/^[a-z0-9_]{1,64}$/', $sezione ) ) {
+			return new WP_Error(
+				'conformita_core_sezione_non_valida',
+				__( 'Identificativo di sezione non valido: da uno a sessantaquattro caratteri fra lettere minuscole, cifre e trattino basso.', 'conformita-core' )
 			);
 		}
 
