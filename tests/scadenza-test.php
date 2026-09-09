@@ -296,26 +296,57 @@ class Conformita_Core_Scadenza_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-88: la decisione non produce mai un errore.
+	 * C-88: la decisione non produce mai un errore, e sbaglia in sicurezza.
 	 *
 	 * E' chiamata nel percorso di lettura: una funzione che puo' fallire li'
 	 * prima o poi lascia passare qualcosa mentre qualcuno gestisce l'eccezione.
+	 *
+	 * **Correzione di una prova debole scritta in prima stesura.** Le tre
+	 * asserzioni erano `assertIsBool`, che verificano solo il tipo del risultato:
+	 * la prova sarebbe passata anche restituendo falso, cioe' nella direzione
+	 * insicura, che e' esattamente il difetto che questa riga esiste per
+	 * escludere. Il contratto dice che tipo non gestito e identificativo
+	 * inesistente danno scaduto, quindi le asserzioni devono dirlo.
 	 */
-	public function test_c88_la_decisione_non_fallisce_mai() {
+	public function test_c88_la_decisione_sbaglia_in_sicurezza() {
 		$articolo = self::factory()->post->create( array( 'post_type' => 'post' ) );
 
-		$this->assertIsBool( conformita_core_scaduto( $articolo ) );
-		$this->assertIsBool( conformita_core_scaduto( 0 ) );
-		$this->assertIsBool( conformita_core_scaduto( 999999 ) );
+		$this->assertTrue( conformita_core_scaduto( $articolo ), 'Tipo non gestito: scaduto.' );
+		$this->assertTrue( conformita_core_scaduto( 0 ), 'Identificativo zero: scaduto.' );
+		$this->assertTrue( conformita_core_scaduto( 999999 ), 'Identificativo inesistente: scaduto.' );
+	}
+
+	/**
+	 * La lettura della data su un tipo non gestito e' un errore esplicito.
+	 *
+	 * Qui l'errore ci vuole, al contrario della decisione: chi chiede la data di
+	 * un contenuto che core non governa sta facendo una domanda sbagliata, e
+	 * deve saperlo. La decisione invece non puo' fallire perche' sta nel
+	 * percorso di lettura.
+	 */
+	public function test_lettura_su_tipo_non_gestito_e_un_errore() {
+		$articolo = self::factory()->post->create( array( 'post_type' => 'post' ) );
+
+		$esito = conformita_core_fine_pubblicazione( $articolo );
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_tipo_non_gestito', $esito->get_error_code() );
+
+		$istante = conformita_core_istante_scadenza( $articolo );
+
+		$this->assertWPError( $istante );
+		$this->assertSame( 'conformita_core_tipo_non_gestito', $istante->get_error_code() );
 	}
 
 	/**
 	 * C-23: la scadenza cade nell'istante civile giusto anche ai cambi d'ora.
 	 *
-	 * Marzo e ottobre. E' la ragione per cui si salva una data e si calcola
-	 * l'istante alla lettura, invece di salvare un istante alla scrittura: un
-	 * istante salvato prima del cambio d'ora si sposterebbe di un'ora rispetto
-	 * alla mezzanotte civile.
+	 * Marzo e ottobre. E' la ragione per cui il termine si esprime in giorni
+	 * civili e non in secondi: nei giorni del cambio d'ora **un giorno civile
+	 * dura 23 o 25 ore**, quindi sommare 86.400 secondi alla data di fine
+	 * porterebbe la scadenza alle 23 o all'una invece che a mezzanotte. Un
+	 * istante gia' memorizzato, invece, non si sposta: non e' quello il
+	 * problema.
 	 *
 	 * @dataProvider giorni_di_cambio_ora
 	 *

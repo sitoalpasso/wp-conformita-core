@@ -37,11 +37,16 @@ propria maschera.
 **Una data civile nel formato `Y-m-d`**, per esempio `2026-09-09`. Non un istante, non un
 numero di secondi.
 
-La ragione è di sostanza e non di gusto. L'obbligo di legge si conta in giorni: un atto si
-pubblica per quindici giorni, non per 1.296.000 secondi. E c'è un motivo tecnico che decide
-la questione: se si salvasse un istante calcolato al momento della pubblicazione, un cambio
-d'ora successivo lo sposterebbe di un'ora rispetto alla mezzanotte civile. Salvando la data e
-calcolando l'istante alla lettura, la scadenza cade sempre alla mezzanotte giusta.
+La data civile è il dato di dominio appropriato perché il termine di legge è espresso in
+giorni: un atto si pubblica per quindici giorni. La scadenza si calcola come mezzanotte
+civile del giorno successivo nel fuso del sito, il che evita di trattare quindici giorni come
+un numero fisso di secondi: **nei giorni del cambio d'ora un giorno civile dura 23 o 25 ore**,
+quindi un calcolo a secondi porterebbe la scadenza alle 23 o all'una invece che a mezzanotte.
+
+**Correzione di una spiegazione sbagliata della stesura precedente**, segnalata in revisione.
+Avevo scritto che un istante salvato alla pubblicazione si sposterebbe dopo un cambio d'ora.
+È falso: un istante già memorizzato non si sposta. L'errore non sta nel conservare un
+istante, sta nel calcolarlo sommando una quantità fissa di secondi a una data.
 
 Il valore è validato in scrittura: formato esatto, data reale (il 31 febbraio è rifiutato).
 La validazione la fa core e la espone al componente.
@@ -365,6 +370,20 @@ Righe nuove da aggiungere al catalogo, numerate dopo C-86:
 | C-99 | `conformita_core_imposta_fine_pubblicazione()` chiamata due volte con lo stesso valore: `true`, non errore |
 
 Totale: **15 esistenti più 13 nuove, 28**.
+
+### Come si legge il conteggio dei test, e come non si legge
+
+Il numero di prove e di asserzioni riportato dalla verifica automatica è un **controllo di
+esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve perché
+un lavoro verde con un test saltato ha lo stesso colore di uno con il test passato.
+
+**Non è una prova di copertura.** Che le righe del catalogo siano coperte lo dimostrano due
+cose diverse: la **tracciabilità**, cioè ogni riga del catalogo con il suo test che la nomina,
+e le **prove di non vacuità**, che mostrano il test diventare rosso quando il comportamento
+si rompe. Un conteggio che cresce è compatibile con dieci prove che non verificano niente.
+
+Precisazione aggiunta dopo una revisione in cui avevo presentato il conteggio come se
+dimostrasse più di quello che dimostra.
 
 ### Prove di non vacuità, una per famiglia
 

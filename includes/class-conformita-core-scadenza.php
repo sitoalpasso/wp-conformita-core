@@ -17,12 +17,18 @@
  * partire dall'elenco dei tipi registrati, e un componente potrebbe indicare una
  * chiave che scrive anche per altri scopi.
  *
- * **Il valore è una data civile, non un istante.** L'obbligo di legge si conta
- * in giorni: un atto si pubblica per quindici giorni, non per un numero di
- * secondi. E c'è una ragione tecnica che decide la questione: un istante
- * calcolato al momento della pubblicazione si sposterebbe di un'ora rispetto
- * alla mezzanotte civile dopo un cambio d'ora. Salvando la data e calcolando
- * l'istante alla lettura, la scadenza cade sempre alla mezzanotte giusta.
+ * **Il valore è una data civile, non un istante.** La data civile è il dato di
+ * dominio appropriato perché il termine di legge è espresso in giorni: un atto
+ * si pubblica per quindici giorni. La scadenza si calcola come mezzanotte
+ * civile del giorno successivo nel fuso del sito, il che evita di trattare
+ * quindici giorni come un numero fisso di secondi: **durante i cambi d'ora un
+ * giorno civile dura 23 o 25 ore**, quindi un calcolo a secondi porterebbe la
+ * scadenza a un'ora diversa dalla mezzanotte.
+ *
+ * Correzione di una spiegazione sbagliata scritta qui in prima stesura: un
+ * istante già memorizzato **non si sposta** dopo un cambio d'ora. L'errore non
+ * sta nel conservare un istante, sta nel calcolarlo sommando una quantità fissa
+ * di secondi a una data.
  *
  * **La data di fine è inclusiva.** Un atto con fine il 9 settembre resta
  * pubblico per tutto il 9, e scade alla mezzanotte del 10 nel fuso del sito. Un
