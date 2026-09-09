@@ -203,6 +203,54 @@ class Conformita_Core_Tipi_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-86: due identificativi diversi non possono produrre le stesse capability.
+	 *
+	 * La prima stesura derivava la radice sostituendo il trattino con il trattino
+	 * basso. `atto-albo` e `atto_albo` sono due tipi distinti per WordPress, ma
+	 * quella sostituzione li faceva arrivare alla stessa radice: chi era
+	 * autorizzato sul primo risultava autorizzato anche sul secondo, e la
+	 * garanzia della riga C-71 valeva solo verso i tipi nativi, non fra i tipi
+	 * di core. Il difetto e' stato trovato in revisione, non dai test.
+	 *
+	 * La correzione toglie la sostituzione e restringe l'insieme dei caratteri
+	 * ammessi: senza trasformazione la derivazione e' l'identita', quindi
+	 * identificativi distinti danno radici distinte per costruzione. Questa prova
+	 * fissa entrambe le meta' della proprieta'.
+	 */
+	public function test_c86_radici_capacita_non_collidono() {
+		$this->assertSame(
+			array( 'atto_albo', 'atto_albo_multipli' ),
+			Conformita_Core_Tipi::radici_capacita( 'atto_albo' ),
+			'La radice e l\'identificativo, senza trasformazioni.'
+		);
+
+		$this->registra_sezione();
+
+		$esito = conformita_core_registra_tipo( 'atto-albo', $this->definizione() );
+
+		$this->assertWPError( $esito, 'Un identificativo con il trattino non e ammesso.' );
+		$this->assertSame( 'conformita_core_tipo_non_valido', $esito->get_error_code() );
+
+		$this->assertTrue( conformita_core_registra_tipo( 'atto_albo', $this->definizione() ) );
+
+		$radici = array();
+
+		foreach ( array( 'atto_albo', self::TIPO ) as $tipo ) {
+			if ( ! conformita_core_tipo_registrato( $tipo ) ) {
+				$this->assertTrue( conformita_core_registra_tipo( $tipo, $this->definizione() ) );
+			}
+
+			$radici[] = Conformita_Core_Tipi::radici_capacita( $tipo );
+		}
+
+		$this->assertCount(
+			count( $radici ),
+			array_unique( array_map( 'wp_json_encode', $radici ) ),
+			'Tipi distinti devono avere radici di capability distinte.'
+		);
+	}
+
+	/**
 	 * C-71: senza capability l'utente non vede il tipo e non ne modifica i dati;
 	 * con le capability assegnate vede e modifica.
 	 *
@@ -438,6 +486,7 @@ class Conformita_Core_Tipi_Test extends WP_UnitTestCase {
 			'oltre venti lettere' => array( 'prova_tipo_lunghissimo' ),
 			'spazi interni'       => array( 'prova atto' ),
 			'lettere maiuscole'   => array( 'Prova_Atto' ),
+			'trattino'            => array( 'prova-atto' ),
 		);
 	}
 

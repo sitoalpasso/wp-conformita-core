@@ -56,13 +56,22 @@ final class Conformita_Core_Tipi {
 	 * distinte le capability sul singolo contenuto da quelle sull'insieme, come
 	 * WordPress si aspetta.
 	 *
+	 * La derivazione è l'identità, e deve restare tale. La prima stesura
+	 * sostituiva il trattino con il trattino basso: siccome WordPress accetta
+	 * entrambi nel nome di un tipo, `atto-albo` e `atto_albo` sono due tipi
+	 * distinti che quella sostituzione portava alla stessa radice, quindi alle
+	 * stesse capability. Chi era autorizzato sull'uno lo era anche sull'altro, e
+	 * l'isolamento promesso dalla riga di collaudo C-71 cadeva proprio fra i tipi
+	 * di core, che è il caso che conta. Una funzione che deriva un permesso da un
+	 * identificativo deve essere iniettiva: qui lo è per costruzione, perché non
+	 * trasforma niente, e il trattino è escluso a monte dalla verifica
+	 * dell'identificativo. Riga di collaudo C-86.
+	 *
 	 * @param string $tipo Identificativo del tipo.
 	 * @return array<int, string> Radice singolare e radice plurale.
 	 */
 	public static function radici_capacita( $tipo ) {
-		$radice = str_replace( '-', '_', $tipo );
-
-		return array( $radice, $radice . '_multipli' );
+		return array( $tipo, $tipo . '_multipli' );
 	}
 
 	/**
@@ -139,14 +148,22 @@ final class Conformita_Core_Tipi {
 	 * quanto sembri: senza, `register_post_type` rimpiazzerebbe in silenzio il
 	 * tipo esistente, capability comprese.
 	 *
+	 * Il trattino è escluso pur essendo accettato da WordPress, ed è una
+	 * restrizione nostra: le capability si derivano dall'identificativo, e
+	 * ammettere due grafie che WordPress distingue mentre la derivazione le
+	 * confonde produce due tipi diversi governati dagli stessi permessi. Non
+	 * costa niente, perché il nome del tipo è interno: l'indirizzo pubblico
+	 * arriva dal parametro di riscrittura, che resta libero. Riga C-86.
+	 *
 	 * @param string $tipo Identificativo del tipo.
 	 * @return true|WP_Error
 	 */
 	private static function verifica_identificativo( $tipo ) {
-		if ( ! preg_match( '/^[a-z0-9_-]{1,20}$/', $tipo ) ) {
+		if ( ! preg_match( '/^[a-z0-9_]{1,20}$/', $tipo ) ) {
 			return new WP_Error(
 				'conformita_core_tipo_non_valido',
-				__( 'Identificativo di tipo non valido: da uno a venti caratteri fra lettere minuscole, cifre, trattino e trattino basso.', 'conformita-core' )
+				__( 'Identificativo di tipo non valido: da uno a venti caratteri fra lettere minuscole, cifre e trattino basso.', 'conformita-core' )
+				. ' ' . __( 'Il trattino non è ammesso: renderebbe ambigua la derivazione delle capability.', 'conformita-core' )
 			);
 		}
 
