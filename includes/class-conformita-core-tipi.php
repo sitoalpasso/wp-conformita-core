@@ -297,10 +297,17 @@ final class Conformita_Core_Tipi {
 	/**
 	 * Capability dedicate a un tipo registrato.
 	 *
-	 * Core le registra e non le assegna a nessun ruolo: appena registrato, un
-	 * tipo non è visibile né modificabile da nessuno, e l'assegnazione è compito
-	 * del componente che conosce la propria sezione. Fra le due direzioni
+	 * Core le registra e non le assegna ad alcun ruolo: finché il componente non
+	 * effettua l'assegnazione, nessun ruolo può gestire il tipo
+	 * nell'amministrazione WordPress. L'assegnazione è compito del componente,
+	 * che conosce la propria sezione e i propri ruoli. Fra le due direzioni
 	 * possibili è quella che sbaglia in sicurezza.
+	 *
+	 * Detto così e non come assenza di visibilità: le capability governano la
+	 * gestione del contenuto, non la sua consultazione pubblica, che discende
+	 * dalla politica della sezione e dallo stato del contenuto. Un tipo senza
+	 * capability assegnate resta pubblicamente consultabile se registrato come
+	 * pubblico e con contenuti pubblicati.
 	 *
 	 * @param string $tipo Identificativo del tipo.
 	 * @return array<string, string>|WP_Error Mappa delle capability, oppure errore.

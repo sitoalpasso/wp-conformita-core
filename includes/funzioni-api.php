@@ -127,9 +127,14 @@ if ( ! function_exists( 'conformita_core_capacita_tipo' ) ) {
 	/**
 	 * Capability dedicate a un tipo registrato.
 	 *
-	 * Core le registra e non le assegna a nessun ruolo: appena registrato, il
-	 * tipo non è visibile né modificabile da nessuno. Assegnarle è compito del
-	 * componente, che è l'unico a sapere a quali ruoli spetta la sua sezione.
+	 * Core le registra e non le assegna ad alcun ruolo: finché il componente non
+	 * effettua l'assegnazione, nessun ruolo può gestire il tipo
+	 * nell'amministrazione WordPress. Assegnarle è compito del componente, che è
+	 * l'unico a sapere a quali ruoli spetta la sua sezione.
+	 *
+	 * Le capability governano la gestione del contenuto e non la sua
+	 * consultazione pubblica, che discende dalla politica della sezione e dallo
+	 * stato del contenuto.
 	 *
 	 * @param string $tipo Identificativo del tipo.
 	 * @return array<string, string>|WP_Error Mappa delle capability, oppure errore.
