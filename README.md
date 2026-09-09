@@ -53,6 +53,31 @@ Per lo stesso motivo l'identificativo ammette lettere minuscole, cifre e trattin
 ma non il trattino: la derivazione deve restare iniettiva, altrimenti due tipi che
 WordPress distingue arriverebbero alle stesse capability.
 
+### Scadenza: che cosa il filtro copre, e che cosa no
+
+La scadenza è una proprietà del dato letto: la decisione si prende alla lettura, e non
+dipende dall'esecuzione del compito pianificato. Il filtro lavora su due strati. Il primo
+aggiunge una condizione all'interrogazione della banca dati, ed è quello che tiene coerente
+l'impaginazione. Il secondo ricontrolla ogni contenuto restituito, ed è quello che fa fede:
+il primo confronta stringhe, quindi un valore corrotto che ordina alto lo supererebbe.
+
+La condizione della banca dati si aggiunge **solo alle interrogazioni che riguardano
+esclusivamente tipi registrati da core**. Su un'interrogazione mista lavora il secondo
+strato, che guarda un contenuto alla volta: aggiungere quella condizione a
+un'interrogazione mista toglierebbe dai risultati tutti i contenuti che quel metadato non
+ce l'hanno.
+
+L'esenzione dal filtro è **della superficie, non dell'utente**. Un utente autorizzato che
+naviga il sito pubblico vede quello che vede chiunque altro. Le capability governano la
+gestione nell'amministrazione, dove il contenuto scaduto resta visibile perché resti
+correggibile.
+
+Non sono coperti, e vanno considerati limiti noti: `WP_Query` con `suppress_filters` e con
+`fields => 'ids'`, che non applicano il secondo strato; `get_post()` sul singolo
+identificativo; le interrogazioni SQL dirette; la lettura diretta dei metadati; le pagine
+servite da una memoria che risponde prima di WordPress. Il controllo non avviene a ogni
+richiesta del contenuto: avviene a ogni richiesta che arriva a WordPress.
+
 ## Requisiti normativi di riferimento
 
 Il componente implementa requisiti derivati dalla normativa applicabile ai soggetti

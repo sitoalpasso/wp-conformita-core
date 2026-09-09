@@ -50,11 +50,26 @@ final class Conformita_Core_Sezioni {
 	 * ed è la ragione per cui il vincolo entra adesso e non più avanti. Riga di
 	 * collaudo C-95.
 	 *
+	 * **Guardia difensiva sul motore di scadenza.** Una sezione registrata a
+	 * motore spento avrebbe una politica di scadenza dichiarata e nessuno ad
+	 * applicarla: i contenuti resterebbero pubblici oltre il termine, e il difetto
+	 * sarebbe invisibile finché qualcuno non contesta una pubblicazione. Fra
+	 * fallire e proseguire in silenzio si fallisce. In esercizio non può accadere,
+	 * perché il motore si accende al caricamento di core: la guardia copre il caso
+	 * in cui il file del motore non venga caricato. Riga di collaudo C-94.
+	 *
 	 * @param string $sezione   Identificativo della sezione.
 	 * @param array  $politica  Politiche dichiarate dal componente.
 	 * @return true|WP_Error Vero se la sezione è attiva, errore altrimenti.
 	 */
 	public static function registra( $sezione, array $politica ) {
+		if ( ! Conformita_Core_Filtro_Scadenza::avviato() ) {
+			return new WP_Error(
+				'conformita_core_motore_non_avviato',
+				__( 'Motore di scadenza non avviato: la sezione non si registra, perché i suoi contenuti non sarebbero filtrati alla scadenza. Verificare che il file del motore sia caricato.', 'conformita-core' )
+			);
+		}
+
 		$sezione = is_string( $sezione ) ? trim( $sezione ) : '';
 
 		if ( '' === $sezione ) {

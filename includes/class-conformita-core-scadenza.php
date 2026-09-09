@@ -2,9 +2,9 @@
 /**
  * Contratto del dato di fine pubblicazione.
  *
- * Questa classe non nasconde ancora niente: definisce **quando** un contenuto è
- * scaduto, e lo definisce senza ambiguità. Il filtro che applica quella
- * decisione sui dodici percorsi di lettura arriva dopo, e senza un istante di
+ * Questa classe non nasconde niente da sola: definisce **quando** un contenuto è
+ * scaduto, e lo definisce senza ambiguità. Dove quella decisione viene applicata
+ * lo stabilisce `Conformita_Core_Filtro_Scadenza`, che senza un istante di
  * scadenza definito qui non avrebbe niente di preciso da applicare.
  *
  * Tre scelte, tutte imposte da core e non negoziabili dal componente, per la
@@ -108,6 +108,23 @@ final class Conformita_Core_Scadenza {
 		}
 
 		return new DateTimeImmutable( 'now', wp_timezone() );
+	}
+
+	/**
+	 * Il giorno civile corrente nel fuso del sito, nel formato del metadato.
+	 *
+	 * Serve al primo strato del filtro, che deve esprimere la scadenza come
+	 * condizione sulla banca dati e non può confrontare istanti. Le due forme
+	 * sono equivalenti: un contenuto non è scaduto finché la sua data di fine
+	 * non è anteriore al giorno corrente, perché la data di fine è inclusiva.
+	 *
+	 * Legge lo stesso orologio di `scaduto()`, quindi i due strati del filtro non
+	 * possono trovarsi in disaccordo per una differenza di lettura dell'ora.
+	 *
+	 * @return string Data nel formato AAAA-MM-GG.
+	 */
+	public static function giorno_corrente() {
+		return self::adesso()->setTimezone( wp_timezone() )->format( 'Y-m-d' );
 	}
 
 	/**

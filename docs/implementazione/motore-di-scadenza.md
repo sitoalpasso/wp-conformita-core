@@ -281,9 +281,9 @@ fatto.
 
 | Percorso | Aggancio | Righe |
 |---|---|---|
-| Interrogazioni, elenchi, ricerca, feed | `pre_get_posts` | C-11, C-12, C-13 |
-| Contenuto singolo dopo l'interrogazione | `the_posts` | C-10 |
-| Mappa per i motori di ricerca | `wp_sitemaps_posts_query_args` | C-14 |
+| Interrogazioni, elenchi, ricerca, feed | `pre_get_posts` **confermato** | C-11, C-12, C-13 |
+| Contenuto singolo dopo l'interrogazione | `the_posts` **confermato** | C-10 |
+| Mappa per i motori di ricerca | `wp_sitemaps_posts_query_args` **confermato** | C-14 |
 | Interfaccia informatica, collezione | `rest_{$post_type}_query` | C-15 |
 | Interfaccia informatica, singolo | **da confermare**: `rest_request_before_callbacks` oppure `rest_prepare_{$post_type}`. Il comportamento fissato dal test è "non trovato", non "vietato" e non "200 con i dati" | C-16 |
 | Anteprime incorporate | `oembed_response_data` | C-17 |
@@ -324,7 +324,8 @@ pagina risponde prima, WordPress non viene eseguito.
 
 | File | Cosa |
 |---|---|
-| `includes/class-conformita-core-scadenza.php` | nuovo, il motore |
+| `includes/class-conformita-core-scadenza.php` | nuovo, il contratto del dato |
+| `includes/class-conformita-core-filtro-scadenza.php` | nuovo, il filtro sui percorsi di lettura |
 | `includes/class-conformita-core-sezioni.php` | modificato: vincolo sui caratteri dell'identificativo, e rifiuto della registrazione a motore non avviato |
 | `includes/funzioni-api.php` | modificato: le dieci funzioni del punto 6 |
 | `conformita-core.php` | modificato: versione dell'interfaccia a 1.2.0 |
@@ -370,6 +371,21 @@ Righe nuove da aggiungere al catalogo, numerate dopo C-86:
 | C-99 | `conformita_core_imposta_fine_pubblicazione()` chiamata due volte con lo stesso valore: `true`, non errore |
 
 Totale: **15 esistenti più 13 nuove, 28**.
+
+### Che cosa è cambiato in questo elenco durante l'implementazione
+
+Tre righe si sono aggiunte in corso d'opera, e il catalogo di collaudo le contiene già.
+Ognuna nasce da un caso che la scheda non aveva previsto e che il codice ha reso visibile.
+
+| Riga | Perché non era prevista |
+|---|---|
+| C-101 | La scheda dava per scontata l'esenzione dell'amministrazione al punto 4 senza collaudarla. Un contenuto con la data rotta deve restare correggibile, ed è un comportamento che va verificato come gli altri |
+| C-102 | `WP_Query` con `fields => 'ids'` restituisce le colonne e torna prima di applicare `the_posts`: è lo stesso limite di C-93 su un percorso diverso, e la scheda non lo nominava |
+| C-103 | Una `meta_query` di terzi dichiarata in `OR`. Se la clausola di core si accodasse all'elenco esistente invece di annidarlo come sottogruppo, diventerebbe un'alternativa alle altre condizioni e il filtro sarebbe aggirabile senza volerlo. È il difetto che questo blocco ha evitato per costruzione, e la riga esiste perché resti evitato |
+
+Il numero **C-96 resta impegnato** dalla riga di questa scheda sulla scansione delle
+anomalie: per questo la verifica sulla `meta_query` in OR ha preso C-103 e non il primo
+numero libero.
 
 ### Come si legge il conteggio dei test, e come non si legge
 
@@ -428,3 +444,38 @@ identificativi che la 1.2 rifiuta.
 
 **Ordine di lavoro**: prima il vincolo sulle sezioni con la sua riga, poi i test, poi il
 motore. In mezzo, la prova di non vacuità per ognuna delle cinque famiglie.
+
+---
+
+## 13. Stato dell'implementazione
+
+Aggiornato mentre il lavoro procede, perché una scheda che descrive solo le intenzioni non
+dice a chi rilegge dove si è arrivati.
+
+**Fatto: il contratto del dato.** Chiave, formato, istante, decisione, validazione,
+idempotenza della scrittura. Righe C-23, C-24, C-87, C-88, C-99, C-100.
+
+**Fatto: il filtro sui percorsi che passano da `WP_Query`.** Elenchi, ricerca, feed, mappa
+per i motori, contenuto singolo, interrogazioni di terzi. Righe C-10, C-11, C-12, C-13,
+C-14, C-21, C-22, più C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102, C-103.
+
+Il filtro è a **due strati**, e la ragione è che nessuno dei due basta da solo. Il primo
+aggiunge una condizione sui metadati all'interrogazione: è veloce e tiene coerente
+l'impaginazione, ma confronta stringhe, quindi una data corrotta che ordina alta
+(`9999-99-99`) lo supererebbe. Il secondo ricontrolla ogni contenuto restituito con la
+stessa funzione che decide la scadenza altrove, ed è lo strato che fa fede.
+
+Il primo strato si aggiunge **solo quando l'interrogazione riguarda esclusivamente tipi
+gestiti**. È la precauzione più importante del blocco: aggiungere quella condizione a
+un'interrogazione mista cancellerebbe dal sito tutti gli articoli, che quel metadato non ce
+l'hanno. Sulle interrogazioni miste lavora il secondo strato, che guarda un contenuto alla
+volta.
+
+**Da fare: i percorsi che non passano da `WP_Query`.** Interfaccia informatica sul singolo
+identificativo (C-16), anteprime incorporate (C-17), XML-RPC (C-18), pagina dell'allegato
+(C-19), navigazione adiacente (C-20). Più C-15, che passa da `WP_Query` ma ha un aggancio
+suo. E le cinque prove di non vacuità.
+
+**Da fare, e non è di questo blocco:** l'azione `conformita_core_pronto` del punto 5. Il
+motore si accende già al caricamento di core, che è la metà che riguarda la conformità; la
+stretta di mano verso i componenti è un'unità sua, e prima le serve la sua riga di catalogo.
