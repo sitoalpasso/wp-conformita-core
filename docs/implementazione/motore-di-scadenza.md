@@ -112,12 +112,16 @@ due capability diverse. Nessuna collisione.
 1. **Una regola sola invece di due.** Gli identificativi di tipo ammettono lettere minuscole,
    cifre e trattino basso. Farne una diversa per le sezioni obbliga chi scrive un componente
    a ricordarsene due, e la seconda si sbaglia.
-2. **I nomi di capability con il trattino sono fuori convenzione in WordPress**, e strumenti
-   che le elencano o le filtrano assumono spesso l'insieme `[a-z_]`.
-3. **Toglie un piede di porco futuro.** Se un domani qualcuno normalizzasse
-   l'identificativo prima di derivarne la capability, per esempio con `sanitize_key`, la
-   collisione comparirebbe davvero. Vietare adesso il carattere che la produrrebbe costa
-   zero.
+2. **Convenzione interna del progetto.** Per sezioni e capability si adotta l'insieme
+   `[a-z0-9_]`, così gli identificativi restano uniformi e non richiedono normalizzazioni
+   successive. Non è un vincolo imposto da WordPress, che non prescrive formalmente un
+   insieme e ammette anche le cifre: è una scelta nostra, e va detta così.
+3. **Toglie un piede di porco futuro.** Se un domani qualcuno introducesse una
+   trasformazione esplicita, del tipo `str_replace( '-', '_', ... )`, la collisione
+   comparirebbe davvero. Vietare adesso il carattere che la produrrebbe costa zero.
+   **Correzione**: la stesura precedente indicava `sanitize_key()` come la normalizzazione
+   pericolosa. È falso, perché `sanitize_key()` conserva sia il trattino sia il trattino
+   basso.
 
 **Ed è una modifica incompatibile, non un'aggiunta.** L'interfaccia 1.1 accetta identificativi
 di sezione con qualunque carattere; questa versione li restringe. Formalmente sarebbe un

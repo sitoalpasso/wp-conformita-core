@@ -202,10 +202,11 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 	 * `sezione_a` darebbero due capability diverse, quindi non collidono. Il
 	 * vincolo esiste per tre ragioni. Una regola sola invece di due, perche' chi
 	 * scrive un componente non deve ricordarsene una per i tipi e una per le
-	 * sezioni. La convenzione dei nomi di capability in WordPress, che assume
-	 * l'insieme `[a-z_]`. E il fatto che una normalizzazione futura, per esempio
-	 * con `sanitize_key`, riaprirebbe davvero la collisione della riga C-86:
-	 * vietare adesso il carattere che la produrrebbe costa zero.
+	 * sezioni. La convenzione interna del progetto, che per sezioni e capability
+	 * adotta l'insieme `[a-z0-9_]`. E il fatto che una trasformazione esplicita
+	 * del tipo `str_replace( '-', '_', ... )`, introdotta un domani, riaprirebbe
+	 * la collisione della riga C-86. Nota: `sanitize_key()` **conserva** il
+	 * trattino, quindi non e' quella la trasformazione da temere.
 	 *
 	 * @dataProvider identificativi_di_sezione_non_validi
 	 *

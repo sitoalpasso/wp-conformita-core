@@ -33,11 +33,18 @@ final class Conformita_Core_Sezioni {
 	 * normalizzazione `sezione-a` e `sezione_a` produrrebbero capability diverse,
 	 * quindi non collidono. Il vincolo esiste per tre ragioni. Una regola sola
 	 * invece di due, perché chi scrive un componente non deve ricordarne una per
-	 * i tipi e una per le sezioni. La convenzione dei nomi di capability in
-	 * WordPress, che assume l'insieme `[a-z_]`. E il fatto che una
-	 * normalizzazione futura, per esempio con `sanitize_key`, riaprirebbe
-	 * davvero la collisione della riga C-86: vietare adesso il carattere che la
+	 * i tipi e una per le sezioni. La convenzione interna del progetto, che per
+	 * sezioni e capability adotta l'insieme `[a-z0-9_]`, così gli identificativi
+	 * restano uniformi e non richiedono normalizzazioni successive. E il fatto
+	 * che una trasformazione esplicita del tipo `str_replace( '-', '_', ... )`,
+	 * introdotta un domani da chi non conosce questa storia, riaprirebbe la
+	 * collisione della riga C-86: vietare adesso il carattere che la
 	 * produrrebbe costa zero, mentre toglierlo dopo costerebbe una migrazione.
+	 *
+	 * Correzione di una motivazione sbagliata scritta qui in prima stesura:
+	 * `sanitize_key()` di WordPress **conserva** sia il trattino sia il trattino
+	 * basso, quindi non produce nessuna collisione. Ed è il progetto ad adottare
+	 * `[a-z0-9_]` come convenzione, non WordPress a imporlo.
 	 *
 	 * Da qui deriveranno le capability di archivio della politica di scadenza,
 	 * ed è la ragione per cui il vincolo entra adesso e non più avanti. Riga di
