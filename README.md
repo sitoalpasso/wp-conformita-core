@@ -27,6 +27,32 @@ supportato.
 - **Scheletro dei tipi di contenuto**, con capability dedicate ed esposizione REST
   dichiarata esplicitamente per ogni tipo registrato.
 
+### Capability: generate qui, assegnate dal componente
+
+Core genera capability dedicate per ciascun tipo, ma **non le assegna automaticamente ad
+alcun ruolo**. Finché il componente non effettua l'assegnazione, il tipo non è gestibile
+dall'amministrazione WordPress.
+
+Non è una dimenticanza. Fra le due direzioni possibili è quella che sbaglia in sicurezza:
+un tipo che nasce senza nessuno autorizzato a scriverci si nota subito, mentre un tipo che
+nasce con permessi assegnati a ruoli che non dovrebbero averli non si nota affatto. Chi
+conosce i propri ruoli è il componente, non questo plugin.
+
+Ne discendono tre obblighi per chi dipende da core:
+
+1. assegnare, all'attivazione e a ogni aggiornamento, l'insieme minimo di capability
+   almeno all'amministratore;
+2. configurare da sé gli eventuali ruoli propri, per esempio un responsabile della
+   pubblicazione;
+3. mostrare un avviso in amministrazione se nessun ruolo risulta avere le capability del
+   tipo, così la condizione si vede invece di essere scambiata per un guasto.
+
+Le capability sono derivate dall'identificativo del tipo e non sono riscrivibili dal
+componente: è la garanzia che il tipo non finisca governato dai permessi degli articoli.
+Per lo stesso motivo l'identificativo ammette lettere minuscole, cifre e trattino basso,
+ma non il trattino: la derivazione deve restare iniettiva, altrimenti due tipi che
+WordPress distingue arriverebbero alle stesse capability.
+
 ## Requisiti normativi di riferimento
 
 Il componente implementa requisiti derivati dalla normativa applicabile ai soggetti
