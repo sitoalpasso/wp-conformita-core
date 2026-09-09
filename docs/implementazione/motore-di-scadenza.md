@@ -59,40 +59,69 @@ confronto è `adesso >= istante_di_scadenza`. La scelta è deliberata: fra le du
 possibili, questa sbaglia rendendo invisibile un attimo prima invece che visibile un attimo
 dopo.
 
-### 1.4 Perché la data di inizio non sta qui
+### 1.4 La data di inizio non sta qui
 
-L'albo ha anche una data di inizio, e non entra in questo meccanismo. Un atto non ancora
-iniziato non deve essere pubblico, ma quel controllo lo fa lo **stato** dell'atto, cioè la
-macchina a stati ALBO-22: finché non è pubblicato, non è pubblicato.
-
-L'asimmetria è voluta e vale la pena dirla. Se un atto comincia a essere visibile qualche ora
-tardi, non succede niente. Se un atto smette di essere invisibile qualche ora tardi, succede
-esattamente la cosa che questo componente esiste per impedire. Il rischio è asimmetrico,
-quindi il trattamento lo è.
+L'albo ha anche una data di inizio, e non entra in questo meccanismo: quando un atto diventa
+pubblico lo decide il suo **stato**, cioè la macchina a stati ALBO-22 del componente. Finché
+non è pubblicato, non è pubblicato.
 
 ---
 
-## 2. Il contratto delle capability, e un difetto trovato scrivendo questa scheda
+## 1-bis. Che cosa distingue le due politiche di scadenza
+
+La stesura precedente descriveva `irraggiungibile` e `archivio` in modo identico, e la riga
+C-91 avrebbe collaudato una differenza inesistente. La differenza c'è, ed è **una sola**:
+che cosa risponde l'indirizzo proprio del contenuto, dopo la scadenza, a un utente
+autenticato che possiede la capability di archivio.
+
+| | Dodici percorsi pubblici | Amministrazione | Indirizzo proprio, utente con capability archivio | Interfaccia informatica pubblica |
+|---|---|---|---|---|
+| `irraggiungibile` | invisibile | visibile | **non trovato**, anche per l'autorizzato | assente |
+| `archivio` | invisibile | visibile | **200, solo per l'autorizzato**, con divieto di indicizzazione e divieto di memorizzazione | assente |
+
+Fuori da quella casella le due politiche fanno la stessa cosa, e nessuna delle due fa
+ricomparire niente negli elenchi, nei feed, nella mappa per i motori, nelle anteprime
+incorporate o nell'interfaccia informatica pubblica. Con `irraggiungibile` il contenuto
+scaduto resta raggiungibile **solo da una schermata di amministrazione dedicata**, che non è
+questa unità.
+
+**L'albo dichiarerà `irraggiungibile`**, coerentemente con ALBO-21: l'atto defisso esce dalla
+vista e l'archivio è una schermata riservata, non un indirizzo che continua a rispondere.
+
+La riga C-91 collauda esattamente quella casella, nei due sensi: con `irraggiungibile`
+l'autorizzato riceve "non trovato"; con `archivio` riceve il contenuto, e un anonimo riceve
+"non trovato" in entrambi i casi.
+
+## 2. Il contratto delle capability, e una motivazione che avevo sbagliato
 
 La politica `archivio` prevede che il contenuto scaduto resti raggiungibile a chi è
-autorizzato. Serve quindi una capability, e la domanda del revisore era come si determina.
+autorizzato. La capability **deriva dall'identificativo della sezione**, perché la politica
+di scadenza sta sulla sezione: `conformita_core_archivio_<sezione>`.
 
-**Deriva dall'identificativo della sezione**, perché la politica di scadenza sta sulla
-sezione e non sul tipo: `conformita_core_archivio_<sezione>`.
+**Correzione della stesura precedente.** Avevo scritto che senza un vincolo sui caratteri si
+riaprirebbe la collisione della riga C-86. **Non è vero**, ed è giusto che il revisore lo
+abbia contestato: la collisione di C-86 nasceva perché il codice *trasformava* il trattino in
+trattino basso. Qui non si trasforma niente, quindi `sezione-a` e `sezione_a` produrrebbero
+due capability diverse. Nessuna collisione.
 
-**E qui c'è il difetto.** Gli identificativi di sezione oggi non hanno nessun controllo sui
-caratteri ammessi: `registra()` verifica solo che non siano vuoti e che non siano duplicati.
-Derivare una capability da una stringa libera riapre **esattamente la collisione della riga
-C-86**, quella corretta stamattina sui tipi: due sezioni scritte in modo diverso potrebbero
-arrivare alla stessa capability, e chi è autorizzato sull'archivio di una lo sarebbe anche
-sull'altra.
+**Il vincolo lo mettiamo lo stesso, per tre ragioni vere.**
 
-**Conseguenza per questa unità**: prima di derivare qualunque capability dalle sezioni, gli
-identificativi di sezione ricevono lo stesso vincolo dei tipi, cioè lettere minuscole, cifre e
-trattino basso, con la sua riga di collaudo. È lavoro in più rispetto alla scheda precedente,
-ma è la condizione perché il resto sia sicuro.
+1. **Una regola sola invece di due.** Gli identificativi di tipo ammettono lettere minuscole,
+   cifre e trattino basso. Farne una diversa per le sezioni obbliga chi scrive un componente
+   a ricordarsene due, e la seconda si sbaglia.
+2. **I nomi di capability con il trattino sono fuori convenzione in WordPress**, e strumenti
+   che le elencano o le filtrano assumono spesso l'insieme `[a-z_]`.
+3. **Toglie un piede di porco futuro.** Se un domani qualcuno normalizzasse
+   l'identificativo prima di derivarne la capability, per esempio con `sanitize_key`, la
+   collisione comparirebbe davvero. Vietare adesso il carattere che la produrrebbe costa
+   zero.
 
----
+**Ed è una modifica incompatibile, non un'aggiunta.** L'interfaccia 1.1 accetta identificativi
+di sezione con qualunque carattere; questa versione li restringe. Formalmente sarebbe un
+cambio di numero maggiore. Si accetta come **correzione del contratto prima del rilascio**,
+motivata dal fatto che nessun componente consuma ancora la 1.1 e che il repository è in
+versione alfa. Va scritta così nel README e nelle note di versione, senza far finta che sia
+additiva.
 
 ## 3. Che cosa la capability consente, e che cosa non consente
 
@@ -118,91 +147,140 @@ generale per il fatto di aver fatto accesso, e nessuna per l'amministratore in q
 
 ## 4. Pubblico e amministrazione si comportano in modo diverso
 
-L'altra correzione del revisore, e anche questa era giusta. Far sparire ovunque un contenuto
-con la data rotta significa renderlo irreparabile: nessuno lo trova più per correggerlo.
+Far sparire ovunque un contenuto con la data rotta significa renderlo irreparabile: nessuno
+lo trova più per correggerlo.
 
 | Caso | Pubblico | Amministrazione e archivio autorizzato |
 |---|---|---|
 | Data valida, non scaduta | visibile | visibile |
 | Data valida, scaduta | invisibile | visibile secondo la politica |
-| **Data mancante** | **invisibile** | **visibile, con segnalazione** |
-| **Data non valida o corrotta** | **invisibile** | **visibile, con segnalazione** |
+| **Data mancante** | **invisibile** | **visibile** |
+| **Data non valida o corrotta** | **invisibile** | **visibile** |
 
-La pubblicazione di un contenuto senza data valida è impedita a monte dal componente, che
-valida in scrittura: i due casi anomali qui sopra descrivono un dato già finito nella banca
-dati, per migrazione o per scrittura diretta, non un percorso normale.
+### 4-bis. Le anomalie: nessuna scrittura durante la lettura
 
-**La segnalazione è persistente e non chiacchierona.** Un contatore per identificativo di
-contenuto e un avviso in amministrazione che elenca i contenuti anomali, non una riga di
-registro a ogni richiesta: un contenuto anomalo molto visitato riempirebbe il disco.
+La stesura precedente prevedeva un contatore per identificativo, aggiornato mentre si legge.
+Era sottospecificato e soprattutto sbagliato: introduceva scritture nella banca dati sul
+percorso pubblico, con il costo e le condizioni di concorrenza che ne seguono.
 
----
+**Il percorso di lettura non scrive niente.** Guarda la data, decide, e non lascia traccia.
+Un contenuto anomalo molto visitato costa esattamente come uno sano.
 
-## 5. Il meccanismo non avviato: la prima stesura diceva una cosa impossibile
+Le anomalie si intercettano in due momenti, entrambi fuori dal percorso pubblico:
 
-Diceva che se il meccanismo non è avviato il contenuto non viene mostrato. Non può funzionare:
-se il filtro non è agganciato, non c'è niente che nasconda.
+1. **In scrittura**, dove la validazione rifiuta un valore malformato prima che entri nella
+   banca dati. È il percorso normale, ed è il motivo per cui un'anomalia può esistere solo
+   se il dato è arrivato per migrazione o per scrittura diretta.
+2. **Con una scansione amministrativa** invocata su richiesta, mai automatica, che legge e
+   non scrive.
 
-**Comportamento corretto**: la registrazione di una sezione che dichiara una politica di
-scadenza **fallisce** se il motore non risulta avviato, con un errore che dice cosa manca.
-È lo stesso trattamento della riga C-85 per l'indicizzazione, e per la stessa ragione: un
-meccanismo di conformità che non parte deve impedire l'avvio, non fallire in silenzio.
+La funzione `conformita_core_contenuti_anomali()` della stesura precedente è **eliminata** e
+sostituita da:
 
----
+| Funzione | Parametri | Ritorno | Autorizzazione |
+|---|---|---|---|
+| `conformita_core_scansiona_anomalie( $limite = 200 )` | `int` | array di voci `array( 'post_id' => int, 'tipo' => string, 'sezione' => string, 'motivo' => 'assente'\|'formato'\|'inesistente', 'valore' => string )`, ordinate per `post_id` crescente | richiede `manage_options`, altrimenti `WP_Error` |
+
+Non memorizza esiti, non tiene contatori, non va ripulita quando una data viene corretta:
+alla scansione successiva l'anomalia semplicemente non c'è più. Un contenuto cancellato non
+lascia niente da ripulire perché non c'è niente di persistito.
+
+La schermata che mostra questi risultati **non è in questa unità**.
+
+## 5. Come si avvia il motore: interno, automatico, idempotente
+
+La stesura precedente esponeva due funzioni pubbliche per avviare il motore e per chiedere se
+fosse avviato. Sbagliato: il motore è infrastruttura di core, e accenderlo non deve essere
+responsabilità del componente che lo usa. **Entrambe le funzioni sono eliminate
+dall'interfaccia pubblica.**
+
+**Come si avvia davvero.**
+
+| Momento | Cosa succede |
+|---|---|
+| Caricamento del file di core | Il motore registra i propri filtri. Aggiungere un filtro non richiede che esista nulla, quindi non dipende dall'ordine di caricamento dei plugin né dall'ordine alfabetico delle cartelle |
+| `plugins_loaded`, priorità **5** | Core emette l'azione `conformita_core_pronto` |
+| `plugins_loaded`, priorità 10 in poi, oppure `init` | I componenti registrano sezioni e tipi, agganciandosi a `conformita_core_pronto` |
+
+**Idempotente**: l'avvio è protetto da una guardia interna. Invocato due volte non aggiunge i
+filtri due volte e non produce errori.
+
+**La verifica resta, come guardia difensiva.** La registrazione di una sezione controlla
+internamente che il motore sia pronto e, se non lo è, fallisce con un errore che dice cosa
+manca. Nella pratica non può accadere, perché il motore si accende al caricamento di core:
+la guardia esiste per il caso in cui il file del motore non venga caricato, e perché un
+meccanismo di conformità che non parte deve impedire l'avvio invece di fallire in silenzio.
+È lo stesso trattamento della riga C-85 per l'indicizzazione.
 
 ## 6. Il contratto delle funzioni pubbliche
 
-Versione dell'interfaccia: **da 1.1.0 a 1.2.0**. L'albo dovrà richiedere `1.2.0` e non il
+Versione dell'interfaccia: **da 1.1.0 a 1.2.0**, con la nota del punto 2 sul fatto che
+contiene anche una restrizione e non solo aggiunte. L'albo dovrà richiedere `1.2.0` e non il
 generico `1`, che accetterebbe anche un core privo di questo motore.
 
 | Funzione | Parametri | Ritorno | Errori |
 |---|---|---|---|
-| `conformita_core_avvia_motore_scadenza()` | nessuno | `true`, oppure `WP_Error` se già avviato | `conformita_core_motore_gia_avviato` |
-| `conformita_core_motore_scadenza_avviato()` | nessuno | `bool` | nessuno |
 | `conformita_core_chiave_fine_pubblicazione()` | nessuno | `string`, la chiave del metadato | nessuno |
 | `conformita_core_valida_fine_pubblicazione( $valore )` | `string` | `true` oppure `WP_Error` | `conformita_core_data_formato`, `conformita_core_data_inesistente` |
 | `conformita_core_imposta_fine_pubblicazione( $post_id, $data )` | `int`, `string` | `true` oppure `WP_Error` | i due sopra, più `conformita_core_tipo_non_gestito` |
 | `conformita_core_fine_pubblicazione( $post_id )` | `int` | `string` la data, `''` se assente, `WP_Error` se il tipo non è gestito | `conformita_core_tipo_non_gestito` |
 | `conformita_core_istante_scadenza( $post_id )` | `int` | `DateTimeImmutable` nel fuso del sito, oppure `WP_Error` | `conformita_core_data_assente`, `conformita_core_data_non_valida` |
-| `conformita_core_scaduto( $post_id, $adesso = null )` | `int`, `DateTimeInterface|null` | `bool`. **Un contenuto con data assente o non valida risulta scaduto**, cioè non pubblicabile | nessuno: la funzione non fallisce, perché è chiamata nel percorso di lettura |
+| `conformita_core_scaduto( $post_id )` | `int` | `bool`. Un contenuto con data assente o non valida risulta scaduto | nessuno: è chiamata nel percorso di lettura e non deve poter fallire |
 | `conformita_core_capacita_archivio( $sezione )` | `string` | `string` il nome della capability, oppure `WP_Error` | `conformita_core_sezione_non_registrata` |
-| `conformita_core_contenuti_anomali()` | nessuno | `array` di identificativi con il motivo | nessuno |
+| `conformita_core_scansiona_anomalie( $limite = 200 )` | `int` | array di voci come al punto 4-bis | `conformita_core_permesso_negato` |
 
-Due scelte da spiegare. **`conformita_core_scaduto()` non restituisce mai un errore**: viene
-chiamata dentro il filtro di lettura, e una funzione che può fallire nel percorso di lettura è
-una funzione che prima o poi lascia passare qualcosa mentre qualcuno gestisce l'eccezione. Il
-parametro `$adesso` esiste solo per i test, e ha un valore predefinito che è l'ora vera.
+Tre precisazioni che la stesura precedente sbagliava o taceva.
 
-**`conformita_core_imposta_fine_pubblicazione()` esiste** perché il componente non deve
-scrivere il metadato a mano: se lo facesse, la validazione sarebbe facoltativa.
+**`conformita_core_scaduto()` non prende più il parametro `$adesso`.** Esisteva "solo per i
+test" e finiva comunque nell'interfaccia pubblica, dove qualcuno prima o poi lo avrebbe usato
+per far sembrare non scaduto qualcosa che lo è. L'orologio si inietta **internamente**: la
+classe accetta un orologio sostituibile, e i test usano quello. La funzione pubblica prende
+solo l'identificativo.
+
+**`conformita_core_imposta_fine_pubblicazione()` è idempotente.** `update_post_meta()`
+restituisce `false` sia quando fallisce sia quando il valore era già identico. Distinguere i
+due casi rileggendo il valore è obbligatorio: impostare due volte la stessa data
+restituisce `true`, non un errore.
+
+**Non esiste nessuna funzione pubblica per avviare il motore o per chiedere se è avviato**:
+vedi il punto 5.
 
 ---
 
 ## 7. Dove si aggancia, e i limiti dichiarati
 
-**Si aggancia a**: `pre_get_posts` per le interrogazioni, i filtri di `WP_Query` per il
-contenuto singolo, la mappa per i motori di ricerca, l'interfaccia informatica sia in
-collezione sia sul singolo, le anteprime incorporate, la navigazione fra contenuti adiacenti,
-la pagina dell'allegato, i feed.
+Gli agganci, con i nomi veri. Due sono da confermare contro WordPress 6.5 in fase di
+implementazione, e sono marcati: la scheda fissa il **comportamento osservabile**, che è
+quello che il test verifica, e il nome dell'aggancio è un dettaglio che riporterò a lavoro
+fatto.
 
-**I limiti, dichiarati perché la prima stesura prometteva troppo.** La riga C-21 diceva
-"query dirette di terzi" e la scheda diceva che il filtro copre ogni interrogazione scritta da
-altri. Non è vero, e va scritto dove qualcuno lo leggerà.
+| Percorso | Aggancio | Righe |
+|---|---|---|
+| Interrogazioni, elenchi, ricerca, feed | `pre_get_posts` | C-11, C-12, C-13 |
+| Contenuto singolo dopo l'interrogazione | `the_posts` | C-10 |
+| Mappa per i motori di ricerca | `wp_sitemaps_posts_query_args` | C-14 |
+| Interfaccia informatica, collezione | `rest_{$post_type}_query` | C-15 |
+| Interfaccia informatica, singolo | **da confermare**: `rest_request_before_callbacks` oppure `rest_prepare_{$post_type}`. Il comportamento fissato dal test è "non trovato", non "vietato" e non "200 con i dati" | C-16 |
+| Anteprime incorporate | `oembed_response_data` | C-17 |
+| XML-RPC | `xmlrpc_prepare_post`, più il rifiuto della chiamata sul singolo. **Alternativa dichiarata**: disattivare XML-RPC per i tipi gestiti, documentandolo, come la riga C-18 consente | C-18 |
+| Pagina dell'allegato | `pre_get_posts` sull'interrogazione dell'allegato, più controllo su `template_redirect` | C-19 |
+| Navigazione adiacente | `get_previous_post_where` e `get_next_post_where` | C-20 |
+| `WP_Query` sui tipi registrati, filtri attivi | `pre_get_posts` | C-21 |
+
+**I limiti, dichiarati perché la prima stesura prometteva troppo.**
 
 | Percorso | Coperto? |
 |---|---|
 | `WP_Query` sui tipi registrati, filtri normali attivi | **sì**, ed è la formulazione corretta di C-21 |
-| `WP_Query` con `suppress_filters` | **no.** Chi lo usa disattiva i filtri di WordPress deliberatamente. Documentato e collaudato come limite noto |
-| `get_post()` sul singolo identificativo | **no.** Non passa dalle interrogazioni. Il contenuto è protetto dove viene reso, non dove viene letto in memoria |
+| `WP_Query` con `suppress_filters` | **no.** Chi lo usa disattiva i filtri deliberatamente. Limite noto e documentato |
+| `get_post()` sul singolo identificativo | **no.** Non passa dalle interrogazioni |
 | Interrogazione SQL diretta | **no**, e non è copribile da nessun componente |
 | Lettura diretta dei metadati | **no** |
-| Pagina servita da una memoria che risponde prima di WordPress | **no.** È il rischio della riga ALBO-20, e si chiude nel componente dell'albo, non qui |
+| Pagina servita da una memoria che risponde prima di WordPress | **no.** È il rischio della riga ALBO-20, e si chiude nel componente dell'albo |
 
-Questo cambia anche una frase della prima stesura: **non è vero che il controllo avviene ogni
-volta che qualcuno chiede il contenuto**. Avviene ogni volta che la richiesta arriva a
-WordPress. Se una memoria di pagina risponde prima, WordPress non viene eseguito.
-
----
+Ne segue una frase da correggere: **il controllo non avviene ogni volta che qualcuno chiede
+il contenuto**, avviene ogni volta che la richiesta arriva a WordPress. Se una memoria di
+pagina risponde prima, WordPress non viene eseguito.
 
 ## 8. Che cosa NON faccio in questa unità
 
@@ -252,19 +330,21 @@ Righe nuove da aggiungere al catalogo, numerate dopo C-86:
 
 | Riga | Cosa verifica |
 |---|---|
-| C-87 | Ora corrente **esattamente uguale** all'istante di scadenza: scaduto |
-| C-88 | Data mancante e data corrotta: invisibile al pubblico, **visibile in amministrazione**, segnalata |
+| C-87 | Ora corrente **esattamente uguale** all'istante di scadenza: scaduto. E un istante **immediatamente precedente**: non scaduto |
+| C-88 | Data mancante e data corrotta: invisibile al pubblico, **visibile in amministrazione** |
 | C-89 | Bozza e contenuto privato: il filtro non li tratta come scaduti né li rende pubblici |
 | C-90 | Tipo di WordPress non registrato in core: **non toccato**, nessun filtro applicato |
-| C-91 | Due sezioni con politiche di scadenza opposte nello stesso sito, nei due ordini di caricamento |
+| C-91 | **La differenza fra le due politiche**: con `irraggiungibile` l'indirizzo proprio risponde "non trovato" anche all'utente con la capability di archivio; con `archivio` risponde 200 a lui e "non trovato" all'anonimo. Nei due ordini di caricamento |
 | C-92 | Utente con la capability di archivio sulle superfici pubbliche: **non fa ricomparire niente**, su nessuna delle dodici |
-| C-93 | `WP_Query` con `suppress_filters`: il contenuto scaduto **passa**, e il test lo fissa come limite noto e documentato |
-| C-94 | Sezione con politica di scadenza registrata a motore non avviato: **registrazione rifiutata** |
-| C-95 | Identificativo di sezione con il trattino: rifiutato, e due identificativi che differiscono solo per quello non arrivano alla stessa capability |
-| C-96 | Contenuto anomalo richiesto molte volte: **una sola segnalazione**, non una per richiesta |
+| C-93 | `WP_Query` con `suppress_filters`: il contenuto scaduto **passa**. **Non è una prova di conformità: è la documentazione eseguibile di un limite noto**, e il suo nome lo dice |
+| C-94 | Guardia difensiva: sezione con politica di scadenza registrata a motore non pronto, registrazione rifiutata |
+| C-95 | Identificativo di sezione con il trattino: rifiutato. **Restrizione del contratto prima del rilascio**, non correzione di una collisione |
+| C-96 | Scansione delle anomalie senza la capability richiesta: rifiutata. E il percorso di lettura non scrive niente, verificato contando le scritture |
 | C-97 | Nessuna contaminazione fra tipi e sezioni: il filtro di una sezione non tocca i contenuti di un'altra |
+| C-98 | Avvio idempotente: il motore acceso due volte non aggiunge i filtri due volte e non produce errori |
+| C-99 | `conformita_core_imposta_fine_pubblicazione()` chiamata due volte con lo stesso valore: `true`, non errore |
 
-Totale: **15 esistenti più 11 nuove, 26**.
+Totale: **15 esistenti più 13 nuove, 28**.
 
 ### Prove di non vacuità, una per famiglia
 
@@ -282,15 +362,30 @@ aggancio, ognuna documentata con il test che diventa rosso:
 
 ---
 
-## 11. Che cosa resta da decidere prima di scrivere
+## 11. Le decisioni prese in questa revisione
 
-Niente di bloccante, ma due cose vanno dette perché Andrea le veda.
+| # | Punto sollevato | Decisione |
+|---|---|---|
+| 1 | Le due politiche erano indistinguibili | La differenza è **una sola casella**: l'indirizzo proprio del contenuto per l'utente autorizzato. Tabella al punto 1-bis, riga C-91 riscritta di conseguenza. L'albo dichiara `irraggiungibile` |
+| 2 | L'avvio del motore era API pubblica | **Eliminate** le due funzioni. Filtri registrati al caricamento di core, azione `conformita_core_pronto` su `plugins_loaded` priorità 5, avvio idempotente con guardia, verifica interna alla registrazione della sezione come guardia difensiva |
+| 3 | Le anomalie erano sottospecificate e scrivevano in lettura | **Il percorso di lettura non scrive niente.** Validazione in scrittura più una scansione amministrativa su richiesta, che legge e non persiste. `conformita_core_contenuti_anomali()` eliminata, sostituita da `conformita_core_scansiona_anomalie()` con struttura definita e capability richiesta |
+| 4 | Il vincolo sugli identificativi non derivava dalla collisione | **Motivazione riscritta**: non c'è collisione, e dirlo era sbagliato. Il vincolo resta per uniformità con i tipi, convenzione dei nomi di capability e prevenzione di una normalizzazione futura. Dichiarato come **restrizione del contratto prima del rilascio**, non come aggiunta |
+| 5 | Mancava XML-RPC | Aggiunto al punto 7, riga C-18, con l'alternativa della disattivazione documentata |
+| 6 | Servivano i nomi veri degli agganci | Tabella al punto 7. Due marcati **da confermare** contro WordPress 6.5: la scheda fissa il comportamento osservabile, il nome dell'aggancio lo riporto a lavoro fatto |
+| 7 | Impostazione del metadato non idempotente | Rilettura del valore per distinguere "già identico" da "fallito". Riga C-99 |
+| 8 | `$adesso` finiva nell'interfaccia pubblica | **Tolto.** Orologio iniettato internamente, i test usano quello |
+| 9 | La frase sul ritardo dell'inizio | **Eliminata.** Un ritardo può alterare durata ed effetti della pubblicazione. Resta solo che l'inizio è governato dalla macchina a stati dell'albo |
+| 10 | C-87 verificava solo l'istante esatto | Adesso verifica anche l'istante immediatamente precedente |
+| 11 | C-93 era classificata come prova di conformità | **Riclassificata** come documentazione eseguibile di un limite noto |
 
-**Il vincolo sui caratteri delle sezioni è una modifica a codice già in `main`.** Se un
-componente avesse già registrato una sezione con il trattino smetterebbe di funzionare. Oggi
-non esiste nessun componente che registri sezioni, quindi il costo è zero, ed è il momento
-giusto per farlo.
+## 12. Che cosa resta da sapere prima di scrivere
 
-**La versione dell'interfaccia a 1.2.0 va comunicata**: nessun componente la richiede ancora,
-ma quando l'albo partirà dovrà chiedere `1.2.0`. Va scritto nel README, altrimenti si scopre
-al primo avvio che fallisce.
+**Il vincolo sui caratteri delle sezioni tocca codice già in `main`.** Nessun componente
+registra ancora sezioni, quindi il costo è zero, ed è il momento giusto.
+
+**La versione 1.2.0 va scritta nel README** con la nota che contiene una restrizione: quando
+l'albo partirà dovrà chiedere `1.2.0`, e chi legge deve sapere che la 1.1 accettava
+identificativi che la 1.2 rifiuta.
+
+**Ordine di lavoro**: prima il vincolo sulle sezioni con la sua riga, poi i test, poi il
+motore. In mezzo, la prova di non vacuità per ognuna delle cinque famiglie.
