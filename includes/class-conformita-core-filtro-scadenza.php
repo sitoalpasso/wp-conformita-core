@@ -109,14 +109,69 @@ final class Conformita_Core_Filtro_Scadenza {
 
 		self::$avviato = true;
 
-		add_action( 'pre_get_posts', array( __CLASS__, 'filtra_interrogazione' ) );
-		add_filter( 'the_posts', array( __CLASS__, 'filtra_risultati' ), 10, 2 );
-		add_filter( 'wp_sitemaps_posts_query_args', array( __CLASS__, 'filtra_argomenti_mappa' ), 10, 2 );
-		add_filter( 'rest_request_before_callbacks', array( __CLASS__, 'filtra_richiesta_rest' ), 10, 3 );
-		add_filter( 'oembed_response_data', array( __CLASS__, 'filtra_anteprima_incorporata' ), 10, 2 );
-		add_filter( 'xmlrpc_prepare_post', array( __CLASS__, 'filtra_dato_xmlrpc' ), 10, 2 );
-		add_filter( 'get_previous_post_where', array( __CLASS__, 'filtra_vicino' ), 10, 5 );
-		add_filter( 'get_next_post_where', array( __CLASS__, 'filtra_vicino' ), 10, 5 );
+		foreach ( self::agganci() as $aggancio ) {
+			add_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), 10, $aggancio['argomenti'] );
+		}
+	}
+
+	/**
+	 * L'elenco degli agganci del motore, in un posto solo.
+	 *
+	 * @internal L'elenco è uno perché accensione e spegnimento devono per forza
+	 *           dire la stessa cosa. Nella prima stesura erano due elenchi
+	 *           scritti a mano: l'accensione ne registrava otto e lo spegnimento
+	 *           ne toglieva tre, quindi `azzera_avvio()` dichiarava il motore
+	 *           spento mentre cinque agganci continuavano a girare. Il difetto
+	 *           non poteva produrre nessun errore, perché uno spegnimento
+	 *           incompleto non fallisce: fa semplicemente una cosa diversa da
+	 *           quella che dice. Con un elenco solo quel disallineamento non è
+	 *           più esprimibile.
+	 *
+	 * @return array<int, array<string, mixed>>
+	 */
+	public static function agganci() {
+		return array(
+			array(
+				'aggancio'  => 'pre_get_posts',
+				'metodo'    => 'filtra_interrogazione',
+				'argomenti' => 1,
+			),
+			array(
+				'aggancio'  => 'the_posts',
+				'metodo'    => 'filtra_risultati',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'wp_sitemaps_posts_query_args',
+				'metodo'    => 'filtra_argomenti_mappa',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'rest_request_before_callbacks',
+				'metodo'    => 'filtra_richiesta_rest',
+				'argomenti' => 3,
+			),
+			array(
+				'aggancio'  => 'oembed_response_data',
+				'metodo'    => 'filtra_anteprima_incorporata',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'xmlrpc_prepare_post',
+				'metodo'    => 'filtra_dato_xmlrpc',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'get_previous_post_where',
+				'metodo'    => 'filtra_vicino',
+				'argomenti' => 5,
+			),
+			array(
+				'aggancio'  => 'get_next_post_where',
+				'metodo'    => 'filtra_vicino',
+				'argomenti' => 5,
+			),
+		);
 	}
 
 	/**
@@ -141,9 +196,9 @@ final class Conformita_Core_Filtro_Scadenza {
 			return;
 		}
 
-		remove_action( 'pre_get_posts', array( __CLASS__, 'filtra_interrogazione' ) );
-		remove_filter( 'the_posts', array( __CLASS__, 'filtra_risultati' ), 10 );
-		remove_filter( 'wp_sitemaps_posts_query_args', array( __CLASS__, 'filtra_argomenti_mappa' ), 10 );
+		foreach ( self::agganci() as $aggancio ) {
+			remove_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), 10 );
+		}
 
 		self::$avviato = false;
 	}
@@ -541,6 +596,27 @@ final class Conformita_Core_Filtro_Scadenza {
 			return $risposta;
 		}
 
+		/*
+		 * Il contesto di modifica non e' la superficie pubblica: e' il canale con
+		 * cui l'editor a blocchi di WordPress apre un contenuto per modificarlo.
+		 * Rifiutarlo renderebbe un atto con la data sbagliata impossibile da
+		 * correggere, cioe' l'esatto contrario di quello che l'amministrazione
+		 * deve garantire.
+		 *
+		 * Lasciarlo passare non apre niente a nessuno: per quel contesto
+		 * WordPress pretende gia' il permesso di modifica sul contenuto, e a chi
+		 * non ce l'ha risponde con il proprio rifiuto. Il rifiuto arriva prima
+		 * che si sappia se il contenuto sia scaduto, quindi non dice niente a chi
+		 * non deve saperlo.
+		 *
+		 * Il confronto e' sul valore esatto e non sul suo contrario: un contesto
+		 * sconosciuto o assente ricade nel trattamento pubblico, che e' la
+		 * direzione sicura. Righe C-16 e C-112.
+		 */
+		if ( 'edit' === $richiesta['context'] ) {
+			return $risposta;
+		}
+
 		if ( ! self::da_nascondere( (int) $richiesta['id'] ) ) {
 			return $risposta;
 		}
@@ -675,10 +751,12 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * raggiungibile dai suoi vicini, che è il modo meno vistoso di restare
 	 * pubblicato.
 	 *
-	 * **Limite dichiarato, lo stesso delle righe C-93 e C-102.** Qui agisce solo
-	 * il confronto sulla banca dati, quindi un valore corrotto che ordina alto
-	 * resterebbe raggiungibile come vicino. Il secondo strato non c'è perché non
-	 * c'è niente su cui agganciarlo.
+	 * **Qui non c'è secondo strato, quindi la condizione deve bastare da sola.**
+	 * WordPress restituisce direttamente il risultato della propria
+	 * interrogazione, e non c'è niente su cui agganciare un ricontrollo. Per
+	 * questo la condizione non si limita a confrontare le stringhe ma ammette
+	 * soltanto date che esistono davvero: altrimenti un valore corrotto che ordina
+	 * alto tornerebbe raggiungibile come vicino, contraddicendo la riga C-88.
 	 *
 	 * La condizione si aggiunge in coda alla condizione già costruita da
 	 * WordPress, e vale solo per i tipi che core governa: su un articolo normale
@@ -704,12 +782,72 @@ final class Conformita_Core_Filtro_Scadenza {
 			return $condizione;
 		}
 
+		return $condizione . self::condizione_data_valida_e_non_scaduta();
+	}
+
+	/**
+	 * La condizione che ammette soltanto date valide e non scadute.
+	 *
+	 * **Perché non basta il confronto fra stringhe.** Il formato è a lunghezza
+	 * fissa, quindi l'ordine alfabetico coincide con quello cronologico, e su
+	 * ogni altro percorso il confronto basta perché c'è un secondo strato che
+	 * ricontrolla ogni contenuto restituito. Qui quel secondo strato non esiste:
+	 * WordPress cerca il vicino con un'interrogazione propria e restituisce
+	 * direttamente il risultato. Un valore corrotto che ordina alto, come
+	 * `9999-99-99`, supererebbe il confronto e il contenuto tornerebbe
+	 * raggiungibile come vicino.
+	 *
+	 * **Perché è un difetto e non un limite.** Il contratto della riga C-88 dice
+	 * che una data corrotta rende il contenuto scaduto. Un percorso che lo mostra
+	 * lo contraddice, e la navigazione adiacente è uno dei percorsi che questo
+	 * componente dichiara di coprire: non è come `suppress_filters`, che chi lo
+	 * usa sceglie deliberatamente.
+	 *
+	 * **Perché le condizioni sono queste e non una conversione a data.** Le
+	 * funzioni che trasformano una stringa in data si comportano in modo diverso
+	 * fra versioni e configurazioni della banca dati: su una respingono il 31
+	 * febbraio, su un'altra lo accettano. Un componente di conformità che gira su
+	 * ospiti sconosciuti non può appoggiarsi a quella differenza, quindi la
+	 * validità è scritta per intero: la forma con il controllo sull'espressione,
+	 * poi i tre soli modi in cui una data ben formata può non esistere, cioè il
+	 * giorno 31 nei mesi di trenta giorni, il 30 e il 31 di febbraio, e il 29 di
+	 * febbraio in un anno non bisestile.
+	 *
+	 * Riga di collaudo C-113.
+	 *
+	 * @return string Frammento di condizione, già preparato.
+	 */
+	private static function condizione_data_valida_e_non_scaduta() {
 		global $wpdb;
 
-		return $condizione . $wpdb->prepare(
-			" AND p.ID IN ( SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value >= %s )",
+		$anno   = 'CAST( SUBSTRING( pm.meta_value, 1, 4 ) AS UNSIGNED )';
+		$mese   = 'SUBSTRING( pm.meta_value, 6, 2 )';
+		$giorno = 'SUBSTRING( pm.meta_value, 9, 2 )';
+
+		$bisestile = "( MOD( $anno, 4 ) = 0 AND ( MOD( $anno, 100 ) <> 0 OR MOD( $anno, 400 ) = 0 ) )";
+
+		/*
+		 * Le parti interpolate qui sotto sono i tre frammenti costruiti qui sopra
+		 * da costanti scritte nel codice: non contengono niente che arrivi da
+		 * fuori. I due soli valori variabili, la chiave del metadato e il giorno
+		 * corrente, passano dai segnaposto come devono.
+		 */
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$condizione = $wpdb->prepare(
+			" AND p.ID IN (
+				SELECT pm.post_id FROM {$wpdb->postmeta} AS pm
+				WHERE pm.meta_key = %s
+					AND pm.meta_value >= %s
+					AND pm.meta_value REGEXP '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'
+					AND NOT ( $mese IN ( '04', '06', '09', '11' ) AND $giorno = '31' )
+					AND NOT ( $mese = '02' AND $giorno > '29' )
+					AND NOT ( $mese = '02' AND $giorno = '29' AND NOT $bisestile )
+			)",
 			Conformita_Core_Scadenza::chiave(),
 			self::oggi()
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return $condizione;
 	}
 }

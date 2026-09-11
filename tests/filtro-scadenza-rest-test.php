@@ -1,7 +1,7 @@
 <?php
 /**
  * Il filtro di scadenza nell'interfaccia informatica pubblica: righe C-15, C-16,
- * C-17 e C-105 del catalogo.
+ * C-17, C-105 e C-112 del catalogo.
  *
  * I due percorsi sono diversi per costruzione, e questa e' la ragione per cui
  * hanno due righe di collaudo. La **collezione** passa da un'interrogazione, e
@@ -135,6 +135,27 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Un amministratore con tutte le capability del tipo assegnate.
+	 *
+	 * L'assegnazione e' esplicita perche' core registra le capability e non le
+	 * assegna a nessun ruolo: senza, nemmeno un amministratore potrebbe
+	 * modificare il tipo, e le prove sul contesto di modifica sarebbero verdi o
+	 * rosse per il motivo sbagliato.
+	 *
+	 * @return int Identificativo dell'utente.
+	 */
+	private function utente_autorizzato() {
+		$utente_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$utente    = get_user_by( 'id', $utente_id );
+
+		foreach ( array_unique( array_values( conformita_core_capacita_tipo( self::TIPO ) ) ) as $capacita ) {
+			$utente->add_cap( $capacita );
+		}
+
+		return $utente_id;
+	}
+
+	/**
 	 * Esegue una richiesta sull'interfaccia informatica.
 	 *
 	 * **I parametri si passano uno per uno, non attaccati al percorso.** Il
@@ -252,20 +273,65 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 		$scaduto = $this->contenuto( '2026-09-08' );
 		$valido  = $this->contenuto( '2026-09-30' );
 
-		$utente_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
-		$utente    = get_user_by( 'id', $utente_id );
-
-		foreach ( array_unique( array_values( conformita_core_capacita_tipo( self::TIPO ) ) ) as $capacita ) {
-			$utente->add_cap( $capacita );
-		}
-
-		wp_set_current_user( $utente_id );
+		wp_set_current_user( $this->utente_autorizzato() );
 
 		$this->assertSame( 200, $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $valido )->get_status() );
 		$this->assertSame(
 			404,
 			$this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto )->get_status(),
 			'I permessi di gestione non aprono una superficie pubblica.'
+		);
+	}
+
+	/**
+	 * C-112: con il contesto di modifica l'atto scaduto resta correggibile.
+	 *
+	 * **E' il difetto piu' serio trovato in revisione, e non si vedeva dai test.**
+	 * L'interfaccia informatica non e' soltanto una superficie pubblica: e' anche
+	 * il canale con cui l'editor a blocchi di WordPress apre un contenuto per
+	 * modificarlo. Rispondendo "non trovato" a qualunque richiesta del singolo, un
+	 * atto con la data sbagliata compariva nell'elenco amministrativo ma non si
+	 * apriva, quindi non era correggibile: l'esatto contrario di quello che la
+	 * riga C-101 pretende.
+	 *
+	 * Le tre asserzioni vanno lette insieme. L'anonimo non passa, quindi il
+	 * contesto di modifica non e' una porta di servizio. L'autorizzato passa,
+	 * quindi l'atto si corregge. Lo stesso autorizzato con il contesto pubblico
+	 * **non** passa, quindi l'esenzione e' del contesto e non dell'utente.
+	 */
+	public function test_c112_contesto_di_modifica() {
+		$this->oggi_e( '2026-09-09' );
+
+		$scaduto = $this->contenuto( '2026-09-08' );
+
+		wp_set_current_user( 0 );
+
+		$anonimo = $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto, array( 'context' => 'edit' ) );
+
+		$this->assertNotSame( 200, $anonimo->get_status(), 'Il contesto di modifica non e\' una porta di servizio per chi non ha permessi.' );
+		$this->assertContains(
+			$anonimo->get_status(),
+			array( 401, 403 ),
+			'Il rifiuto e\' quello normale di WordPress sui permessi, e arriva prima che si sappia se il contenuto sia scaduto. Motivo: ' . $this->motivo( $anonimo )
+		);
+
+		wp_set_current_user( $this->utente_autorizzato() );
+
+		$modifica = $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto, array( 'context' => 'edit' ) );
+
+		$this->assertSame(
+			200,
+			$modifica->get_status(),
+			'Chi ha il permesso di modifica deve poter aprire l\'atto scaduto, altrimenti non lo corregge nessuno. Motivo del rifiuto: ' . $this->motivo( $modifica )
+		);
+		$this->assertSame( $scaduto, $modifica->get_data()['id'] );
+
+		$pubblico = $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto );
+
+		$this->assertSame(
+			404,
+			$pubblico->get_status(),
+			'Lo stesso utente, con il contesto pubblico, non lo vede: l\'esenzione e\' del contesto e non dell\'utente.'
 		);
 	}
 

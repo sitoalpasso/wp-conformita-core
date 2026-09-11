@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sui percorsi di lettura: righe C-10, C-11, C-12, C-13,
  * C-14, C-21, C-22, C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102,
- * C-103, C-104, C-19 e C-20.
+ * C-103, C-104, C-19, C-20, C-111 e C-113.
  *
  * Il file collauda **dove** la scadenza viene applicata. Quando un contenuto sia
  * scaduto lo stabilisce il contratto del dato, collaudato in `scadenza-test.php`.
@@ -164,6 +164,46 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 		}
 
 		return $utente_id;
+	}
+
+	/**
+	 * Sposta la data di pubblicazione di un contenuto.
+	 *
+	 * @param int    $post_id Identificativo del contenuto.
+	 * @param string $data    Data completa.
+	 */
+	private function datato( $post_id, $data ) {
+		wp_update_post(
+			array(
+				'ID'        => $post_id,
+				'post_date' => $data,
+			)
+		);
+	}
+
+	/**
+	 * Un contenuto con un valore di fine scritto direttamente, senza validazione.
+	 *
+	 * E' il modo in cui un valore corrotto puo' davvero esistere: l'API valida in
+	 * scrittura, quindi un valore malformato arriva solo per migrazione o per
+	 * scrittura diretta nella banca dati.
+	 *
+	 * @param string $valore Valore grezzo da scrivere.
+	 * @param string $data   Data di pubblicazione.
+	 * @return int Identificativo del contenuto.
+	 */
+	private function contenuto_con_valore_grezzo( $valore, $data ) {
+		$post_id = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+				'post_date'   => $data,
+			)
+		);
+
+		update_post_meta( $post_id, conformita_core_chiave_fine_pubblicazione(), $valore );
+
+		return $post_id;
 	}
 
 	/**
@@ -643,6 +683,133 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Lo spegnimento del motore spegne **tutti** gli agganci.
+	 *
+	 * Nella prima stesura l'accensione ne registrava otto e lo spegnimento ne
+	 * toglieva tre: `azzera_avvio()` dichiarava il motore spento mentre cinque
+	 * agganci continuavano a girare. Il difetto non poteva produrre nessun
+	 * errore, perche' uno spegnimento incompleto non fallisce: fa semplicemente
+	 * una cosa diversa da quella che dice. Adesso accensione e spegnimento
+	 * leggono lo stesso elenco, e questa prova lo verifica dall'esterno invece di
+	 * fidarsi.
+	 */
+	public function test_spegnimento_completo_del_motore() {
+		$this->assertTrue( Conformita_Core_Filtro_Scadenza::avviato() );
+
+		foreach ( Conformita_Core_Filtro_Scadenza::agganci() as $aggancio ) {
+			$this->assertNotFalse(
+				has_filter( $aggancio['aggancio'], array( 'Conformita_Core_Filtro_Scadenza', $aggancio['metodo'] ) ),
+				'A motore acceso l\'aggancio ' . $aggancio['aggancio'] . ' deve esserci.'
+			);
+		}
+
+		Conformita_Core_Filtro_Scadenza::azzera_avvio();
+
+		$this->assertFalse( Conformita_Core_Filtro_Scadenza::avviato() );
+
+		foreach ( Conformita_Core_Filtro_Scadenza::agganci() as $aggancio ) {
+			$this->assertFalse(
+				has_filter( $aggancio['aggancio'], array( 'Conformita_Core_Filtro_Scadenza', $aggancio['metodo'] ) ),
+				'A motore spento l\'aggancio ' . $aggancio['aggancio'] . ' non deve esserci piu\'. Un motore che si dichiara spento mentre meta\' dei suoi agganci gira e\' peggio di uno che non si spegne.'
+			);
+		}
+
+		Conformita_Core_Filtro_Scadenza::avvia();
+	}
+
+	/**
+	 * C-111: l'aggancio dedicato alla mappa trasforma gli argomenti come deve.
+	 *
+	 * Serve perche' la prova di non vacuita' C-108 dimostra che quell'aggancio
+	 * oggi non regge nessun comportamento: la mappa passa comunque da
+	 * un'interrogazione. Resta come rete di sicurezza, e una rete che nessuno
+	 * prova puo' rompersi restando sempre verde.
+	 */
+	public function test_c111_aggancio_della_mappa() {
+		$this->oggi_e( '2026-09-09' );
+
+		$gestiti = apply_filters( 'wp_sitemaps_posts_query_args', array( 'post_type' => self::TIPO ), self::TIPO );
+
+		$this->assertArrayHasKey( 'meta_query', $gestiti, 'Per un tipo gestito la condizione sulla scadenza va aggiunta.' );
+
+		$clausola = end( $gestiti['meta_query'] );
+
+		$this->assertSame( conformita_core_chiave_fine_pubblicazione(), $clausola['key'] );
+		$this->assertSame( '2026-09-09', $clausola['value'], 'Il confronto usa il giorno corrente letto dallo stesso orologio del resto del motore.' );
+		$this->assertSame( '>=', $clausola['compare'] );
+
+		$altri = apply_filters( 'wp_sitemaps_posts_query_args', array( 'post_type' => 'post' ), 'post' );
+
+		$this->assertArrayNotHasKey( 'meta_query', $altri, 'Su un tipo non gestito non si tocca niente: la condizione cancellerebbe tutti gli articoli dalla mappa.' );
+	}
+
+	/**
+	 * C-113: un contenuto con data corrotta non e' mai il vicino.
+	 *
+	 * La riga C-88 dice che una data corrotta rende il contenuto scaduto. Su
+	 * questo percorso non c'e' un secondo strato che ricontrolli il risultato,
+	 * quindi il confronto sulla banca dati deve bastare da solo: un valore che
+	 * ordina alto come `9999-99-99` supererebbe un confronto fra stringhe e
+	 * contraddirebbe il contratto.
+	 */
+	public function test_c113_vicino_con_data_corrotta() {
+		$this->oggi_e( '2026-09-09' );
+
+		$buono = $this->contenuto( '2026-09-30', self::TIPO, 'Vicino buono' );
+		$this->datato( $buono, '2026-09-01 10:00:00' );
+
+		$corrotti = array( '9999-99-99', '2026-02-31', '2026-13-01', '2026-00-10', '2027-02-29', '2026-04-31', 'non una data', '' );
+		$giorno   = 2;
+
+		foreach ( $corrotti as $valore ) {
+			$this->contenuto_con_valore_grezzo( $valore, sprintf( '2026-09-%02d 10:00:00', $giorno ) );
+			++$giorno;
+		}
+
+		$partenza = $this->contenuto( '2026-09-30', self::TIPO, 'Punto di partenza' );
+		$this->datato( $partenza, '2026-09-20 10:00:00' );
+
+		$GLOBALS['post'] = get_post( $partenza );
+
+		$precedente = get_adjacent_post( false, '', true );
+
+		$this->assertInstanceOf( WP_Post::class, $precedente, 'Un vicino deve esserci: senza questa asserzione la prova sarebbe verde anche cancellando tutti i vicini.' );
+		$this->assertSame(
+			$buono,
+			$precedente->ID,
+			'Il vicino salta tutti i valori corrotti e arriva a quello valido. Se si ferma prima, la condizione sta accettando date che non esistono.'
+		);
+
+		unset( $GLOBALS['post'] );
+	}
+
+	/**
+	 * C-113: una data valida e lontana resta accettata.
+	 *
+	 * Controllo opposto del precedente, e non e' una formalita': una condizione
+	 * troppo stretta escluderebbe date buone, e il 29 febbraio di un anno
+	 * bisestile e' quella su cui si sbaglia.
+	 */
+	public function test_c113_data_valida_di_anno_bisestile() {
+		$this->oggi_e( '2026-09-09' );
+
+		$bisestile = $this->contenuto( '2028-02-29', self::TIPO, 'Scade in un anno bisestile' );
+		$this->datato( $bisestile, '2026-09-05 10:00:00' );
+
+		$partenza = $this->contenuto( '2026-09-30', self::TIPO, 'Punto di partenza' );
+		$this->datato( $partenza, '2026-09-20 10:00:00' );
+
+		$GLOBALS['post'] = get_post( $partenza );
+
+		$precedente = get_adjacent_post( false, '', true );
+
+		$this->assertInstanceOf( WP_Post::class, $precedente );
+		$this->assertSame( $bisestile, $precedente->ID, 'Il 29 febbraio di un anno bisestile e\' una data che esiste, e va accettata.' );
+
+		unset( $GLOBALS['post'] );
+	}
+
+	/**
 	 * C-19: la pagina dell'allegato di un contenuto scaduto non risponde.
 	 *
 	 * La scadenza si legge sul contenuto padre: l'allegato non ha una data di
@@ -832,6 +999,12 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 			'xmlrpc_prepare_post'           => 'filtra_dato_xmlrpc',
 			'get_previous_post_where'       => 'filtra_vicino',
 			'get_next_post_where'           => 'filtra_vicino',
+		);
+
+		$this->assertCount(
+			count( $attesi ),
+			Conformita_Core_Filtro_Scadenza::agganci(),
+			'Il motore dichiara un numero di agganci diverso da quello che questa prova conosce: se ne e\' stato aggiunto uno, va aggiunto anche qui, altrimenti nessuna prova lo guarderebbe.'
 		);
 
 		$conteggio = array();

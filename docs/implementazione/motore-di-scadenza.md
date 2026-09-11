@@ -285,7 +285,7 @@ fatto.
 | Contenuto singolo dopo l'interrogazione | `the_posts` **confermato** | C-10 |
 | Mappa per i motori di ricerca | `wp_sitemaps_posts_query_args` **confermato** | C-14 |
 | Interfaccia informatica, collezione | **nessun aggancio dedicato**: la collezione passa da `WP_Query`, quindi la coprono i due strati generali. `rest_{$post_type}_query`, che la scheda indicava, non serve | C-15 |
-| Interfaccia informatica, singolo | `rest_request_before_callbacks` **confermato**. L'alternativa `rest_prepare_{$post_type}` è stata **scartata in implementazione**: per un tipo consultabile dal web, WordPress applica quel filtro e poi chiama un metodo sull'oggetto restituito per aggiungere un'intestazione, quindi restituire lì un errore produrrebbe un errore fatale al posto di un 404; e lo stesso filtro prepara ogni elemento della collezione, quindi avrebbe richiesto di distinguere a mano il singolo dall'elenco. Il comportamento fissato dal test è "non trovato", non "vietato" e non "200 con i dati" | C-16, C-105 |
+| Interfaccia informatica, singolo | `rest_request_before_callbacks` **confermato**. L'alternativa `rest_prepare_{$post_type}` è stata **scartata in implementazione**: per un tipo consultabile dal web, WordPress applica quel filtro e poi chiama un metodo sull'oggetto restituito per aggiungere un'intestazione, quindi restituire lì un errore produrrebbe un errore fatale al posto di un 404; e lo stesso filtro prepara ogni elemento della collezione, quindi avrebbe richiesto di distinguere a mano il singolo dall'elenco. Il comportamento fissato dal test è "non trovato", non "vietato" e non "200 con i dati", **tranne con `context=edit`**, che non si filtra perché è il canale dell'editor a blocchi | C-16, C-105, C-112 |
 | Anteprime incorporate | `oembed_response_data` **confermato** | C-17 |
 | XML-RPC | `xmlrpc_prepare_post` **confermato**, che copre sia la lettura del singolo sia quella degli elenchi perché WordPress prepara ogni contenuto di lì. L'alternativa di disattivare XML-RPC per i tipi gestiti è stata scartata: toglierebbe anche la scrittura, che non c'entra con la scadenza | C-18 |
 | Pagina dell'allegato | **nessuno dei due indicati**: basta il secondo strato, che guarda la scadenza del contenuto padre e toglie l'allegato dai risultati. `template_redirect` è stato scartato perché non viene emesso quando la richiesta non arriva a disegnare una pagina, quindi il controllo sarebbe mancato proprio dove serve | C-19 |
@@ -534,3 +534,47 @@ passaggio intermedio prima di verificare l'esito.
 **Da fare, e non è di questo blocco:** l'azione `conformita_core_pronto` del punto 5. Il
 motore si accende già al caricamento di core, che è la metà che riguarda la conformità; la
 stretta di mano verso i componenti è un'unità sua, e prima le serve la sua riga di catalogo.
+
+---
+
+## 14. La revisione del 2026-09-11 e i tre difetti che ha trovato
+
+Registrati qui perché due dei tre non erano visibili da nessuna prova, e il terzo lo era ma
+nessuna prova lo guardava.
+
+**1. L'interfaccia informatica non è solo pubblica.** Il filtro rispondeva "non trovato" a
+qualunque richiesta del singolo contenuto scaduto. Ma quel canale è anche quello con cui
+l'editor a blocchi apre un contenuto per modificarlo: un atto con la data di fine sbagliata
+compariva nell'elenco amministrativo e non si apriva, quindi non era correggibile. È l'esatto
+contrario di quello che la riga C-101 pretende, ed era scritto nero su bianco in un test che
+lo dichiarava come comportamento voluto. La regola corretta lega l'esenzione al **contesto**
+e non all'utente: `context=edit` passa, ogni altro contesto no. Non apre nulla a nessuno,
+perché per quel contesto WordPress pretende già il permesso di modifica. Riga C-112.
+
+**2. Un percorso dichiarato non può avere il limite di un percorso esterno.** La navigazione
+adiacente confrontava le date come stringhe, quindi un valore corrotto che ordina alto
+(`9999-99-99`) restava raggiungibile come vicino. L'avevo classificato come limite
+dichiarato, insieme a `suppress_filters` e a `fields => 'ids'`. Era una classificazione
+sbagliata: quei due li sceglie chi chiama, mentre la navigazione adiacente è uno dei percorsi
+che questo componente dichiara di coprire, e la riga C-88 dice che una data corrotta rende il
+contenuto scaduto. Un percorso dichiarato che la mostra contraddice il contratto. La
+condizione adesso ammette soltanto date che esistono davvero. Riga C-113.
+
+**Una conseguenza da valutare più avanti.** La stessa condizione, applicata al primo strato,
+chiuderebbe anche il limite di `fields => 'ids'` della riga C-102, che oggi resta aperto per
+lo stesso motivo tecnico. Non si fa adesso perché il primo strato usa la forma dichiarativa
+delle condizioni sui metadati e passarlo a una condizione scritta a mano cambierebbe anche il
+conteggio dei risultati e l'impaginazione. Va soppesato, non dato per scontato.
+
+**3. Lo spegnimento diceva una cosa e ne faceva un'altra.** L'accensione registrava otto
+agganci, lo spegnimento ne toglieva tre, e `$avviato` passava comunque a falso: il motore si
+dichiarava spento mentre cinque agganci continuavano a girare. Nessun errore possibile,
+perché uno spegnimento incompleto non fallisce. Accensione e spegnimento adesso leggono lo
+stesso elenco, e una prova verifica dall'esterno che dopo lo spegnimento nessuno degli otto
+risponda più.
+
+**Due osservazioni minori, accolte.** La riga C-104 diceva "il contenuto scaduto esce", che
+si poteva leggere come "viene restituito": riscritta in "resta fuori dai risultati".
+E l'aggancio dedicato alla mappa per i motori, che la prova C-108 dimostra non reggere oggi
+nessun comportamento, ha ora una prova diretta che ne verifica la trasformazione degli
+argomenti: una rete di sicurezza che nessuno prova può rompersi restando verde. Riga C-111.

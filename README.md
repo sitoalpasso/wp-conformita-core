@@ -72,6 +72,13 @@ naviga il sito pubblico vede quello che vede chiunque altro. Le capability gover
 gestione nell'amministrazione, dove il contenuto scaduto resta visibile perché resti
 correggibile.
 
+Lo stesso vale per l'interfaccia REST, che non è solo una superficie pubblica ma anche il
+canale dell'editor a blocchi: una richiesta con `context=edit` non viene filtrata, perché
+altrimenti un contenuto con la data di fine sbagliata non sarebbe apribile per correggerlo.
+Non è una scorciatoia: per quel contesto WordPress pretende già il permesso di modifica sul
+contenuto e risponde da sé a chi non ce l'ha. Ogni altro contesto, dichiarato o assente,
+riceve `404`.
+
 Non sono coperti, e vanno considerati limiti noti: `WP_Query` con `suppress_filters` e con
 `fields => 'ids'`, che non applicano il secondo strato; `get_post()` sul singolo
 identificativo; le interrogazioni SQL dirette; la lettura diretta dei metadati; le pagine
