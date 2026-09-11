@@ -502,7 +502,34 @@ identificativo (C-16), anteprime incorporate (C-17), pubblicazione remota (C-18)
 dell'allegato (C-19), navigazione adiacente (C-20). Più C-15 e C-105, che passano da
 `WP_Query` e non hanno avuto bisogno di nessun aggancio.
 
-**Da fare: le cinque prove di non vacuità.**
+**Fatto: le cinque prove di non vacuità.** Righe C-106..C-110. Ognuna spegne un solo
+aggancio e pretende che il contenuto scaduto ricompaia: se ricompare, la riga corrispondente
+stava misurando il filtro; se non ricompare, stava misurando altro. Prima di spegnere un
+aggancio si verifica che ci fosse e dopo che non ci sia più, perché con un nome sbagliato lo
+spegnimento non farebbe niente e la prova fallirebbe accusando il filtro.
+
+**Che cosa hanno trovato.** Una cosa, ed è C-108: **l'aggancio dedicato alla mappa per i
+motori di ricerca oggi non regge niente.** Spegnendo lui solo il contenuto scaduto resta
+fuori dalla mappa, perché la mappa passa comunque da un'interrogazione e a tenerlo fuori sono
+i due strati generali. Il commento accanto al codice lo diceva già come ipotesi; adesso è una
+prova che gira a ogni verifica. L'aggancio resta come rete di sicurezza per il caso in cui
+una versione futura di WordPress costruisse la mappa senza interrogazione, ma va saputo che
+oggi non è lui a reggere: un aggancio che nessuna prova esercita può rompersi in silenzio.
+
+**Fatto: le prove sul sito vero.** Righe P-33..P-37 in `collaudo-di-rilascio.md` del repo di
+progetto, come prescrive il punto 9 della scheda di lavorazione. Quattro delle cinque si
+fanno da fuori senza credenziali, quindi entrano nel controllo automatico del periodo di
+chiusura dell'ente.
+
+**Due errori di percorso, tutti e due nelle prove e non nel filtro**, vale la pena
+ricordarli perché sono la stessa famiglia. La riga C-17 è andata rossa due volte: la prima
+perché l'indirizzo del contenuto non portava a niente, essendo la prova appoggiata a regole
+di riscrittura che non si erano formate; la seconda perché passavo i parametri della
+richiesta dentro il percorso della rotta, che li rende parte del nome e fa rispondere
+"nessuna rotta corrispondente". **Tutti e due si presentavano come un 404**, cioè
+indistinguibili dal rifiuto giusto se non si guarda il motivo. Da lì vengono due abitudini
+che restano: le prove verificano il motivo del rifiuto e non solo il numero, e verificano il
+passaggio intermedio prima di verificare l'esito.
 
 **Da fare, e non è di questo blocco:** l'azione `conformita_core_pronto` del punto 5. Il
 motore si accende già al caricamento di core, che è la metà che riguarda la conformità; la
