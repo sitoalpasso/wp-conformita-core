@@ -112,6 +112,7 @@ final class Conformita_Core_Filtro_Scadenza {
 		add_action( 'pre_get_posts', array( __CLASS__, 'filtra_interrogazione' ) );
 		add_filter( 'the_posts', array( __CLASS__, 'filtra_risultati' ), 10, 2 );
 		add_filter( 'wp_sitemaps_posts_query_args', array( __CLASS__, 'filtra_argomenti_mappa' ), 10, 2 );
+		add_filter( 'rest_request_before_callbacks', array( __CLASS__, 'filtra_richiesta_rest' ), 10, 3 );
 	}
 
 	/**
@@ -468,5 +469,104 @@ final class Conformita_Core_Filtro_Scadenza {
 		);
 
 		return $argomenti;
+	}
+
+	/**
+	 * L'indirizzo di un contenuto scaduto nell'interfaccia informatica pubblica
+	 * risponde "non trovato".
+	 *
+	 * **Perché serve un aggancio a parte.** La collezione passa da `WP_Query`,
+	 * quindi la coprono i due strati generali. La richiesta di un singolo
+	 * identificativo no: WordPress legge il contenuto direttamente e lo prepara,
+	 * senza nessuna interrogazione da filtrare. Senza questo aggancio
+	 * risponderebbe 200 con i dati di un atto che non è più pubblicabile.
+	 *
+	 * **Non trovato, non vietato.** Sull'interfaccia pubblica la risposta è 404 e
+	 * non 401 né 403: un codice che distingue "non esiste" da "non ti è permesso"
+	 * è esso stesso un'informazione. Vale anche per l'utente autenticato con
+	 * permessi di gestione, perché l'esenzione è della superficie e l'interfaccia
+	 * informatica pubblica non è l'amministrazione. Riga C-16.
+	 *
+	 * **Perché qui e non sulla preparazione della risposta.** La scheda indicava
+	 * come alternativa `rest_prepare_{$tipo}`, e sarebbe stata una scelta
+	 * sbagliata: WordPress applica quel filtro e poi, per un tipo consultabile
+	 * dal web, chiama un metodo sull'oggetto restituito per aggiungere
+	 * un'intestazione. Restituire lì un errore farebbe chiamare quel metodo su un
+	 * oggetto che non ce l'ha, cioè un errore fatale al posto di un 404. Lo stesso
+	 * filtro, inoltre, prepara ogni elemento della collezione, quindi avrebbe
+	 * richiesto di distinguere a mano il singolo dall'elenco per non corrompere
+	 * la risposta della collezione. Questo aggancio, che WordPress espone proprio
+	 * perché ci si possa rifiutare di eseguire la richiesta, non ha nessuno dei
+	 * due problemi: riguarda solo la lettura del singolo, e l'errore diventa una
+	 * risposta d'errore per costruzione. Righe C-16 e C-105.
+	 *
+	 * @internal Aggancio di `rest_request_before_callbacks`.
+	 *
+	 * @param mixed $risposta  Esito già deciso da qualcun altro, di norma nullo.
+	 * @param mixed $gestore   Descrizione della funzione che servirebbe la rotta.
+	 * @param mixed $richiesta Richiesta in corso.
+	 * @return mixed La risposta invariata, oppure l'errore "non trovato".
+	 */
+	public static function filtra_richiesta_rest( $risposta, $gestore = null, $richiesta = null ) {
+		if ( null !== $risposta ) {
+			return $risposta;
+		}
+
+		if ( ! $richiesta instanceof WP_REST_Request || 'GET' !== $richiesta->get_method() ) {
+			return $risposta;
+		}
+
+		if ( ! self::e_lettura_di_un_singolo( $gestore ) ) {
+			return $risposta;
+		}
+
+		$contenuto = get_post( (int) $richiesta['id'] );
+
+		if ( ! $contenuto instanceof WP_Post ) {
+			return $risposta;
+		}
+
+		if ( ! Conformita_Core_Tipi::registrato( $contenuto->post_type ) ) {
+			return $risposta;
+		}
+
+		if ( 'publish' !== $contenuto->post_status ) {
+			return $risposta;
+		}
+
+		if ( ! Conformita_Core_Scadenza::scaduto( (int) $contenuto->ID ) ) {
+			return $risposta;
+		}
+
+		return new WP_Error(
+			'conformita_core_contenuto_non_trovato',
+			__( 'Contenuto non trovato.', 'conformita-core' ),
+			array( 'status' => 404 )
+		);
+	}
+
+	/**
+	 * La rotta in corso è la lettura di un singolo contenuto.
+	 *
+	 * Si riconosce da chi la servirebbe, non dalla forma dell'indirizzo: la
+	 * forma degli indirizzi è una convenzione che cambia, mentre la funzione che
+	 * legge un contenuto singolo è la stessa per ogni tipo. Così la collezione
+	 * resta fuori senza doverla escludere a mano.
+	 *
+	 * @param mixed $gestore Descrizione della funzione che servirebbe la rotta.
+	 * @return bool
+	 */
+	private static function e_lettura_di_un_singolo( $gestore ) {
+		if ( ! is_array( $gestore ) || ! isset( $gestore['callback'] ) ) {
+			return false;
+		}
+
+		$funzione = $gestore['callback'];
+
+		if ( ! is_array( $funzione ) || ! isset( $funzione[0], $funzione[1] ) ) {
+			return false;
+		}
+
+		return $funzione[0] instanceof WP_REST_Posts_Controller && 'get_item' === $funzione[1];
 	}
 }

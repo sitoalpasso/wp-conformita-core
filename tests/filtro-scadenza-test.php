@@ -690,9 +690,10 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 	 */
 	private function agganci_del_motore() {
 		$attesi = array(
-			'pre_get_posts'                => 'filtra_interrogazione',
-			'the_posts'                    => 'filtra_risultati',
-			'wp_sitemaps_posts_query_args' => 'filtra_argomenti_mappa',
+			'pre_get_posts'                 => 'filtra_interrogazione',
+			'the_posts'                     => 'filtra_risultati',
+			'wp_sitemaps_posts_query_args'  => 'filtra_argomenti_mappa',
+			'rest_request_before_callbacks' => 'filtra_richiesta_rest',
 		);
 
 		$conteggio = array();
@@ -740,12 +741,13 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 		$this->assertTrue( Conformita_Core_Filtro_Scadenza::avviato() );
 
 		$attesi = array(
-			'pre_get_posts'                => 1,
-			'the_posts'                    => 1,
-			'wp_sitemaps_posts_query_args' => 1,
+			'pre_get_posts'                 => 1,
+			'the_posts'                     => 1,
+			'wp_sitemaps_posts_query_args'  => 1,
+			'rest_request_before_callbacks' => 1,
 		);
 
-		$this->assertSame( $attesi, $this->agganci_del_motore(), 'Tutti e tre gli agganci del motore devono risultare registrati una volta sola.' );
+		$this->assertSame( $attesi, $this->agganci_del_motore(), 'Ogni aggancio del motore deve risultare registrato una volta sola.' );
 
 		Conformita_Core_Filtro_Scadenza::avvia();
 		Conformita_Core_Filtro_Scadenza::avvia();
