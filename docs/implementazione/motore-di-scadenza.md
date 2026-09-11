@@ -327,7 +327,7 @@ pagina risponde prima, WordPress non viene eseguito.
 | `includes/class-conformita-core-scadenza.php` | nuovo, il contratto del dato |
 | `includes/class-conformita-core-filtro-scadenza.php` | nuovo, il filtro sui percorsi di lettura |
 | `includes/class-conformita-core-sezioni.php` | modificato: vincolo sui caratteri dell'identificativo, e rifiuto della registrazione a motore non avviato |
-| `includes/funzioni-api.php` | modificato: le dieci funzioni del punto 6 |
+| `includes/funzioni-api.php` | modificato: le sei funzioni della scadenza effettivamente implementate, non le otto del punto 6. Vedi il punto 15 |
 | `conformita-core.php` | modificato: versione dell'interfaccia a 1.2.0 |
 | `tests/scadenza-test.php` | nuovo |
 | `tests/sezioni-test.php` | modificato: le due righe nuove sulle sezioni |
@@ -578,3 +578,64 @@ si poteva leggere come "viene restituito": riscritta in "resta fuori dai risulta
 E l'aggancio dedicato alla mappa per i motori, che la prova C-108 dimostra non reggere oggi
 nessun comportamento, ha ora una prova diretta che ne verifica la trasformazione degli
 argomenti: una rete di sicurezza che nessuno prova può rompersi restando verde. Riga C-111.
+
+---
+
+## 15. Il perimetro davvero consegnato, e quello che questa scheda prometteva in più
+
+**Correzione di un difetto di contratto, non di codice**, segnalato in revisione l'11
+settembre. Questa scheda progettava quattro cose che l'unità non ha costruito e che
+altrove sono state contate come se fossero sue:
+
+| Cosa | Dove era promessa | Stato vero |
+|---|---|---|
+| `conformita_core_capacita_archivio( $sezione )` | tabella del punto 6 | **non esiste** |
+| `conformita_core_scansiona_anomalie( $limite )` | tabella del punto 6 e punto 4-bis | **non esiste** |
+| Riga C-91, la differenza fra le due politiche di scadenza | punto 1-bis e punto 10 | **nessun test** |
+| Riga C-96, la scansione delle anomalie senza capability | punto 10 | **nessun test** |
+
+Ne seguivano tre affermazioni false. Che il filtro leggesse la politica di scadenza: non la
+legge mai. Che `archivio` e `irraggiungibile` si comportassero in modo diverso: oggi fanno
+esattamente la stessa cosa. E il conteggio "quindici esistenti più tredici nuove", che
+includeva due righe mai scritte.
+
+**La decisione.** Le quattro cose si spostano in una unità nuova, **S10, archivio riservato e
+scansione delle anomalie**, che dipende da S4 ed è registrata in `unita-di-lavoro.md` del
+cantiere. Non si costruiscono adesso, per due ragioni: non servono all'albo, che dichiara
+`irraggiungibile`, e aggiungerle qui gonfierebbe una richiesta di unione che è già lunga.
+
+**Il perimetro di S4 è quindi, per intero e senza altro:** il contratto del dato di fine
+pubblicazione, e il filtro che applica la scadenza sui dodici percorsi di lettura.
+
+**Le funzioni pubbliche della scadenza sono sei**, non otto: `chiave_fine_pubblicazione`,
+`valida_fine_pubblicazione`, `imposta_fine_pubblicazione`, `fine_pubblicazione`,
+`istante_scadenza`, `scaduto`. Le due della tabella del punto 6 che non ci sono arrivano con
+S10.
+
+**Conseguenza da dichiarare a chi dipende da core.** La politica `archivio` è registrabile,
+la validazione la accetta, ma il suo accesso riservato non esiste: un componente che la
+dichiara ottiene oggi lo stesso comportamento di `irraggiungibile`. Non va consumata contando
+su una differenza che non c'è. È scritto anche nel README, perché è lì che guarda chi scrive
+un componente.
+
+### Il caso limite dei metadati duplicati
+
+Trovato nella stessa revisione. WordPress ammette più righe di metadato con la stessa chiave,
+e la lettura normale ne restituisce una sola. La condizione sulla banca dati della navigazione
+adiacente, scritta senza raggruppamento, avrebbe accettato il contenuto se *almeno una* riga
+fosse stata valida e futura: con un valore corrotto e uno futuro le due strade avrebbero
+deciso in modo opposto, e su quel percorso, che non ha un secondo strato, avrebbe vinto la più
+permissiva.
+
+**Deciso ora, prima che il caso si presentasse**: un valore solo per chiave è il contratto, i
+duplicati sono un'anomalia, e un'anomalia rende scaduto come qualsiasi altra. La lettura dà
+errore, la condizione sulla banca dati raggruppa e pretende una riga sola, e la scrittura
+dall'API ripara, perché altrimenti un contenuto con due date resterebbe invisibile per sempre.
+Riga C-114.
+
+### Che cosa resta scelto e non corretto
+
+Il limite di `fields => 'ids'` della riga C-102 **resta aperto**. Estendere a tutte le
+interrogazioni la condizione scritta a mano chiuderebbe anche quello, ma cambierebbe la forma
+delle condizioni sui metadati, quindi il conteggio dei risultati e l'impaginazione, e
+andrebbe misurata sulle prestazioni. È una unità sua, non una riga di questa.

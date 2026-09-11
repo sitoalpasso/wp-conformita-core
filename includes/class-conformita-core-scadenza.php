@@ -36,7 +36,7 @@
  * e il difetto si vedrebbe solo quando un ente contesta una pubblicazione durata
  * quattordici giorni invece di quindici.
  *
- * Righe di collaudo C-23, C-24, C-87, C-88, C-99, C-100.
+ * Righe di collaudo C-23, C-24, C-87, C-88, C-99, C-100, C-114.
  *
  * @package Conformita_Core
  */
@@ -198,7 +198,22 @@ final class Conformita_Core_Scadenza {
 			return $esito;
 		}
 
-		if ( get_post_meta( $post_id, self::CHIAVE, true ) === $data ) {
+		$valori = get_post_meta( $post_id, self::CHIAVE, false );
+		$valori = is_array( $valori ) ? $valori : array();
+
+		/*
+		 * WordPress ammette più righe di metadato con la stessa chiave. Scrivere
+		 * senza guardarle lascerebbe il contenuto con più valori, e la scrittura
+		 * normale li aggiornerebbe tutti allo stesso valore senza ridurne il
+		 * numero: resterebbe un'anomalia, solo meno visibile. Qui si ripara,
+		 * perché questa è la strada per cui il dato entra correttamente.
+		 */
+		if ( count( $valori ) > 1 ) {
+			delete_post_meta( $post_id, self::CHIAVE );
+			$valori = array();
+		}
+
+		if ( array( $data ) === $valori ) {
 			return true;
 		}
 
@@ -215,9 +230,18 @@ final class Conformita_Core_Scadenza {
 	/**
 	 * La fine della pubblicazione registrata sul contenuto.
 	 *
+	 * **Più di un valore è un'anomalia, non una scelta fra due.** WordPress ammette
+	 * più righe di metadato con la stessa chiave, e la lettura normale ne
+	 * restituisce una sola, la prima. Con due valori diversi, per esempio uno
+	 * corrotto e uno futuro valido, questa funzione e una condizione scritta
+	 * sulla banca dati potrebbero decidere in modo opposto, e fra le due
+	 * vincerebbe la più permissiva. Un valore solo per chiave è il contratto:
+	 * i duplicati danno errore, e l'errore rende scaduto. Riga C-114.
+	 *
 	 * @param int $post_id Identificativo del contenuto.
 	 * @return string|WP_Error La data, stringa vuota se assente, errore se il
-	 *                         tipo non è gestito.
+	 *                         tipo non è gestito o se le date registrate sono
+	 *                         più di una.
 	 */
 	public static function fine( $post_id ) {
 		$post_id = (int) $post_id;
@@ -230,7 +254,21 @@ final class Conformita_Core_Scadenza {
 			);
 		}
 
-		$valore = get_post_meta( $post_id, self::CHIAVE, true );
+		$valori = get_post_meta( $post_id, self::CHIAVE, false );
+		$valori = is_array( $valori ) ? $valori : array();
+
+		if ( count( $valori ) > 1 ) {
+			return new WP_Error(
+				'conformita_core_dato_duplicato',
+				__( 'Fine pubblicazione: il contenuto ha più di una data di fine registrata, e non è possibile stabilire quale valga.', 'conformita-core' )
+			);
+		}
+
+		if ( empty( $valori ) ) {
+			return '';
+		}
+
+		$valore = reset( $valori );
 
 		return is_string( $valore ) ? $valore : '';
 	}

@@ -813,16 +813,31 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * giorno 31 nei mesi di trenta giorni, il 30 e il 31 di febbraio, e il 29 di
 	 * febbraio in un anno non bisestile.
 	 *
-	 * Riga di collaudo C-113.
+	 * **Perché il raggruppamento con il conteggio a uno.** WordPress ammette più
+	 * righe di metadato con la stessa chiave. La condizione senza raggruppamento
+	 * avrebbe accettato il contenuto se *almeno una* riga fosse valida e futura,
+	 * mentre la lettura normale ne guarda una sola: con un valore corrotto e uno
+	 * futuro le due strade avrebbero deciso in modo opposto, e su questo percorso
+	 * avrebbe vinto la più permissiva. Il conteggio a uno rende il caso
+	 * impossibile invece di risolverlo, che è la direzione sicura, e coincide con
+	 * il contratto: un valore solo per chiave. Riga C-114.
+	 *
+	 * Righe di collaudo C-113 e C-114.
 	 *
 	 * @return string Frammento di condizione, già preparato.
 	 */
 	private static function condizione_data_valida_e_non_scaduta() {
 		global $wpdb;
 
-		$anno   = 'CAST( SUBSTRING( pm.meta_value, 1, 4 ) AS UNSIGNED )';
-		$mese   = 'SUBSTRING( pm.meta_value, 6, 2 )';
-		$giorno = 'SUBSTRING( pm.meta_value, 9, 2 )';
+		/*
+		 * Il valore si legge attraverso un'aggregazione perché la condizione
+		 * raggruppa per contenuto: con una riga sola, che è quello che il
+		 * raggruppamento pretende, l'aggregazione restituisce quell'unica riga.
+		 */
+		$valore = 'MAX( pm.meta_value )';
+		$anno   = "CAST( SUBSTRING( $valore, 1, 4 ) AS UNSIGNED )";
+		$mese   = "SUBSTRING( $valore, 6, 2 )";
+		$giorno = "SUBSTRING( $valore, 9, 2 )";
 
 		$bisestile = "( MOD( $anno, 4 ) = 0 AND ( MOD( $anno, 100 ) <> 0 OR MOD( $anno, 400 ) = 0 ) )";
 
@@ -837,8 +852,10 @@ final class Conformita_Core_Filtro_Scadenza {
 			" AND p.ID IN (
 				SELECT pm.post_id FROM {$wpdb->postmeta} AS pm
 				WHERE pm.meta_key = %s
-					AND pm.meta_value >= %s
-					AND pm.meta_value REGEXP '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'
+				GROUP BY pm.post_id
+				HAVING COUNT( * ) = 1
+					AND $valore >= %s
+					AND $valore REGEXP '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$'
 					AND NOT ( $mese IN ( '04', '06', '09', '11' ) AND $giorno = '31' )
 					AND NOT ( $mese = '02' AND $giorno > '29' )
 					AND NOT ( $mese = '02' AND $giorno = '29' AND NOT $bisestile )

@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sui percorsi di lettura: righe C-10, C-11, C-12, C-13,
  * C-14, C-21, C-22, C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102,
- * C-103, C-104, C-19, C-20, C-111 e C-113.
+ * C-103, C-104, C-19, C-20, C-111, C-113 e C-114.
  *
  * Il file collauda **dove** la scadenza viene applicata. Quando un contenuto sia
  * scaduto lo stabilisce il contratto del dato, collaudato in `scadenza-test.php`.
@@ -807,6 +807,125 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 		$this->assertSame( $bisestile, $precedente->ID, 'Il 29 febbraio di un anno bisestile e\' una data che esiste, e va accettata.' );
 
 		unset( $GLOBALS['post'] );
+	}
+
+	/**
+	 * C-114: due date registrate sullo stesso contenuto sono un'anomalia.
+	 *
+	 * WordPress ammette piu' righe di metadato con la stessa chiave, e la lettura
+	 * normale ne restituisce una sola. Con un valore corrotto e uno futuro valido
+	 * la lettura e la condizione sulla banca dati potrebbero decidere in modo
+	 * opposto, e su un percorso senza secondo strato vincerebbe la piu'
+	 * permissiva. Un valore solo per chiave e' il contratto.
+	 *
+	 * L'ordine dei due valori e' scelto apposta: il corrotto e' scritto per
+	 * primo, quindi la lettura normale prende quello, mentre la condizione sulla
+	 * banca dati troverebbe il secondo valido. E' la combinazione che fa
+	 * divergere le due strade.
+	 */
+	public function test_c114_due_date_sullo_stesso_contenuto() {
+		$this->oggi_e( '2026-09-09' );
+
+		$doppio = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+			)
+		);
+
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '9999-99-99' );
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '2026-12-31' );
+
+		$this->assertCount( 2, get_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), false ), 'La prova parte da due righe vere: senza, non verifica niente.' );
+
+		$fine = conformita_core_fine_pubblicazione( $doppio );
+
+		$this->assertWPError( $fine );
+		$this->assertSame( 'conformita_core_dato_duplicato', $fine->get_error_code() );
+		$this->assertTrue( conformita_core_scaduto( $doppio ), 'Un\'anomalia rende scaduto: si sbaglia nella direzione sicura.' );
+
+		$this->assertNotContains(
+			$doppio,
+			$this->identificativi(
+				new WP_Query(
+					array(
+						'post_type'      => self::TIPO,
+						'posts_per_page' => -1,
+					)
+				)
+			),
+			'Il contenuto con due date non compare negli elenchi.'
+		);
+	}
+
+	/**
+	 * C-114: un contenuto con due date non e' mai il vicino.
+	 *
+	 * E' il percorso che conta di piu', perche' e' l'unico senza un secondo
+	 * strato che ricontrolli il risultato: qui la condizione sulla banca dati
+	 * deve escludere i duplicati da sola.
+	 */
+	public function test_c114_vicino_con_due_date() {
+		$this->oggi_e( '2026-09-09' );
+
+		$buono = $this->contenuto( '2026-09-30', self::TIPO, 'Vicino buono' );
+		$this->datato( $buono, '2026-09-01 10:00:00' );
+
+		$doppio = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+				'post_date'   => '2026-09-05 10:00:00',
+			)
+		);
+
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '9999-99-99' );
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '2026-12-31' );
+
+		$partenza = $this->contenuto( '2026-09-30', self::TIPO, 'Punto di partenza' );
+		$this->datato( $partenza, '2026-09-20 10:00:00' );
+
+		$GLOBALS['post'] = get_post( $partenza );
+
+		$precedente = get_adjacent_post( false, '', true );
+
+		$this->assertInstanceOf( WP_Post::class, $precedente, 'Un vicino deve esserci: senza questa asserzione la prova sarebbe verde cancellando tutti i vicini.' );
+		$this->assertSame(
+			$buono,
+			$precedente->ID,
+			'Il vicino salta il contenuto con due date e arriva a quello buono. Se si ferma sul doppio, la condizione accetta il contenuto perche\' almeno una delle due righe e\' valida.'
+		);
+
+		unset( $GLOBALS['post'] );
+	}
+
+	/**
+	 * C-114: la scrittura dall'API ripara il duplicato.
+	 *
+	 * E' la via d'uscita: senza, un contenuto con due date resterebbe invisibile
+	 * per sempre e nessuno potrebbe rimetterlo a posto passando dall'API.
+	 */
+	public function test_c114_la_scrittura_ripara() {
+		$this->oggi_e( '2026-09-09' );
+
+		$doppio = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+			)
+		);
+
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '9999-99-99' );
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '2026-12-31' );
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $doppio, '2026-09-30' ) );
+
+		$valori = get_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), false );
+
+		$this->assertCount( 1, $valori, 'Dopo la scrittura dall\'API resta una riga sola.' );
+		$this->assertSame( '2026-09-30', reset( $valori ) );
+		$this->assertSame( '2026-09-30', conformita_core_fine_pubblicazione( $doppio ) );
+		$this->assertFalse( conformita_core_scaduto( $doppio ), 'Riparato, il contenuto torna visibile.' );
 	}
 
 	/**

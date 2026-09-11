@@ -72,12 +72,23 @@ naviga il sito pubblico vede quello che vede chiunque altro. Le capability gover
 gestione nell'amministrazione, dove il contenuto scaduto resta visibile perché resti
 correggibile.
 
+Un contenuto con **più di una data di fine registrata** è un'anomalia, non una scelta fra
+due: risulta scaduto, come qualsiasi altro dato che non si sappia leggere. La scrittura
+attraverso l'API riporta il contenuto a un valore solo.
+
 Lo stesso vale per l'interfaccia REST, che non è solo una superficie pubblica ma anche il
 canale dell'editor a blocchi: una richiesta con `context=edit` non viene filtrata, perché
 altrimenti un contenuto con la data di fine sbagliata non sarebbe apribile per correggerlo.
 Non è una scorciatoia: per quel contesto WordPress pretende già il permesso di modifica sul
 contenuto e risponde da sé a chi non ce l'ha. Ogni altro contesto, dichiarato o assente,
 riceve `404`.
+
+**La politica `archivio` non è ancora consumabile.** Le due politiche di scadenza si
+dichiarano entrambe e la validazione le accetta entrambe, ma oggi producono lo stesso
+comportamento: il contenuto scaduto è invisibile sulle superfici pubbliche e visibile
+nell'amministrazione. L'accesso riservato che distingue `archivio` da `irraggiungibile`, con
+la capability derivata dalla sezione, è un'unità successiva. Un componente che dichiara
+`archivio` non deve contare su una differenza che ancora non c'è.
 
 Non sono coperti, e vanno considerati limiti noti: `WP_Query` con `suppress_filters` e con
 `fields => 'ids'`, che non applicano il secondo strato; `get_post()` sul singolo
