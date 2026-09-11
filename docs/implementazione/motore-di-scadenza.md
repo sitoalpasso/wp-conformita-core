@@ -1,17 +1,20 @@
 # Motore di scadenza: scheda di lavorazione
 
-**Repository: `wp-conformita-core`.** Branch `claude/m1-motore-scadenza`, diramato da `main`
-al commit `54e4498`. Unità S4 del piano, righe di collaudo C-10..C-24 più le righe nuove
-proposte al punto 10.
+**Repository: `wp-conformita-core`.** Unità S4 del piano, righe di collaudo elencate al
+punto 10.
 
 **Nel componente dell'albo pretorio non si implementa niente di tutto questo.** L'albo, più
-avanti e in un'altra unità, si limiterà a: dichiarare la politica di scadenza della propria
-sezione, scrivere il metadato di fine pubblicazione definito qui, e assegnare la capability
-di archivio ai propri ruoli. Nessuna logica di scadenza nell'albo, mai: se ci finisse,
-esisterebbero due verità sulla stessa cosa.
+avanti e in un'altra unità, si limiterà a due cose: dichiarare la politica di scadenza della
+propria sezione, che sarà `irraggiungibile`, e scrivere il metadato di fine pubblicazione
+definito qui. Nessuna logica di scadenza nell'albo, mai: se ci finisse, esisterebbero due
+verità sulla stessa cosa.
 
-Scheda scritta prima del codice e non ancora autorizzata. Sostituisce la prima stesura, che
-descriveva il comportamento senza specificare il contratto.
+*La prima stesura di questa riga diceva che l'albo avrebbe anche assegnato ai propri ruoli la
+capability di archivio. Quella capability non esiste: è l'unità S10, e l'albo non la usa
+perché dichiara `irraggiungibile`.*
+
+**Stato: approvata e unita in `main`.** Le sezioni operative descrivono ciò che il codice fa
+oggi; i punti 11, 12 e 15 sono note storiche e lo dichiarano in apertura.
 
 ---
 
@@ -157,10 +160,10 @@ L'archivio riservato, che sarebbe una terza superficie, non esiste: è S10.
 Far sparire ovunque un contenuto con la data rotta significa renderlo irreparabile: nessuno
 lo trova più per correggerlo.
 
-| Caso | Pubblico | Amministrazione e archivio autorizzato |
+| Caso | Pubblico | Amministrazione |
 |---|---|---|
 | Data valida, non scaduta | visibile | visibile |
-| Data valida, scaduta | invisibile | visibile secondo la politica |
+| Data valida, scaduta | invisibile | visibile |
 | **Data mancante** | **invisibile** | **visibile** |
 | **Data non valida o corrotta** | **invisibile** | **visibile** |
 
