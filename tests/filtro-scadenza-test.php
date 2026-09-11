@@ -1,8 +1,8 @@
 <?php
 /**
  * Il filtro di scadenza sui percorsi di lettura: righe C-10, C-11, C-12, C-13,
- * C-14, C-21, C-22, C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102 e
- * C-103.
+ * C-14, C-21, C-22, C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102,
+ * C-103 e C-104.
  *
  * Il file collauda **dove** la scadenza viene applicata. Quando un contenuto sia
  * scaduto lo stabilisce il contratto del dato, collaudato in `scadenza-test.php`.
@@ -678,23 +678,132 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-98: l'avvio del motore e' idempotente.
+	 * Gli agganci del motore, contati per metodo e su tutte le priorita'.
 	 *
-	 * Non basta che non produca errori: se agganciasse i filtri due volte, il
-	 * secondo strato girerebbe due volte su ogni lettura, e il costo si vedrebbe
-	 * solo in esercizio.
+	 * Il conteggio guarda la chiave con cui WordPress registra il singolo
+	 * callback, non quanti callback ci sono sull'aggancio: cosi' non dipende da
+	 * quello che aggancia il resto di WordPress, e soprattutto vede un doppione
+	 * anche se fosse stato aggiunto a una priorita' diversa, che e' il caso in
+	 * cui WordPress non deduplica.
+	 *
+	 * @return array<string, int> Quante volte ciascun aggancio risulta registrato.
 	 */
-	public function test_c98_avvio_idempotente() {
+	private function agganci_del_motore() {
+		$attesi = array(
+			'pre_get_posts'                => 'filtra_interrogazione',
+			'the_posts'                    => 'filtra_risultati',
+			'wp_sitemaps_posts_query_args' => 'filtra_argomenti_mappa',
+		);
+
+		$conteggio = array();
+
+		foreach ( $attesi as $aggancio => $metodo ) {
+			$chiave  = 'Conformita_Core_Filtro_Scadenza::' . $metodo;
+			$quante  = 0;
+			$elenchi = isset( $GLOBALS['wp_filter'][ $aggancio ] )
+				? $GLOBALS['wp_filter'][ $aggancio ]->callbacks
+				: array();
+
+			foreach ( $elenchi as $per_priorita ) {
+				if ( isset( $per_priorita[ $chiave ] ) ) {
+					++$quante;
+				}
+			}
+
+			$conteggio[ $aggancio ] = $quante;
+		}
+
+		return $conteggio;
+	}
+
+	/**
+	 * C-98: dopo piu' avvii ciascun aggancio risulta registrato una volta sola.
+	 *
+	 * **Che cosa questa prova dimostra e che cosa no.** Dimostra lo stato
+	 * osservabile degli agganci dopo avvii ripetuti. Non dimostra che la guardia
+	 * dentro `avvia()` sia indispensabile: WordPress identifica ogni aggancio con
+	 * una chiave univoca, e per un metodo statico quella chiave e' deterministica,
+	 * quindi riagganciare lo stesso metodo alla stessa priorita' sostituisce la
+	 * registrazione invece di aggiungerne una seconda. Togliendo la guardia,
+	 * questa prova resterebbe verde. La prima stesura sosteneva il contrario, ed
+	 * era falsa.
+	 *
+	 * Le ragioni vere della guardia sono altre e stanno nel codice: `$avviato` e'
+	 * la condizione che la registrazione di una sezione legge per rifiutarsi a
+	 * motore spento, e la deduplicazione di WordPress non varrebbe piu' se uno di
+	 * questi agganci diventasse una chiusura.
+	 *
+	 * L'ultima parte della prova serve a mostrare che il conteggio sa vedere un
+	 * doppione: senza, l'asserzione precedente sarebbe vera per costruzione.
+	 */
+	public function test_c98_agganci_registrati_una_volta_sola() {
 		$this->assertTrue( Conformita_Core_Filtro_Scadenza::avviato() );
 
-		$prima_azione = count( $GLOBALS['wp_filter']['pre_get_posts']->callbacks[10] );
-		$prima_filtro = count( $GLOBALS['wp_filter']['the_posts']->callbacks[10] );
+		$attesi = array(
+			'pre_get_posts'                => 1,
+			'the_posts'                    => 1,
+			'wp_sitemaps_posts_query_args' => 1,
+		);
+
+		$this->assertSame( $attesi, $this->agganci_del_motore(), 'Tutti e tre gli agganci del motore devono risultare registrati una volta sola.' );
 
 		Conformita_Core_Filtro_Scadenza::avvia();
 		Conformita_Core_Filtro_Scadenza::avvia();
 
 		$this->assertTrue( Conformita_Core_Filtro_Scadenza::avviato() );
-		$this->assertSame( $prima_azione, count( $GLOBALS['wp_filter']['pre_get_posts']->callbacks[10] ), 'Nessun aggancio aggiunto due volte su pre_get_posts.' );
-		$this->assertSame( $prima_filtro, count( $GLOBALS['wp_filter']['the_posts']->callbacks[10] ), 'Nessun aggancio aggiunto due volte su the_posts.' );
+		$this->assertSame( $attesi, $this->agganci_del_motore(), 'Dopo altri due avvii lo stato degli agganci non cambia.' );
+
+		add_filter( 'the_posts', array( 'Conformita_Core_Filtro_Scadenza', 'filtra_risultati' ), 11, 2 );
+
+		$this->assertSame(
+			2,
+			$this->agganci_del_motore()['the_posts'],
+			'Il conteggio sa vedere un doppione aggiunto a una priorita\' diversa: e\' la prova che l\'asserzione precedente non e\' vera per costruzione.'
+		);
+
+		remove_filter( 'the_posts', array( 'Conformita_Core_Filtro_Scadenza', 'filtra_risultati' ), 11 );
+
+		$this->assertSame( $attesi, $this->agganci_del_motore(), 'Tolto il doppione si torna allo stato di partenza.' );
+	}
+
+	/**
+	 * C-104: una clausola di terzi sulla stessa chiave non fa credere a core di
+	 * aver gia' aggiunto la propria.
+	 *
+	 * Il percorso si collauda con `fields => 'ids'` di proposito: e' uno dei due
+	 * casi in cui il secondo strato non gira, quindi se il primo strato si
+	 * tirasse indietro il contenuto scaduto uscirebbe davvero. Con
+	 * un'interrogazione normale il secondo strato mascherebbe il difetto e la
+	 * prova sarebbe verde con il codice sbagliato.
+	 */
+	public function test_c104_clausola_di_terzi_sulla_stessa_chiave() {
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30' );
+		$scaduto = $this->contenuto( '2026-09-08' );
+
+		$interrogazione = new WP_Query(
+			array(
+				'post_type'      => self::TIPO,
+				'posts_per_page' => -1,
+				'fields'         => 'ids',
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- E' proprio la meta_query di terzi che la riga C-104 collauda.
+				'meta_query'     => array(
+					array(
+						'key'     => Conformita_Core_Scadenza::chiave(),
+						'compare' => 'EXISTS',
+					),
+				),
+			)
+		);
+
+		$trovati = $interrogazione->posts;
+
+		$this->assertContains( $valido, $trovati, 'La condizione di terzi deve continuare a funzionare.' );
+		$this->assertNotContains(
+			$scaduto,
+			$trovati,
+			'La clausola di core si riconosce per intero e non dalla sola chiave: qui va aggiunta, altrimenti lo scaduto esce.'
+		);
 	}
 }

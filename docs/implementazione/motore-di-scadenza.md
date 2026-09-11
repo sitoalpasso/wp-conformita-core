@@ -382,6 +382,7 @@ Ognuna nasce da un caso che la scheda non aveva previsto e che il codice ha reso
 | C-101 | La scheda dava per scontata l'esenzione dell'amministrazione al punto 4 senza collaudarla. Un contenuto con la data rotta deve restare correggibile, ed è un comportamento che va verificato come gli altri |
 | C-102 | `WP_Query` con `fields => 'ids'` restituisce le colonne e torna prima di applicare `the_posts`: è lo stesso limite di C-93 su un percorso diverso, e la scheda non lo nominava |
 | C-103 | Una `meta_query` di terzi dichiarata in `OR`. Se la clausola di core si accodasse all'elenco esistente invece di annidarlo come sottogruppo, diventerebbe un'alternativa alle altre condizioni e il filtro sarebbe aggirabile senza volerlo. È il difetto che questo blocco ha evitato per costruzione, e la riga esiste perché resti evitato |
+| C-104 | Una clausola di terzi **sulla stessa chiave** della scadenza. Nata da una revisione: il riconoscimento di "clausola già presente" guardava la sola chiave del metadato, quindi una condizione di terzi su quella chiave veniva scambiata per la nostra e core non aggiungeva il confronto con la data. Si collauda con `fields => 'ids'`, dove il secondo strato non gira e il difetto diventa visibile |
 
 Il numero **C-96 resta impegnato** dalla riga di questa scheda sulla scansione delle
 anomalie: per questo la verifica sulla `meta_query` in OR ha preso C-103 e non il primo
@@ -457,7 +458,8 @@ idempotenza della scrittura. Righe C-23, C-24, C-87, C-88, C-99, C-100.
 
 **Fatto: il filtro sui percorsi che passano da `WP_Query`.** Elenchi, ricerca, feed, mappa
 per i motori, contenuto singolo, interrogazioni di terzi. Righe C-10, C-11, C-12, C-13,
-C-14, C-21, C-22, più C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102, C-103.
+C-14, C-21, C-22, più C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102, C-103,
+C-104.
 
 Il filtro è a **due strati**, e la ragione è che nessuno dei due basta da solo. Il primo
 aggiunge una condizione sui metadati all'interrogazione: è veloce e tiene coerente
@@ -470,6 +472,30 @@ gestiti**. È la precauzione più importante del blocco: aggiungere quella condi
 un'interrogazione mista cancellerebbe dal sito tutti gli articoli, che quel metadato non ce
 l'hanno. Sulle interrogazioni miste lavora il secondo strato, che guarda un contenuto alla
 volta.
+
+**Due correzioni entrate dopo la prima revisione del filtro.**
+
+La prima era una falla vera. Il riconoscimento di "clausola già presente", che esiste solo
+perché la mappa per i motori passa da due agganci, si accontentava di trovare la chiave del
+metadato. Un componente di terzi che interroga la stessa chiave, per esempio con `EXISTS`
+per elencare i contenuti che hanno una data di fine, veniva scambiato per la clausola di
+core, e core credeva di aver già aggiunto il confronto con la data senza averlo fatto. Nelle
+interrogazioni normali il secondo strato copriva il difetto; con `fields => 'ids'` o con
+`suppress_filters` il contenuto scaduto sarebbe uscito davvero, il che contraddiceva C-21 e
+allargava di molto il limite dichiarato da C-102. Adesso si riconosce solo la clausola
+intera: chiave, valore corrente, `>=`, `CHAR`, e lo stesso numero di voci. Riga C-104.
+
+La seconda era una motivazione falsa, non un difetto del codice. La prova C-98 sosteneva che
+agganciare due volte lo stesso metodo statico avrebbe fatto girare il filtro due volte:
+WordPress identifica ogni aggancio con una chiave univoca, e per un metodo statico quella
+chiave è deterministica, quindi la seconda registrazione sostituisce la prima invece di
+aggiungersi. Togliendo la guardia da `avvia()`, quella prova sarebbe rimasta verde. La prova
+è stata riscritta come verifica dello stato osservabile degli agganci, adesso conta anche
+`wp_sitemaps_posts_query_args`, che prima era escluso, e contiene la dimostrazione che il
+conteggio sa vedere un doppione. Le ragioni vere della guardia sono scritte accanto ad
+`avvia()`: `$avviato` è la condizione che la registrazione della sezione legge per rifiutarsi
+a motore spento, e la deduplicazione di WordPress non varrebbe più se uno di questi agganci
+diventasse una chiusura.
 
 **Da fare: i percorsi che non passano da `WP_Query`.** Interfaccia informatica sul singolo
 identificativo (C-16), anteprime incorporate (C-17), XML-RPC (C-18), pagina dell'allegato

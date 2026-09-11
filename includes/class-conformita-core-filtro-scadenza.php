@@ -56,7 +56,7 @@
  * impreciso a un contenuto scaduto visibile.
  *
  * Righe di collaudo C-10, C-11, C-12, C-13, C-14, C-21, C-22, C-89, C-90,
- * C-92, C-93, C-97, C-98, C-101, C-102 e C-103.
+ * C-92, C-93, C-97, C-98, C-101, C-102, C-103 e C-104.
  *
  * @package Conformita_Core
  */
@@ -82,8 +82,25 @@ final class Conformita_Core_Filtro_Scadenza {
 	 *           motore è infrastruttura di core e si accende al caricamento del
 	 *           file di core: accenderlo non è responsabilità di chi lo usa.
 	 *
-	 * Idempotente: invocata due volte non aggancia niente due volte e non
-	 * produce errori. Riga C-98.
+	 * Idempotente. La guardia **non** serve a impedire che WordPress esegua due
+	 * volte lo stesso filtro: WordPress identifica ogni aggancio con una chiave
+	 * univoca, e per un metodo statico quella chiave è deterministica, quindi
+	 * riagganciare lo stesso metodo alla stessa priorità sostituisce la
+	 * registrazione invece di aggiungerne una seconda. Togliere la guardia
+	 * lascerebbe il conteggio degli agganci dov'è.
+	 *
+	 * La guardia serve per due ragioni vere. La prima è che `$avviato` è la
+	 * condizione che `Conformita_Core_Sezioni::registra()` legge per rifiutare
+	 * una sezione a motore spento, e quel rifiuto è l'unica cosa che impedisce
+	 * a una sezione di esistere con una politica di scadenza e nessuno ad
+	 * applicarla: senza la guardia quello stato non esisterebbe. La seconda è che
+	 * la deduplicazione di WordPress vale per i metodi statici e non per le
+	 * chiusure né per i metodi di un'istanza, che ogni volta producono una chiave
+	 * diversa: se un domani uno di questi agganci diventasse una chiusura, la
+	 * guardia è ciò che impedisce al filtro di girare due volte a ogni lettura.
+	 *
+	 * Riga C-98, che verifica lo stato osservabile degli agganci, non
+	 * l'indispensabilità della guardia.
 	 */
 	public static function avvia() {
 		if ( self::$avviato ) {
@@ -237,12 +254,27 @@ final class Conformita_Core_Filtro_Scadenza {
 	}
 
 	/**
-	 * La clausola è già presente in una dichiarazione di `meta_query`.
+	 * La clausola di core è già presente in una dichiarazione di `meta_query`.
 	 *
 	 * Serve perché la mappa per i motori di ricerca passa da due agganci: gli
 	 * argomenti dell'interrogazione e poi l'interrogazione stessa. Aggiungere la
 	 * clausola due volte non cambierebbe l'esito, ma lascerebbe una condizione
 	 * duplicata che rende illeggibile il debug.
+	 *
+	 * **Il riconoscimento è sulla clausola intera, non sulla chiave.** La prima
+	 * stesura si accontentava di trovare la chiave del metadato, e quella era una
+	 * falla: un componente di terzi che interroga la stessa chiave, per esempio
+	 * con `EXISTS` per elencare i contenuti che hanno una data di fine, sarebbe
+	 * stato scambiato per la clausola di core, e core avrebbe creduto di aver già
+	 * aggiunto il confronto con la data senza averlo fatto. Nelle interrogazioni
+	 * normali il secondo strato avrebbe coperto il difetto; con
+	 * `fields => 'ids'` o con `suppress_filters`, dove il secondo strato non
+	 * gira, il contenuto scaduto sarebbe uscito davvero. Riga di collaudo C-104.
+	 *
+	 * Il confronto pretende le stesse quattro voci con gli stessi valori, e anche
+	 * lo stesso numero di voci: una condizione di terzi che aggiungesse una
+	 * chiave in più non è la nostra, e trattarla come tale riaprirebbe la stessa
+	 * falla da un'altra porta.
 	 *
 	 * @param mixed $meta Dichiarazione di `meta_query`, a qualsiasi profondità.
 	 * @return bool
@@ -252,7 +284,7 @@ final class Conformita_Core_Filtro_Scadenza {
 			return false;
 		}
 
-		if ( isset( $meta['key'] ) && Conformita_Core_Scadenza::chiave() === $meta['key'] ) {
+		if ( self::e_clausola_di_core( $meta ) ) {
 			return true;
 		}
 
@@ -263,6 +295,28 @@ final class Conformita_Core_Filtro_Scadenza {
 		}
 
 		return false;
+	}
+
+	/**
+	 * La voce è esattamente la clausola che core aggiunge.
+	 *
+	 * @param array $voce Una voce di `meta_query`.
+	 * @return bool
+	 */
+	private static function e_clausola_di_core( array $voce ) {
+		$nostra = self::clausola();
+
+		if ( count( $voce ) !== count( $nostra ) ) {
+			return false;
+		}
+
+		foreach ( $nostra as $chiave => $valore ) {
+			if ( ! isset( $voce[ $chiave ] ) || $voce[ $chiave ] !== $valore ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
