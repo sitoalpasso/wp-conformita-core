@@ -113,6 +113,8 @@ final class Conformita_Core_Filtro_Scadenza {
 		add_filter( 'the_posts', array( __CLASS__, 'filtra_risultati' ), 10, 2 );
 		add_filter( 'wp_sitemaps_posts_query_args', array( __CLASS__, 'filtra_argomenti_mappa' ), 10, 2 );
 		add_filter( 'rest_request_before_callbacks', array( __CLASS__, 'filtra_richiesta_rest' ), 10, 3 );
+		add_filter( 'oembed_response_data', array( __CLASS__, 'filtra_anteprima_incorporata' ), 10, 2 );
+		add_filter( 'xmlrpc_prepare_post', array( __CLASS__, 'filtra_dato_xmlrpc' ), 10, 2 );
 	}
 
 	/**
@@ -520,21 +522,7 @@ final class Conformita_Core_Filtro_Scadenza {
 			return $risposta;
 		}
 
-		$contenuto = get_post( (int) $richiesta['id'] );
-
-		if ( ! $contenuto instanceof WP_Post ) {
-			return $risposta;
-		}
-
-		if ( ! Conformita_Core_Tipi::registrato( $contenuto->post_type ) ) {
-			return $risposta;
-		}
-
-		if ( 'publish' !== $contenuto->post_status ) {
-			return $risposta;
-		}
-
-		if ( ! Conformita_Core_Scadenza::scaduto( (int) $contenuto->ID ) ) {
+		if ( ! self::da_nascondere( (int) $richiesta['id'] ) ) {
 			return $risposta;
 		}
 
@@ -568,5 +556,94 @@ final class Conformita_Core_Filtro_Scadenza {
 		}
 
 		return $funzione[0] instanceof WP_REST_Posts_Controller && 'get_item' === $funzione[1];
+	}
+
+	/**
+	 * Il contenuto è uno di quelli che il filtro deve togliere di mezzo.
+	 *
+	 * Le quattro condizioni sono sempre le stesse e vanno sempre nello stesso
+	 * ordine: deve essere un contenuto vero, di un tipo che core governa,
+	 * pubblicato, e scaduto. Stanno in un posto solo perché una di esse
+	 * dimenticata in un aggancio è un percorso scoperto, e un percorso scoperto
+	 * non si vede rileggendo il codice: si vede quando qualcuno trova l'atto
+	 * dove non doveva esserci.
+	 *
+	 * **Accetta tre forme dello stesso contenuto** perché i percorsi di lettura
+	 * di WordPress non sono coerenti fra loro: la preparazione delle anteprime
+	 * incorporate passa l'oggetto, l'interfaccia di pubblicazione remota passa un
+	 * elenco di dati con l'identificativo dentro, e altrove si ha solo il numero.
+	 * Pretendere una sola forma qui significherebbe che un aggancio non fa niente
+	 * e nessuno se ne accorge, perché un filtro che non filtra non produce
+	 * nessun errore.
+	 *
+	 * @param mixed $contenuto Contenuto da valutare: oggetto, elenco di dati con
+	 *                         la chiave `ID`, oppure identificativo.
+	 * @return bool
+	 */
+	private static function da_nascondere( $contenuto ) {
+		if ( is_array( $contenuto ) ) {
+			$contenuto = isset( $contenuto['ID'] ) ? get_post( (int) $contenuto['ID'] ) : null;
+		} elseif ( is_numeric( $contenuto ) ) {
+			$contenuto = get_post( (int) $contenuto );
+		}
+
+		if ( ! $contenuto instanceof WP_Post ) {
+			return false;
+		}
+
+		if ( ! Conformita_Core_Tipi::registrato( $contenuto->post_type ) ) {
+			return false;
+		}
+
+		if ( 'publish' !== $contenuto->post_status ) {
+			return false;
+		}
+
+		return Conformita_Core_Scadenza::scaduto( (int) $contenuto->ID );
+	}
+
+	/**
+	 * Le anteprime incorporate non descrivono un contenuto scaduto.
+	 *
+	 * È il percorso con cui un altro sito chiede a questo una scheda del
+	 * contenuto da mostrare dentro una propria pagina: titolo, autore, immagine.
+	 * Senza questo aggancio l'anteprima di un atto non più pubblicabile
+	 * continuerebbe a essere servita a chiunque la chieda, e finirebbe
+	 * memorizzata sul sito che la incorpora, cioè fuori dal nostro controllo.
+	 *
+	 * L'insieme vuoto è il modo in cui WordPress riconosce "niente da mostrare":
+	 * chi ha chiesto riceve "non trovato". Riga C-17.
+	 *
+	 * @internal Aggancio di `oembed_response_data`.
+	 *
+	 * @param mixed $dati      Dati preparati da WordPress.
+	 * @param mixed $contenuto Contenuto a cui si riferiscono.
+	 * @return mixed I dati invariati, oppure l'insieme vuoto.
+	 */
+	public static function filtra_anteprima_incorporata( $dati, $contenuto = null ) {
+		return self::da_nascondere( $contenuto ) ? array() : $dati;
+	}
+
+	/**
+	 * L'interfaccia di pubblicazione remota non restituisce un contenuto scaduto.
+	 *
+	 * **Qui si è scelta fra due letture, e la riga C-18 lo dice.** Le chiamate
+	 * che leggono un contenuto da questa interfaccia sono autenticate e
+	 * pretendono il permesso di modifica, quindi si potrebbe sostenere che
+	 * meritino l'esenzione dell'amministrazione, dove il contenuto scaduto resta
+	 * visibile perché resti correggibile. Si è scelta la lettura prudente, perché
+	 * il costo delle due direzioni non è simmetrico: chi deve correggere una data
+	 * va nell'amministrazione, che è dove andrebbe comunque, mentre non filtrando
+	 * un atto scaduto resterebbe leggibile da una porta remota che quasi nessuno
+	 * presidia.
+	 *
+	 * @internal Aggancio di `xmlrpc_prepare_post`.
+	 *
+	 * @param mixed $dati      Dati preparati da WordPress.
+	 * @param mixed $contenuto Contenuto a cui si riferiscono.
+	 * @return mixed I dati invariati, oppure l'insieme vuoto.
+	 */
+	public static function filtra_dato_xmlrpc( $dati, $contenuto = null ) {
+		return self::da_nascondere( $contenuto ) ? array() : $dati;
 	}
 }

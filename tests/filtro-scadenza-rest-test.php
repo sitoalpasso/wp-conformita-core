@@ -1,7 +1,7 @@
 <?php
 /**
- * Il filtro di scadenza nell'interfaccia informatica pubblica: righe C-15, C-16
- * e C-105 del catalogo.
+ * Il filtro di scadenza nell'interfaccia informatica pubblica: righe C-15, C-16,
+ * C-17 e C-105 del catalogo.
  *
  * I due percorsi sono diversi per costruzione, e questa e' la ragione per cui
  * hanno due righe di collaudo. La **collezione** passa da un'interrogazione, e
@@ -49,6 +49,10 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 		$this->fuso_originale = get_option( 'timezone_string' );
 		update_option( 'timezone_string', 'Europe/Rome' );
 
+		// Le anteprime incorporate si chiedono per indirizzo, quindi il tipo
+		// deve avere un indirizzo leggibile.
+		$this->set_permalink_structure( '/%postname%/' );
+
 		$this->assertTrue(
 			conformita_core_registra_sezione(
 				self::SEZIONE,
@@ -75,6 +79,8 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 
 		// Le rotte si costruiscono a tipo gia' registrato: un server preparato
 		// prima non conoscerebbe questo tipo.
+		flush_rewrite_rules();
+
 		$GLOBALS['wp_rest_server'] = new WP_REST_Server();
 		do_action( 'rest_api_init', $GLOBALS['wp_rest_server'] );
 	}
@@ -84,6 +90,7 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 	 */
 	public function tear_down() {
 		$GLOBALS['wp_rest_server'] = null;
+		$this->set_permalink_structure( '' );
 		update_option( 'timezone_string', $this->fuso_originale );
 		Conformita_Core_Scadenza::azzera_orologio();
 		Conformita_Core_Filtro_Scadenza::avvia();
@@ -225,6 +232,29 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 			$this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto )->get_status(),
 			'I permessi di gestione non aprono una superficie pubblica.'
 		);
+	}
+
+	/**
+	 * C-17: l'anteprima incorporata di un contenuto scaduto non viene servita.
+	 *
+	 * E' il percorso con cui un altro sito chiede a questo una scheda del
+	 * contenuto da mostrare dentro una propria pagina. Conta piu' di quanto
+	 * sembri: l'anteprima finisce memorizzata sul sito che la incorpora, cioe'
+	 * fuori dal nostro controllo, e li' resterebbe anche dopo la scadenza.
+	 */
+	public function test_c17_anteprima_incorporata() {
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30' );
+		$scaduto = $this->contenuto( '2026-09-08' );
+
+		$buona = $this->chiedi( '/oembed/1.0/embed?url=' . rawurlencode( get_permalink( $valido ) ) );
+
+		$this->assertSame( 200, $buona->get_status(), 'L\'anteprima del contenuto valido deve essere servita: senza questa asserzione un filtro che nega tutto passerebbe la prova.' );
+
+		$negata = $this->chiedi( '/oembed/1.0/embed?url=' . rawurlencode( get_permalink( $scaduto ) ) );
+
+		$this->assertNotSame( 200, $negata->get_status(), 'L\'anteprima di un contenuto scaduto non deve essere servita.' );
 	}
 
 	/**

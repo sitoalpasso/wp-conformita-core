@@ -286,8 +286,8 @@ fatto.
 | Mappa per i motori di ricerca | `wp_sitemaps_posts_query_args` **confermato** | C-14 |
 | Interfaccia informatica, collezione | **nessun aggancio dedicato**: la collezione passa da `WP_Query`, quindi la coprono i due strati generali. `rest_{$post_type}_query`, che la scheda indicava, non serve | C-15 |
 | Interfaccia informatica, singolo | `rest_request_before_callbacks` **confermato**. L'alternativa `rest_prepare_{$post_type}` è stata **scartata in implementazione**: per un tipo consultabile dal web, WordPress applica quel filtro e poi chiama un metodo sull'oggetto restituito per aggiungere un'intestazione, quindi restituire lì un errore produrrebbe un errore fatale al posto di un 404; e lo stesso filtro prepara ogni elemento della collezione, quindi avrebbe richiesto di distinguere a mano il singolo dall'elenco. Il comportamento fissato dal test è "non trovato", non "vietato" e non "200 con i dati" | C-16, C-105 |
-| Anteprime incorporate | `oembed_response_data` | C-17 |
-| XML-RPC | `xmlrpc_prepare_post`, più il rifiuto della chiamata sul singolo. **Alternativa dichiarata**: disattivare XML-RPC per i tipi gestiti, documentandolo, come la riga C-18 consente | C-18 |
+| Anteprime incorporate | `oembed_response_data` **confermato** | C-17 |
+| XML-RPC | `xmlrpc_prepare_post` **confermato**, che copre sia la lettura del singolo sia quella degli elenchi perché WordPress prepara ogni contenuto di lì. L'alternativa di disattivare XML-RPC per i tipi gestiti è stata scartata: toglierebbe anche la scrittura, che non c'entra con la scadenza | C-18 |
 | Pagina dell'allegato | `pre_get_posts` sull'interrogazione dell'allegato, più controllo su `template_redirect` | C-19 |
 | Navigazione adiacente | `get_previous_post_where` e `get_next_post_where` | C-20 |
 | `WP_Query` sui tipi registrati, filtri attivi | `pre_get_posts` | C-21 |

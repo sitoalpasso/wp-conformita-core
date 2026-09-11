@@ -694,6 +694,8 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 			'the_posts'                     => 'filtra_risultati',
 			'wp_sitemaps_posts_query_args'  => 'filtra_argomenti_mappa',
 			'rest_request_before_callbacks' => 'filtra_richiesta_rest',
+			'oembed_response_data'          => 'filtra_anteprima_incorporata',
+			'xmlrpc_prepare_post'           => 'filtra_dato_xmlrpc',
 		);
 
 		$conteggio = array();
@@ -745,6 +747,8 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 			'the_posts'                     => 1,
 			'wp_sitemaps_posts_query_args'  => 1,
 			'rest_request_before_callbacks' => 1,
+			'oembed_response_data'          => 1,
+			'xmlrpc_prepare_post'           => 1,
 		);
 
 		$this->assertSame( $attesi, $this->agganci_del_motore(), 'Ogni aggancio del motore deve risultare registrato una volta sola.' );
