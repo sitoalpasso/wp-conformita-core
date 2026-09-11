@@ -288,8 +288,8 @@ fatto.
 | Interfaccia informatica, singolo | `rest_request_before_callbacks` **confermato**. L'alternativa `rest_prepare_{$post_type}` è stata **scartata in implementazione**: per un tipo consultabile dal web, WordPress applica quel filtro e poi chiama un metodo sull'oggetto restituito per aggiungere un'intestazione, quindi restituire lì un errore produrrebbe un errore fatale al posto di un 404; e lo stesso filtro prepara ogni elemento della collezione, quindi avrebbe richiesto di distinguere a mano il singolo dall'elenco. Il comportamento fissato dal test è "non trovato", non "vietato" e non "200 con i dati" | C-16, C-105 |
 | Anteprime incorporate | `oembed_response_data` **confermato** | C-17 |
 | XML-RPC | `xmlrpc_prepare_post` **confermato**, che copre sia la lettura del singolo sia quella degli elenchi perché WordPress prepara ogni contenuto di lì. L'alternativa di disattivare XML-RPC per i tipi gestiti è stata scartata: toglierebbe anche la scrittura, che non c'entra con la scadenza | C-18 |
-| Pagina dell'allegato | `pre_get_posts` sull'interrogazione dell'allegato, più controllo su `template_redirect` | C-19 |
-| Navigazione adiacente | `get_previous_post_where` e `get_next_post_where` | C-20 |
+| Pagina dell'allegato | **nessuno dei due indicati**: basta il secondo strato, che guarda la scadenza del contenuto padre e toglie l'allegato dai risultati. `template_redirect` è stato scartato perché non viene emesso quando la richiesta non arriva a disegnare una pagina, quindi il controllo sarebbe mancato proprio dove serve | C-19 |
+| Navigazione adiacente | `get_previous_post_where` e `get_next_post_where` **confermati**. Limite dichiarato: qui agisce il solo confronto sulla banca dati, perché non c'è niente su cui agganciare il secondo strato | C-20 |
 | `WP_Query` sui tipi registrati, filtri attivi | `pre_get_posts` | C-21 |
 
 **I limiti, dichiarati perché la prima stesura prometteva troppo.**
@@ -497,10 +497,12 @@ conteggio sa vedere un doppione. Le ragioni vere della guardia sono scritte acca
 a motore spento, e la deduplicazione di WordPress non varrebbe più se uno di questi agganci
 diventasse una chiusura.
 
-**Da fare: i percorsi che non passano da `WP_Query`.** Interfaccia informatica sul singolo
-identificativo (C-16), anteprime incorporate (C-17), XML-RPC (C-18), pagina dell'allegato
-(C-19), navigazione adiacente (C-20). Più C-15, che passa da `WP_Query` ma ha un aggancio
-suo. E le cinque prove di non vacuità.
+**Fatto: i percorsi che non passano da `WP_Query`.** Interfaccia informatica sul singolo
+identificativo (C-16), anteprime incorporate (C-17), pubblicazione remota (C-18), pagina
+dell'allegato (C-19), navigazione adiacente (C-20). Più C-15 e C-105, che passano da
+`WP_Query` e non hanno avuto bisogno di nessun aggancio.
+
+**Da fare: le cinque prove di non vacuità.**
 
 **Da fare, e non è di questo blocco:** l'azione `conformita_core_pronto` del punto 5. Il
 motore si accende già al caricamento di core, che è la metà che riguarda la conformità; la

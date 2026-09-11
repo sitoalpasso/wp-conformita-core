@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sui percorsi di lettura: righe C-10, C-11, C-12, C-13,
  * C-14, C-21, C-22, C-89, C-90, C-92, C-93, C-94, C-97, C-98, C-101, C-102,
- * C-103 e C-104.
+ * C-103, C-104, C-19 e C-20.
  *
  * Il file collauda **dove** la scadenza viene applicata. Quando un contenuto sia
  * scaduto lo stabilisce il contratto del dato, collaudato in `scadenza-test.php`.
@@ -164,6 +164,24 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 		}
 
 		return $utente_id;
+	}
+
+	/**
+	 * Un allegato appeso a un contenuto.
+	 *
+	 * @param int $padre Identificativo del contenuto padre.
+	 * @return int Identificativo dell'allegato.
+	 */
+	private function allegato_di( $padre ) {
+		return self::factory()->post->create(
+			array(
+				'post_type'      => 'attachment',
+				'post_status'    => 'inherit',
+				'post_parent'    => $padre,
+				'post_title'     => 'Allegato di prova',
+				'post_mime_type' => 'application/pdf',
+			)
+		);
 	}
 
 	/**
@@ -625,6 +643,122 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-19: la pagina dell'allegato di un contenuto scaduto non risponde.
+	 *
+	 * La scadenza si legge sul contenuto padre: l'allegato non ha una data di
+	 * fine propria, e dargliene una sarebbe un secondo dato da tenere allineato
+	 * al primo, cioe' un secondo posto dove sbagliare.
+	 *
+	 * Questa prova riguarda la pagina che WordPress genera per l'allegato, non il
+	 * file: servire il file da un indirizzo protetto e' l'unita' della consegna
+	 * allegati, e finche' non c'e' il file resta scaricabile dal suo indirizzo
+	 * diretto. E' un limite noto, non una dimenticanza.
+	 */
+	public function test_c19_pagina_dell_allegato() {
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30' );
+		$scaduto = $this->contenuto( '2026-09-08' );
+
+		$allegato_buono = $this->allegato_di( $valido );
+		$allegato_morto = $this->allegato_di( $scaduto );
+
+		$this->go_to( '/?attachment_id=' . $allegato_buono );
+
+		$this->assertTrue( is_attachment(), 'La pagina dell\'allegato di un contenuto valido deve rispondere: senza questa asserzione un filtro che nega tutto passerebbe la prova.' );
+		$this->assertFalse( is_404() );
+		$this->assertSame( $allegato_buono, get_queried_object_id() );
+
+		$this->go_to( '/?attachment_id=' . $allegato_morto );
+
+		$this->assertTrue( is_404(), 'La pagina dell\'allegato di un contenuto scaduto non deve rispondere.' );
+	}
+
+	/**
+	 * C-20: il contenuto scaduto non e' mai il vicino di un altro.
+	 *
+	 * I collegamenti al precedente e al successivo li cerca WordPress con
+	 * un'interrogazione propria, che non passa ne' dal primo strato ne' dal
+	 * secondo: senza un aggancio dedicato un atto scaduto resterebbe
+	 * raggiungibile dai suoi vicini, che e' il modo meno vistoso di restare
+	 * pubblicato.
+	 */
+	public function test_c20_navigazione_adiacente() {
+		$this->oggi_e( '2026-09-09' );
+
+		$vecchio = $this->contenuto( '2026-09-30', self::TIPO, 'Atto vecchio' );
+		$mezzo   = $this->contenuto( '2026-09-08', self::TIPO, 'Atto di mezzo' );
+		$nuovo   = $this->contenuto( '2026-09-30', self::TIPO, 'Atto nuovo' );
+
+		wp_update_post(
+			array(
+				'ID'        => $vecchio,
+				'post_date' => '2026-09-01 10:00:00',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'        => $mezzo,
+				'post_date' => '2026-09-02 10:00:00',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'        => $nuovo,
+				'post_date' => '2026-09-03 10:00:00',
+			)
+		);
+
+		$GLOBALS['post'] = get_post( $nuovo );
+
+		$precedente = get_adjacent_post( false, '', true );
+
+		$this->assertInstanceOf( WP_Post::class, $precedente, 'Un vicino deve esserci: senza questa asserzione un filtro che cancella tutti i vicini passerebbe la prova.' );
+		$this->assertSame( $vecchio, $precedente->ID, 'Il vicino all\'indietro salta lo scaduto e arriva a quello buono.' );
+
+		$GLOBALS['post'] = get_post( $vecchio );
+
+		$successivo = get_adjacent_post( false, '', false );
+
+		$this->assertInstanceOf( WP_Post::class, $successivo );
+		$this->assertSame( $nuovo, $successivo->ID, 'Il vicino in avanti salta lo scaduto.' );
+
+		unset( $GLOBALS['post'] );
+	}
+
+	/**
+	 * C-20: sui tipi non gestiti la navigazione adiacente resta intatta.
+	 *
+	 * La condizione sulla scadenza esclude chi non ha il metadato: aggiungerla
+	 * agli articoli normali cancellerebbe tutti i loro vicini.
+	 */
+	public function test_c20_tipi_non_gestiti_intatti() {
+		$this->oggi_e( '2026-09-09' );
+
+		$primo   = self::factory()->post->create(
+			array(
+				'post_status' => 'publish',
+				'post_date'   => '2026-09-01 10:00:00',
+			)
+		);
+		$secondo = self::factory()->post->create(
+			array(
+				'post_status' => 'publish',
+				'post_date'   => '2026-09-02 10:00:00',
+			)
+		);
+
+		$GLOBALS['post'] = get_post( $secondo );
+
+		$precedente = get_adjacent_post( false, '', true );
+
+		$this->assertInstanceOf( WP_Post::class, $precedente, 'Un articolo normale deve continuare ad avere i suoi vicini.' );
+		$this->assertSame( $primo, $precedente->ID );
+
+		unset( $GLOBALS['post'] );
+	}
+
+	/**
 	 * C-94: a motore spento la registrazione di una sezione fallisce.
 	 */
 	public function test_c94_sezione_a_motore_spento() {
@@ -696,6 +830,8 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 			'rest_request_before_callbacks' => 'filtra_richiesta_rest',
 			'oembed_response_data'          => 'filtra_anteprima_incorporata',
 			'xmlrpc_prepare_post'           => 'filtra_dato_xmlrpc',
+			'get_previous_post_where'       => 'filtra_vicino',
+			'get_next_post_where'           => 'filtra_vicino',
 		);
 
 		$conteggio = array();
@@ -749,6 +885,8 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 			'rest_request_before_callbacks' => 1,
 			'oembed_response_data'          => 1,
 			'xmlrpc_prepare_post'           => 1,
+			'get_previous_post_where'       => 1,
+			'get_next_post_where'           => 1,
 		);
 
 		$this->assertSame( $attesi, $this->agganci_del_motore(), 'Ogni aggancio del motore deve risultare registrato una volta sola.' );

@@ -115,6 +115,8 @@ final class Conformita_Core_Filtro_Scadenza {
 		add_filter( 'rest_request_before_callbacks', array( __CLASS__, 'filtra_richiesta_rest' ), 10, 3 );
 		add_filter( 'oembed_response_data', array( __CLASS__, 'filtra_anteprima_incorporata' ), 10, 2 );
 		add_filter( 'xmlrpc_prepare_post', array( __CLASS__, 'filtra_dato_xmlrpc' ), 10, 2 );
+		add_filter( 'get_previous_post_where', array( __CLASS__, 'filtra_vicino' ), 10, 5 );
+		add_filter( 'get_next_post_where', array( __CLASS__, 'filtra_vicino' ), 10, 5 );
 	}
 
 	/**
@@ -385,6 +387,15 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * usa la stessa funzione che decide la scadenza ovunque, quindi non può
 	 * essere in disaccordo con il resto del componente.
 	 *
+	 * **Gli allegati li guarda sul padre.** Un allegato non ha una data di fine
+	 * propria, e dargliene una sarebbe un secondo dato da tenere allineato al
+	 * primo, cioè un secondo posto dove sbagliare. Togliendolo dai risultati
+	 * sparisce anche la pagina che WordPress genera per lui, che altrimenti
+	 * continuerebbe a mostrare titolo e descrizione di un allegato a un atto non
+	 * più pubblicabile. Riguarda la pagina e non il file: servire il file da un
+	 * indirizzo protetto è l'unità della consegna allegati, e finché non c'è, il
+	 * file resta scaricabile dal suo indirizzo diretto. Riga C-19.
+	 *
 	 * @internal Aggancio di `the_posts`.
 	 *
 	 * @param mixed $contenuti      Contenuti restituiti dall'interrogazione.
@@ -407,6 +418,14 @@ final class Conformita_Core_Filtro_Scadenza {
 		foreach ( $contenuti as $contenuto ) {
 			if ( ! is_object( $contenuto ) || ! isset( $contenuto->post_type, $contenuto->post_status, $contenuto->ID ) ) {
 				$rimasti[] = $contenuto;
+				continue;
+			}
+
+			if ( 'attachment' === $contenuto->post_type ) {
+				if ( ! self::da_nascondere( (int) $contenuto->post_parent ) ) {
+					$rimasti[] = $contenuto;
+				}
+
 				continue;
 			}
 
@@ -645,5 +664,52 @@ final class Conformita_Core_Filtro_Scadenza {
 	 */
 	public static function filtra_dato_xmlrpc( $dati, $contenuto = null ) {
 		return self::da_nascondere( $contenuto ) ? array() : $dati;
+	}
+
+	/**
+	 * Il contenuto scaduto non è mai il vicino di un altro.
+	 *
+	 * I collegamenti al contenuto precedente e al successivo li cerca WordPress
+	 * con un'interrogazione propria, che non passa né da `pre_get_posts` né dal
+	 * ricontrollo per contenuto: senza questo aggancio un atto scaduto resterebbe
+	 * raggiungibile dai suoi vicini, che è il modo meno vistoso di restare
+	 * pubblicato.
+	 *
+	 * **Limite dichiarato, lo stesso delle righe C-93 e C-102.** Qui agisce solo
+	 * il confronto sulla banca dati, quindi un valore corrotto che ordina alto
+	 * resterebbe raggiungibile come vicino. Il secondo strato non c'è perché non
+	 * c'è niente su cui agganciarlo.
+	 *
+	 * La condizione si aggiunge in coda alla condizione già costruita da
+	 * WordPress, e vale solo per i tipi che core governa: su un articolo normale
+	 * escluderebbe tutto, perché il metadato non ce l'ha. Riga C-20.
+	 *
+	 * @internal Agganci di `get_previous_post_where` e `get_next_post_where`.
+	 *
+	 * @param mixed $condizione       Condizione costruita da WordPress.
+	 * @param mixed $stesso_termine   Non usato.
+	 * @param mixed $termini_esclusi  Non usato.
+	 * @param mixed $tassonomia       Non usato.
+	 * @param mixed $contenuto        Contenuto di partenza.
+	 * @return mixed La condizione, con l'aggiunta sulla scadenza dove serve.
+	 */
+	public static function filtra_vicino( $condizione, $stesso_termine = null, $termini_esclusi = null, $tassonomia = null, $contenuto = null ) {
+		unset( $stesso_termine, $termini_esclusi, $tassonomia );
+
+		if ( ! is_string( $condizione ) || ! $contenuto instanceof WP_Post ) {
+			return $condizione;
+		}
+
+		if ( ! Conformita_Core_Tipi::registrato( $contenuto->post_type ) ) {
+			return $condizione;
+		}
+
+		global $wpdb;
+
+		return $condizione . $wpdb->prepare(
+			" AND p.ID IN ( SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_value >= %s )",
+			Conformita_Core_Scadenza::chiave(),
+			self::oggi()
+		);
 	}
 }
