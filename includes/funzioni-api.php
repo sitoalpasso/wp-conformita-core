@@ -155,6 +155,91 @@ if ( ! function_exists( 'conformita_core_tipi_registrati' ) ) {
 	}
 }
 
+if ( ! function_exists( 'conformita_core_chiave_fine_pubblicazione' ) ) {
+	/**
+	 * La chiave del metadato che contiene la fine della pubblicazione.
+	 *
+	 * È una sola per tutti i tipi e non è configurabile dal componente: il
+	 * filtro di lettura deve poterla usare senza chiedere permesso a nessuno.
+	 *
+	 * @return string
+	 */
+	function conformita_core_chiave_fine_pubblicazione() {
+		return Conformita_Core_Scadenza::chiave();
+	}
+}
+
+if ( ! function_exists( 'conformita_core_valida_fine_pubblicazione' ) ) {
+	/**
+	 * Il valore è una data valida per la fine della pubblicazione.
+	 *
+	 * @param mixed $valore Valore da validare.
+	 * @return true|WP_Error
+	 */
+	function conformita_core_valida_fine_pubblicazione( $valore ) {
+		return Conformita_Core_Scadenza::valida( $valore );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_imposta_fine_pubblicazione' ) ) {
+	/**
+	 * Scrive la fine della pubblicazione su un contenuto di tipo gestito.
+	 *
+	 * Il componente non scrive il metadato per conto proprio: se lo facesse, la
+	 * validazione sarebbe facoltativa. Idempotente: impostare due volte la
+	 * stessa data non è un errore.
+	 *
+	 * @param int    $post_id Identificativo del contenuto.
+	 * @param string $data    Data di fine, formato AAAA-MM-GG.
+	 * @return true|WP_Error
+	 */
+	function conformita_core_imposta_fine_pubblicazione( $post_id, $data ) {
+		return Conformita_Core_Scadenza::imposta( $post_id, $data );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_fine_pubblicazione' ) ) {
+	/**
+	 * La fine della pubblicazione registrata su un contenuto.
+	 *
+	 * @param int $post_id Identificativo del contenuto.
+	 * @return string|WP_Error La data, stringa vuota se assente.
+	 */
+	function conformita_core_fine_pubblicazione( $post_id ) {
+		return Conformita_Core_Scadenza::fine( $post_id );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_istante_scadenza' ) ) {
+	/**
+	 * L'istante in cui il contenuto smette di essere pubblicabile.
+	 *
+	 * Mezzanotte del giorno successivo alla data di fine, nel fuso del sito: la
+	 * data di fine è inclusiva.
+	 *
+	 * @param int $post_id Identificativo del contenuto.
+	 * @return DateTimeImmutable|WP_Error
+	 */
+	function conformita_core_istante_scadenza( $post_id ) {
+		return Conformita_Core_Scadenza::istante( $post_id );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_scaduto' ) ) {
+	/**
+	 * Il contenuto è scaduto.
+	 *
+	 * Non restituisce mai un errore: è chiamata nel percorso di lettura. Data
+	 * assente, valore corrotto o tipo non gestito danno tutti scaduto.
+	 *
+	 * @param int $post_id Identificativo del contenuto.
+	 * @return bool
+	 */
+	function conformita_core_scaduto( $post_id ) {
+		return Conformita_Core_Scadenza::scaduto( $post_id );
+	}
+}
+
 if ( ! function_exists( 'conformita_core_versione_api' ) ) {
 	/**
 	 * Versione dell'API esposta da core.

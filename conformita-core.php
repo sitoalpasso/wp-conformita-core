@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.1.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.2.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -42,5 +42,18 @@ defined( 'CONFORMITA_CORE_PERCORSO' ) || define( 'CONFORMITA_CORE_PERCORSO', plu
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-politica.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-sezioni.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-tipi.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-scadenza.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-filtro-scadenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-dipendenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/funzioni-api.php';
+
+/*
+ * Il motore di scadenza si accende qui, al caricamento del file di core, e non
+ * su un aggancio successivo. Aggiungere un filtro non richiede che esista
+ * nulla, quindi l'accensione non dipende dall'ordine di caricamento dei plugin
+ * ne dall'ordine alfabetico delle cartelle: un meccanismo di conformita' che
+ * parte solo se i plugin si caricano nell'ordine giusto non e' un meccanismo di
+ * conformita'. Accendere il motore non e' responsabilita' del componente che lo
+ * usa, e infatti nessuna funzione pubblica lo espone.
+ */
+Conformita_Core_Filtro_Scadenza::avvia();

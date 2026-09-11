@@ -1,6 +1,6 @@
 <?php
 /**
- * Registro delle sezioni, righe C-03, C-04, C-06, C-07, C-08 del catalogo.
+ * Registro delle sezioni, righe C-03, C-04, C-06, C-07, C-08 e C-95 del catalogo.
  *
  * La riga che conta di più è C-04: due componenti con politiche di
  * indicizzazione opposte stanno nello stesso sito, e nessuno dei due deve poter
@@ -53,12 +53,12 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 	 * politiche si rileggono dall'API interna.
 	 */
 	public function test_c03_registrazione_con_entrambe_le_politiche() {
-		$esito = conformita_core_registra_sezione( 'sezione-chiusa', $this->politica_chiusa() );
+		$esito = conformita_core_registra_sezione( 'sezione_chiusa', $this->politica_chiusa() );
 
 		$this->assertTrue( $esito, 'La registrazione completa deve riuscire.' );
-		$this->assertTrue( conformita_core_sezione_registrata( 'sezione-chiusa' ) );
+		$this->assertTrue( conformita_core_sezione_registrata( 'sezione_chiusa' ) );
 
-		$politica = conformita_core_politica_sezione( 'sezione-chiusa' );
+		$politica = conformita_core_politica_sezione( 'sezione_chiusa' );
 
 		$this->assertInstanceOf( Conformita_Core_Politica::class, $politica );
 		$this->assertSame( Conformita_Core_Politica::INDICIZZAZIONE_VIETATA, $politica->indicizzazione() );
@@ -70,11 +70,11 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 	 * C-04: due sezioni con politiche di indicizzazione opposte convivono.
 	 */
 	public function test_c04_due_sezioni_con_politiche_opposte() {
-		$this->assertTrue( conformita_core_registra_sezione( 'sezione-chiusa', $this->politica_chiusa() ) );
-		$this->assertTrue( conformita_core_registra_sezione( 'sezione-aperta', $this->politica_aperta() ) );
+		$this->assertTrue( conformita_core_registra_sezione( 'sezione_chiusa', $this->politica_chiusa() ) );
+		$this->assertTrue( conformita_core_registra_sezione( 'sezione_aperta', $this->politica_aperta() ) );
 
-		$chiusa = conformita_core_politica_sezione( 'sezione-chiusa' );
-		$aperta = conformita_core_politica_sezione( 'sezione-aperta' );
+		$chiusa = conformita_core_politica_sezione( 'sezione_chiusa' );
+		$aperta = conformita_core_politica_sezione( 'sezione_aperta' );
 
 		$this->assertFalse( $chiusa->consente_indicizzazione(), 'La sezione chiusa vieta l\'indicizzazione.' );
 		$this->assertTrue( $aperta->consente_indicizzazione(), 'La sezione aperta la impone.' );
@@ -83,7 +83,7 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 		$this->assertSame( Conformita_Core_Politica::SCADENZA_ARCHIVIO, $aperta->scadenza() );
 
 		$this->assertSame(
-			array( 'sezione-chiusa', 'sezione-aperta' ),
+			array( 'sezione_chiusa', 'sezione_aperta' ),
 			conformita_core_sezioni_registrate()
 		);
 	}
@@ -103,8 +103,8 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 	 */
 	public function test_c04_nessuna_interferenza_fra_le_due_registrazioni( $prima, $dopo ) {
 		$politiche = array(
-			'sezione-chiusa' => $this->politica_chiusa(),
-			'sezione-aperta' => $this->politica_aperta(),
+			'sezione_chiusa' => $this->politica_chiusa(),
+			'sezione_aperta' => $this->politica_aperta(),
 		);
 
 		conformita_core_registra_sezione( $prima, $politiche[ $prima ] );
@@ -127,8 +127,8 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 	 */
 	public function ordini_di_registrazione() {
 		return array(
-			'chiusa poi aperta' => array( 'sezione-chiusa', 'sezione-aperta' ),
-			'aperta poi chiusa' => array( 'sezione-aperta', 'sezione-chiusa' ),
+			'chiusa poi aperta' => array( 'sezione_chiusa', 'sezione_aperta' ),
+			'aperta poi chiusa' => array( 'sezione_aperta', 'sezione_chiusa' ),
 		);
 	}
 
@@ -137,17 +137,17 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 	 * e la prima resta intatta.
 	 */
 	public function test_c06_identificativo_gia_registrato() {
-		$this->assertTrue( conformita_core_registra_sezione( 'sezione-chiusa', $this->politica_chiusa() ) );
+		$this->assertTrue( conformita_core_registra_sezione( 'sezione_chiusa', $this->politica_chiusa() ) );
 
-		$esito = conformita_core_registra_sezione( 'sezione-chiusa', $this->politica_aperta() );
+		$esito = conformita_core_registra_sezione( 'sezione_chiusa', $this->politica_aperta() );
 
 		$this->assertWPError( $esito, 'Nessuna sovrascrittura silenziosa.' );
 		$this->assertSame( 'conformita_core_sezione_duplicata', $esito->get_error_code() );
-		$this->assertStringContainsString( 'sezione-chiusa', $esito->get_error_message() );
+		$this->assertStringContainsString( 'sezione_chiusa', $esito->get_error_message() );
 
 		$this->assertSame(
 			$this->politica_chiusa(),
-			conformita_core_politica_sezione( 'sezione-chiusa' )->come_array(),
+			conformita_core_politica_sezione( 'sezione_chiusa' )->come_array(),
 			'La prima registrazione deve restare quella valida.'
 		);
 	}
@@ -191,5 +191,60 @@ class Conformita_Core_Sezioni_Test extends WP_UnitTestCase {
 			'stringa vuota' => array( '' ),
 			'soli spazi'    => array( '   ' ),
 		);
+	}
+
+	/**
+	 * C-95: identificativo fuori dall'insieme dei caratteri ammessi, rifiutato.
+	 *
+	 * L'insieme e' lo stesso degli identificativi di tipo: lettere minuscole,
+	 * cifre e trattino basso. E' una restrizione decisa prima del rilascio, non
+	 * la correzione di una collisione: senza normalizzazione `sezione-a` e
+	 * `sezione_a` darebbero due capability diverse, quindi non collidono. Il
+	 * vincolo esiste per tre ragioni. Una regola sola invece di due, perche' chi
+	 * scrive un componente non deve ricordarsene una per i tipi e una per le
+	 * sezioni. La convenzione interna del progetto, che per sezioni e capability
+	 * adotta l'insieme `[a-z0-9_]`. E il fatto che una trasformazione esplicita
+	 * del tipo `str_replace( '-', '_', ... )`, introdotta un domani, riaprirebbe
+	 * la collisione della riga C-86. Nota: `sanitize_key()` **conserva** il
+	 * trattino, quindi non e' quella la trasformazione da temere.
+	 *
+	 * @dataProvider identificativi_di_sezione_non_validi
+	 *
+	 * @param string $identificativo Identificativo fuori dall'insieme ammesso.
+	 */
+	public function test_c95_identificativo_fuori_dai_caratteri_ammessi( $identificativo ) {
+		$esito = conformita_core_registra_sezione( $identificativo, $this->politica_chiusa() );
+
+		$this->assertWPError( $esito, 'Un identificativo fuori dall\'insieme ammesso non si registra.' );
+		$this->assertSame( 'conformita_core_sezione_non_valida', $esito->get_error_code() );
+		$this->assertSame( array(), conformita_core_sezioni_registrate() );
+	}
+
+	/**
+	 * Identificativi di sezione fuori dall'insieme dei caratteri ammessi.
+	 *
+	 * @return array<string, array<int, string>>
+	 */
+	public function identificativi_di_sezione_non_validi() {
+		return array(
+			'trattino'          => array( 'albo-pretorio' ),
+			'lettere maiuscole' => array( 'Albo' ),
+			'spazi interni'     => array( 'albo pretorio' ),
+			'punto'             => array( 'albo.pretorio' ),
+			'barra'             => array( 'albo/pretorio' ),
+		);
+	}
+
+	/**
+	 * C-95: l'identificativo ammesso resta ammesso.
+	 *
+	 * Meta' necessaria della riga: un vincolo che rifiuta tutto sarebbe corretto
+	 * quanto inutile, e il difetto non si vedrebbe finche' qualcuno non prova a
+	 * registrare una sezione vera.
+	 */
+	public function test_c95_identificativo_ammesso_resta_ammesso() {
+		$this->assertTrue( conformita_core_registra_sezione( 'albo_pretorio', $this->politica_chiusa() ) );
+		$this->assertTrue( conformita_core_registra_sezione( 'sezione2', $this->politica_chiusa() ) );
+		$this->assertSame( array( 'albo_pretorio', 'sezione2' ), conformita_core_sezioni_registrate() );
 	}
 }

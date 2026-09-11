@@ -22,7 +22,7 @@ class Conformita_Core_Politica_Test extends WP_UnitTestCase {
 	 *
 	 * @var string
 	 */
-	const SEZIONE = 'sezione-di-prova';
+	const SEZIONE = 'sezione_di_prova';
 
 	/**
 	 * Registro azzerato prima di ogni prova: le registrazioni vivono in memoria

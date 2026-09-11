@@ -53,6 +53,49 @@ Per lo stesso motivo l'identificativo ammette lettere minuscole, cifre e trattin
 ma non il trattino: la derivazione deve restare iniettiva, altrimenti due tipi che
 WordPress distingue arriverebbero alle stesse capability.
 
+### Scadenza: che cosa il filtro copre, e che cosa no
+
+La scadenza è una proprietà del dato letto: la decisione si prende alla lettura, e non
+dipende dall'esecuzione del compito pianificato. Il filtro lavora su due strati. Il primo
+aggiunge una condizione all'interrogazione della banca dati, ed è quello che tiene coerente
+l'impaginazione. Il secondo ricontrolla ogni contenuto restituito, ed è quello che fa fede:
+il primo confronta stringhe, quindi un valore corrotto che ordina alto lo supererebbe.
+
+La condizione della banca dati si aggiunge **solo alle interrogazioni che riguardano
+esclusivamente tipi registrati da core**. Su un'interrogazione mista lavora il secondo
+strato, che guarda un contenuto alla volta: aggiungere quella condizione a
+un'interrogazione mista toglierebbe dai risultati tutti i contenuti che quel metadato non
+ce l'hanno.
+
+L'esenzione dal filtro è **della superficie, non dell'utente**. Un utente autorizzato che
+naviga il sito pubblico vede quello che vede chiunque altro. Le capability governano la
+gestione nell'amministrazione, dove il contenuto scaduto resta visibile perché resti
+correggibile.
+
+Un contenuto con **più di una data di fine registrata** è un'anomalia, non una scelta fra
+due: risulta scaduto, come qualsiasi altro dato che non si sappia leggere. La scrittura
+attraverso l'API riporta il contenuto a un valore solo.
+
+Lo stesso vale per l'interfaccia REST, che non è solo una superficie pubblica ma anche il
+canale dell'editor a blocchi: una richiesta con `context=edit` non viene filtrata, perché
+altrimenti un contenuto con la data di fine sbagliata non sarebbe apribile per correggerlo.
+Non è una scorciatoia: per quel contesto WordPress pretende già il permesso di modifica sul
+contenuto e risponde da sé a chi non ce l'ha. Ogni altro contesto, dichiarato o assente,
+riceve `404`.
+
+**La politica `archivio` non è ancora consumabile.** Le due politiche di scadenza si
+dichiarano entrambe e la validazione le accetta entrambe, ma oggi producono lo stesso
+comportamento: il contenuto scaduto è invisibile sulle superfici pubbliche e visibile
+nell'amministrazione. L'accesso riservato che distingue `archivio` da `irraggiungibile`, con
+la capability derivata dalla sezione, è un'unità successiva. Un componente che dichiara
+`archivio` non deve contare su una differenza che ancora non c'è.
+
+Non sono coperti, e vanno considerati limiti noti: `WP_Query` con `suppress_filters` e con
+`fields => 'ids'`, che non applicano il secondo strato; `get_post()` sul singolo
+identificativo; le interrogazioni SQL dirette; la lettura diretta dei metadati; le pagine
+servite da una memoria che risponde prima di WordPress. Il controllo non avviene a ogni
+richiesta del contenuto: avviene a ogni richiesta che arriva a WordPress.
+
 ## Requisiti normativi di riferimento
 
 Il componente implementa requisiti derivati dalla normativa applicabile ai soggetti

@@ -22,7 +22,7 @@ class Conformita_Core_Tipi_Test extends WP_UnitTestCase {
 	 *
 	 * @var string
 	 */
-	const SEZIONE = 'sezione-di-prova';
+	const SEZIONE = 'sezione_di_prova';
 
 	/**
 	 * Identificativo di tipo usato dalle prove.
@@ -400,7 +400,7 @@ class Conformita_Core_Tipi_Test extends WP_UnitTestCase {
 		$this->registra_sezione();
 
 		conformita_core_registra_sezione(
-			'sezione-aperta',
+			'sezione_aperta',
 			array(
 				'indicizzazione' => Conformita_Core_Politica::INDICIZZAZIONE_CONSENTITA,
 				'scadenza'       => Conformita_Core_Politica::SCADENZA_ARCHIVIO,
@@ -412,7 +412,7 @@ class Conformita_Core_Tipi_Test extends WP_UnitTestCase {
 			conformita_core_registra_tipo(
 				'prova_scheda',
 				array(
-					'sezione'      => 'sezione-aperta',
+					'sezione'      => 'sezione_aperta',
 					'show_in_rest' => true,
 				)
 			)
