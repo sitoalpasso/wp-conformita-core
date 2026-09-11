@@ -929,6 +929,50 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-114: se la riparazione non riesce, la scrittura non dichiara successo.
+	 *
+	 * La prova simula il fallimento della rimozione: WordPress espone un aggancio
+	 * che permette di rispondere al posto suo, e qui gli si fa dire che la
+	 * rimozione non e' riuscita, lasciando le righe dove sono.
+	 *
+	 * Senza questo controllo la funzione avrebbe restituito vero mentre la
+	 * lettura continuava a dare anomalia: chi ha chiamato avrebbe creduto di aver
+	 * riparato un contenuto che resta invisibile, e nessuno sarebbe andato a
+	 * verificare. Dichiarare un successo che non c'e' stato e' peggio di
+	 * fallire, perche' il fallimento almeno si vede.
+	 */
+	public function test_c114_riparazione_fallita_non_e_un_successo() {
+		$this->oggi_e( '2026-09-09' );
+
+		$doppio = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+			)
+		);
+
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '9999-99-99' );
+		add_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), '2026-12-31' );
+
+		add_filter( 'delete_post_metadata', '__return_false' );
+
+		$esito = conformita_core_imposta_fine_pubblicazione( $doppio, '2026-09-30' );
+
+		remove_filter( 'delete_post_metadata', '__return_false' );
+
+		$this->assertWPError( $esito, 'Se la rimozione non riesce, la scrittura non deve dichiarare successo.' );
+		$this->assertSame( 'conformita_core_dato_non_riparato', $esito->get_error_code() );
+
+		$this->assertCount( 2, get_post_meta( $doppio, conformita_core_chiave_fine_pubblicazione(), false ), 'Le righe sono ancora due: e\' la condizione che la prova simula.' );
+
+		$fine = conformita_core_fine_pubblicazione( $doppio );
+
+		$this->assertWPError( $fine );
+		$this->assertSame( 'conformita_core_dato_duplicato', $fine->get_error_code(), 'La lettura continua a dire anomalia, coerentemente con l\'errore restituito dalla scrittura.' );
+		$this->assertTrue( conformita_core_scaduto( $doppio ), 'E il contenuto resta scaduto.' );
+	}
+
+	/**
 	 * C-19: la pagina dell'allegato di un contenuto scaduto non risponde.
 	 *
 	 * La scadenza si legge sul contenuto padre: l'allegato non ha una data di

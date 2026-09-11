@@ -72,88 +72,83 @@ non è pubblicato, non è pubblicato.
 
 ---
 
-## 1-bis. Che cosa distingue le due politiche di scadenza
+## 1-bis. Le due politiche di scadenza: che cosa fa questa unità
 
-La stesura precedente descriveva `irraggiungibile` e `archivio` in modo identico, e la riga
-C-91 avrebbe collaudato una differenza inesistente. La differenza c'è, ed è **una sola**:
-che cosa risponde l'indirizzo proprio del contenuto, dopo la scadenza, a un utente
-autenticato che possiede la capability di archivio.
+**Questa unità non legge mai la politica di scadenza.** Il filtro guarda la data e lo stato
+del contenuto, non la politica della sezione: con `irraggiungibile` e con `archivio` fa
+esattamente la stessa cosa, cioè rende il contenuto scaduto invisibile su tutte le superfici
+pubbliche e lo lascia visibile nell'amministrazione.
 
-| | Dodici percorsi pubblici | Amministrazione | Indirizzo proprio, utente con capability archivio | Interfaccia informatica pubblica |
-|---|---|---|---|---|
-| `irraggiungibile` | invisibile | visibile | **non trovato**, anche per l'autorizzato | assente |
-| `archivio` | invisibile | visibile | **200, solo per l'autorizzato**, con divieto di indicizzazione e divieto di memorizzazione | assente |
+Le due politiche si dichiarano entrambe e la validazione le accetta entrambe, perché il
+registro delle sezioni è dell'unità S1 e non di questa. Ma **la differenza fra le due non
+esiste ancora**, e finché non esiste la politica `archivio` non va consumata: un componente
+che la dichiara ottiene oggi il comportamento di `irraggiungibile`.
 
-Fuori da quella casella le due politiche fanno la stessa cosa, e nessuna delle due fa
-ricomparire niente negli elenchi, nei feed, nella mappa per i motori, nelle anteprime
-incorporate o nell'interfaccia informatica pubblica. Con `irraggiungibile` il contenuto
-scaduto resta raggiungibile **solo da una schermata di amministrazione dedicata**, che non è
-questa unità.
+**Dove sta la differenza, quando ci sarà.** In una sola casella: che cosa risponde
+l'indirizzo proprio del contenuto, dopo la scadenza, a un utente autenticato che possiede una
+capability dedicata all'archivio. Con `irraggiungibile` risponde "non trovato" anche a lui;
+con `archivio` risponde a lui e non all'anonimo. Quella capability, quel comportamento e la
+riga di collaudo C-91 che li verifica sono l'unità **S10**, che dipende da questa.
 
-**L'albo dichiarerà `irraggiungibile`**, coerentemente con **ALBO-05** ("atto defisso,
-utente anonimo, tutti i percorsi C-10..C-21: irraggiungibile; in archivio solo con capability
-dedicata"): l'atto defisso esce dalla vista e l'archivio è una schermata riservata, non un
-indirizzo che continua a rispondere. *La stesura precedente citava ALBO-21, che invece
-riguarda la scadenza nei giorni dei cambi d'ora: riferimento sbagliato, decisione giusta.*
+**L'albo dichiara `irraggiungibile`**, coerentemente con ALBO-05: l'atto defisso esce dalla
+vista e l'archivio è una schermata riservata, non un indirizzo che continua a rispondere.
+Quindi l'albo non aspetta S10 per funzionare.
 
-La riga C-91 collauda esattamente quella casella, nei due sensi: con `irraggiungibile`
-l'autorizzato riceve "non trovato"; con `archivio` riceve il contenuto, e un anonimo riceve
-"non trovato" in entrambi i casi.
+## 2. Le capability: quali esistono e quale no
 
-## 2. Il contratto delle capability, e una motivazione che avevo sbagliato
+Le capability dei tipi di contenuto sono dell'unità S2, che le registra e non le assegna:
+finché il componente non effettua l'assegnazione, nessun ruolo può gestire il tipo
+nell'amministrazione. Sono le capability che governano la **gestione**, non la consultazione
+pubblica.
 
-La politica `archivio` prevede che il contenuto scaduto resti raggiungibile a chi è
-autorizzato. La capability **deriva dall'identificativo della sezione**, perché la politica
-di scadenza sta sulla sezione: `conformita_core_archivio_<sezione>`.
+**La capability di archivio non esiste.** Era progettata qui, derivata dall'identificativo
+della sezione perché la politica di scadenza sta sulla sezione, ed è stata spostata in S10
+insieme al comportamento che dovrebbe governare: una capability senza il comportamento che
+apre sarebbe un permesso che non permette niente.
 
-**Correzione della stesura precedente.** Avevo scritto che senza un vincolo sui caratteri si
-riaprirebbe la collisione della riga C-86. **Non è vero**, ed è giusto che il revisore lo
-abbia contestato: la collisione di C-86 nasceva perché il codice *trasformava* il trattino in
-trattino basso. Qui non si trasforma niente, quindi `sezione-a` e `sezione_a` produrrebbero
-due capability diverse. Nessuna collisione.
+### Il vincolo sui caratteri degli identificativi di sezione
 
-**Il vincolo lo mettiamo lo stesso, per tre ragioni vere.**
+Questo invece è stato fatto, e vale a prescindere da S10. Gli identificativi di sezione
+ammettono lettere minuscole, cifre e trattino basso, come quelli dei tipi. È una
+**restrizione del contratto decisa prima del rilascio**, non la correzione di un difetto:
+senza normalizzazione `sezione-a` e `sezione_a` produrrebbero identificativi diversi, quindi
+non collidono.
 
-1. **Una regola sola invece di due.** Gli identificativi di tipo ammettono lettere minuscole,
-   cifre e trattino basso. Farne una diversa per le sezioni obbliga chi scrive un componente
-   a ricordarsene due, e la seconda si sbaglia.
-2. **Convenzione interna del progetto.** Per sezioni e capability si adotta l'insieme
-   `[a-z0-9_]`, così gli identificativi restano uniformi e non richiedono normalizzazioni
-   successive. Non è un vincolo imposto da WordPress, che non prescrive formalmente un
-   insieme e ammette anche le cifre: è una scelta nostra, e va detta così.
-3. **Toglie un piede di porco futuro.** Se un domani qualcuno introducesse una
-   trasformazione esplicita, del tipo `str_replace( '-', '_', ... )`, la collisione
-   comparirebbe davvero. Vietare adesso il carattere che la produrrebbe costa zero.
-   **Correzione**: la stesura precedente indicava `sanitize_key()` come la normalizzazione
-   pericolosa. È falso, perché `sanitize_key()` conserva sia il trattino sia il trattino
-   basso.
+Il vincolo esiste per tre ragioni. Una regola sola invece di due, perché chi scrive un
+componente non deve ricordarne una per i tipi e una per le sezioni. La convenzione interna del
+progetto, che per sezioni e capability adotta l'insieme `[a-z0-9_]`. E il fatto che una
+trasformazione esplicita del tipo `str_replace( '-', '_', ... )`, introdotta un domani da chi
+non conosce questa storia, aprirebbe la collisione della riga C-86: vietare adesso il
+carattere che la produrrebbe costa zero.
 
-**Ed è una modifica incompatibile, non un'aggiunta.** L'interfaccia 1.1 accetta identificativi
-di sezione con qualunque carattere; questa versione li restringe. Formalmente sarebbe un
-cambio di numero maggiore. Si accetta come **correzione del contratto prima del rilascio**,
-motivata dal fatto che nessun componente consuma ancora la 1.1 e che il repository è in
-versione alfa. Va scritta così nel README e nelle note di versione, senza far finta che sia
-additiva.
+*Correzione di una motivazione sbagliata scritta qui in prima stesura: `sanitize_key()`
+conserva sia il trattino sia il trattino basso, quindi non produce nessuna collisione. Ed è il
+progetto ad adottare `[a-z0-9_]` come convenzione, non WordPress a imporlo.*
 
-## 3. Che cosa la capability consente, e che cosa non consente
+**È una modifica incompatibile, non un'aggiunta.** L'interfaccia 1.1 accetta identificativi
+di sezione con qualunque carattere; questa versione li restringe. Si accetta come correzione
+del contratto prima del rilascio, motivata dal fatto che nessun componente consuma ancora la
+1.1 e che il repository è in versione alfa. Riga di collaudo C-95.
 
-Il punto più delicato della revisione, e aveva ragione: la prima stesura diceva che il filtro
-non si applica a chi ha la capability. Formulata così sarebbe pericolosa.
+## 3. L'esenzione dal filtro è della superficie, non dell'utente
 
-**L'esenzione è legata alla superficie, non all'utente.** Un utente autorizzato che naviga il
-sito pubblico vede esattamente quello che vede chiunque altro: gli atti scaduti non
+Nel filtro non c'è nessun controllo sulle capability. Un utente autorizzato che naviga il
+sito pubblico vede esattamente quello che vede chiunque altro: i contenuti scaduti non
 ricompaiono nei feed, nella mappa per i motori, nelle anteprime incorporate, negli elenchi,
-né in una pagina che potrebbe finire in memoria e poi essere servita ad altri.
+né in una pagina che potrebbe finire in memoria ed essere poi servita ad altri.
 
-Le superfici dove il contenuto scaduto è raggiungibile sono **due, entrambe esplicite**:
+Le superfici dove il contenuto scaduto resta raggiungibile sono **due, entrambe esplicite**:
 
 | Superficie | Condizione |
 |---|---|
-| Amministrazione | interrogazione di amministrazione, con la capability del tipo |
-| Archivio riservato | superficie dedicata che core contrassegna, autenticata, con intestazioni che ne vietano la memorizzazione pubblica |
+| Amministrazione | l'interrogazione è di amministrazione, e valgono le capability del tipo |
+| Interfaccia informatica con contesto di modifica | `context=edit`, dove WordPress pretende già il permesso di modifica sul contenuto |
 
 Ovunque altro il filtro si applica **a chiunque**, autenticato o no. Nessuna esenzione
-generale per il fatto di aver fatto accesso, e nessuna per l'amministratore in quanto tale.
+generale per aver fatto accesso, e nessuna per l'amministratore in quanto tale. Righe C-92,
+C-101 e C-112.
+
+L'archivio riservato, che sarebbe una terza superficie, non esiste: è S10.
 
 ---
 
@@ -169,35 +164,30 @@ lo trova più per correggerlo.
 | **Data mancante** | **invisibile** | **visibile** |
 | **Data non valida o corrotta** | **invisibile** | **visibile** |
 
-### 4-bis. Le anomalie: nessuna scrittura durante la lettura
+### 4-bis. Le anomalie: il percorso di lettura non scrive niente
 
-La stesura precedente prevedeva un contatore per identificativo, aggiornato mentre si legge.
-Era sottospecificato e soprattutto sbagliato: introduceva scritture nella banca dati sul
-percorso pubblico, con il costo e le condizioni di concorrenza che ne seguono.
+**Questo vale, ed è implementato.** Guardare la data, decidere, e non lasciare traccia. Un
+contenuto anomalo molto visitato costa esattamente come uno sano. Niente contatori, niente
+scritture sul percorso pubblico, quindi nessun costo e nessuna condizione di concorrenza.
 
-**Il percorso di lettura non scrive niente.** Guarda la data, decide, e non lascia traccia.
-Un contenuto anomalo molto visitato costa esattamente come uno sano.
+Le anomalie si intercettano in scrittura, dove la validazione rifiuta un valore malformato
+prima che entri nella banca dati. È il motivo per cui un'anomalia può esistere soltanto se il
+dato è arrivato per migrazione o per scrittura diretta.
 
-Le anomalie si intercettano in due momenti, entrambi fuori dal percorso pubblico:
+**Quali sono le anomalie.** Data assente, valore che non rispetta il formato, data che
+rispetta il formato ma non esiste nel calendario, e **più di un valore per la stessa chiave**.
+Tutte e quattro rendono il contenuto scaduto: si sbaglia nella direzione sicura. La quarta è
+la riga C-114, decisa perché WordPress ammette più righe di metadato con la stessa chiave e la
+lettura normale ne restituisce una sola: con due valori diversi la lettura e una condizione
+scritta sulla banca dati potrebbero decidere in modo opposto, e vincerebbe la più permissiva.
+La scrittura dall'API ripara, riportando il contenuto a un valore solo, e verifica di esserci
+riuscita prima di dichiarare successo.
 
-1. **In scrittura**, dove la validazione rifiuta un valore malformato prima che entri nella
-   banca dati. È il percorso normale, ed è il motivo per cui un'anomalia può esistere solo
-   se il dato è arrivato per migrazione o per scrittura diretta.
-2. **Con una scansione amministrativa** invocata su richiesta, mai automatica, che legge e
-   non scrive.
-
-La funzione `conformita_core_contenuti_anomali()` della stesura precedente è **eliminata** e
-sostituita da:
-
-| Funzione | Parametri | Ritorno | Autorizzazione |
-|---|---|---|---|
-| `conformita_core_scansiona_anomalie( $limite = 200 )` | `int` | array di voci `array( 'post_id' => int, 'tipo' => string, 'sezione' => string, 'motivo' => 'assente'\|'formato'\|'inesistente', 'valore' => string )`, ordinate per `post_id` crescente | richiede `manage_options`, altrimenti `WP_Error` |
-
-Non memorizza esiti, non tiene contatori, non va ripulita quando una data viene corretta:
-alla scansione successiva l'anomalia semplicemente non c'è più. Un contenuto cancellato non
-lascia niente da ripulire perché non c'è niente di persistito.
-
-La schermata che mostra questi risultati **non è in questa unità**.
+**La schermata che elenca i contenuti anomali non esiste**, e nemmeno la funzione che li
+cerca. Erano progettate qui come `conformita_core_scansiona_anomalie()`, una scansione
+amministrativa su richiesta che legge e non persiste; sono l'unità **S10** insieme alla riga
+di collaudo C-96. Finché non ci sono, un contenuto con la data rotta si trova aprendo
+l'amministrazione, dove resta visibile apposta.
 
 ## 5. Come si avvia il motore: interno, automatico, idempotente
 
@@ -243,32 +233,35 @@ Versione dell'interfaccia: **da 1.1.0 a 1.2.0**, con la nota del punto 2 sul fat
 contiene anche una restrizione e non solo aggiunte. L'albo dovrà richiedere `1.2.0` e non il
 generico `1`, che accetterebbe anche un core privo di questo motore.
 
+**Le funzioni della scadenza sono sei**, e sono queste.
+
 | Funzione | Parametri | Ritorno | Errori |
 |---|---|---|---|
 | `conformita_core_chiave_fine_pubblicazione()` | nessuno | `string`, la chiave del metadato | nessuno |
 | `conformita_core_valida_fine_pubblicazione( $valore )` | `string` | `true` oppure `WP_Error` | `conformita_core_data_formato`, `conformita_core_data_inesistente` |
-| `conformita_core_imposta_fine_pubblicazione( $post_id, $data )` | `int`, `string` | `true` oppure `WP_Error` | i due sopra, più `conformita_core_tipo_non_gestito` |
-| `conformita_core_fine_pubblicazione( $post_id )` | `int` | `string` la data, `''` se assente, `WP_Error` se il tipo non è gestito | `conformita_core_tipo_non_gestito` |
-| `conformita_core_istante_scadenza( $post_id )` | `int` | `DateTimeImmutable` nel fuso del sito, oppure `WP_Error` | `conformita_core_data_assente`, `conformita_core_data_non_valida` |
-| `conformita_core_scaduto( $post_id )` | `int` | `bool`. Un contenuto con data assente o non valida risulta scaduto | nessuno: è chiamata nel percorso di lettura e non deve poter fallire |
-| `conformita_core_capacita_archivio( $sezione )` | `string` | `string` il nome della capability, oppure `WP_Error` | `conformita_core_sezione_non_registrata` |
-| `conformita_core_scansiona_anomalie( $limite = 200 )` | `int` | array di voci come al punto 4-bis | `conformita_core_permesso_negato` |
+| `conformita_core_imposta_fine_pubblicazione( $post_id, $data )` | `int`, `string` | `true` oppure `WP_Error` | i due sopra, più `conformita_core_tipo_non_gestito`, `conformita_core_data_non_scritta` e `conformita_core_dato_non_riparato` |
+| `conformita_core_fine_pubblicazione( $post_id )` | `int` | `string` la data, `''` se assente, `WP_Error` altrimenti | `conformita_core_tipo_non_gestito`, `conformita_core_dato_duplicato` |
+| `conformita_core_istante_scadenza( $post_id )` | `int` | `DateTimeImmutable` nel fuso del sito, oppure `WP_Error` | `conformita_core_data_assente`, `conformita_core_data_non_valida`, più quelli di sopra |
+| `conformita_core_scaduto( $post_id )` | `int` | `bool`. Data assente, non valida o duplicata danno scaduto | nessuno: è chiamata nel percorso di lettura e non deve poter fallire |
 
-Tre precisazioni che la stesura precedente sbagliava o taceva.
+**Non esistono** `conformita_core_capacita_archivio()` né
+`conformita_core_scansiona_anomalie()`. Erano progettate qui e sono l'unità S10.
 
-**`conformita_core_scaduto()` non prende più il parametro `$adesso`.** Esisteva "solo per i
-test" e finiva comunque nell'interfaccia pubblica, dove qualcuno prima o poi lo avrebbe usato
-per far sembrare non scaduto qualcosa che lo è. L'orologio si inietta **internamente**: la
-classe accetta un orologio sostituibile, e i test usano quello. La funzione pubblica prende
-solo l'identificativo.
+Tre precisazioni sul comportamento.
 
-**`conformita_core_imposta_fine_pubblicazione()` è idempotente.** `update_post_meta()`
-restituisce `false` sia quando fallisce sia quando il valore era già identico. Distinguere i
-due casi rileggendo il valore è obbligatorio: impostare due volte la stessa data
-restituisce `true`, non un errore.
+**`conformita_core_scaduto()` non prende il parametro `$adesso`.** L'orologio si inietta
+dentro la classe e i test usano quello: un parametro del genere, esposto nell'interfaccia
+pubblica, prima o poi verrebbe usato per far sembrare non scaduto qualcosa che lo è.
 
-**Non esiste nessuna funzione pubblica per avviare il motore o per chiedere se è avviato**:
-vedi il punto 5.
+**`conformita_core_imposta_fine_pubblicazione()` è idempotente e ripara.** Impostare due
+volte la stessa data restituisce `true` e non un errore, perché la scrittura di WordPress
+restituisce falso sia quando fallisce sia quando il valore era già identico, e i due casi si
+distinguono rileggendo. Se il contenuto ha più valori per la chiave, li rimuove e ne scrive
+uno; se la rimozione o la scrittura non riescono, **restituisce errore invece di dichiarare
+un successo che non c'è stato**, perché altrimenti chi chiama crederebbe di aver riparato un
+contenuto che resta anomalo.
+
+**Nessuna funzione pubblica avvia il motore o chiede se è avviato**: vedi il punto 5.
 
 ---
 
@@ -309,6 +302,10 @@ pagina risponde prima, WordPress non viene eseguito.
 
 ## 8. Che cosa NON faccio in questa unità
 
+- **Nessuna capability di archivio, nessuna scansione delle anomalie, nessuna differenza di
+  comportamento fra le due politiche di scadenza: sono l'unità S10.** Finché S10 non esiste,
+  la politica `archivio` è registrabile ma produce il comportamento di `irraggiungibile`, e
+  non va consumata contando su una differenza che non c'è.
 - Nessun compito pianificato e nessun battito: sono l'unità S6.
 - Nessuna consegna degli allegati e nessuna cartella protetta: sono l'unità S5. Finché S5 non
   esiste, **un allegato di un atto scaduto resta scaricabile dal suo indirizzo diretto**: è la
@@ -327,7 +324,7 @@ pagina risponde prima, WordPress non viene eseguito.
 | `includes/class-conformita-core-scadenza.php` | nuovo, il contratto del dato |
 | `includes/class-conformita-core-filtro-scadenza.php` | nuovo, il filtro sui percorsi di lettura |
 | `includes/class-conformita-core-sezioni.php` | modificato: vincolo sui caratteri dell'identificativo, e rifiuto della registrazione a motore non avviato |
-| `includes/funzioni-api.php` | modificato: le sei funzioni della scadenza effettivamente implementate, non le otto del punto 6. Vedi il punto 15 |
+| `includes/funzioni-api.php` | modificato: le sei funzioni della scadenza elencate al punto 6 |
 | `conformita-core.php` | modificato: versione dell'interfaccia a 1.2.0 |
 | `tests/scadenza-test.php` | nuovo |
 | `tests/sezioni-test.php` | modificato: le due righe nuove sulle sezioni |
@@ -335,42 +332,48 @@ pagina risponde prima, WordPress non viene eseguito.
 
 ---
 
-## 10. La matrice dei test, con il conteggio giusto
+## 10. Le righe di collaudo di questa unità
 
-La prima stesura diceva "quindici prove più tre", che era un doppio conteggio. Il conteggio
-vero:
+Il catalogo di collaudo del cantiere è il contratto. Qui c'è la mappa, non una copia: le
+righe si leggono là.
 
-| Righe | Quante | Cosa |
-|---|---|---|
-| C-10..C-21 | **12** | I dodici percorsi di lettura |
-| C-22 | 1 | Contenuto **non** scaduto visibile su tutti e dodici |
-| C-23 | 1 | Cambio d'ora, marzo e ottobre |
-| C-24 | 1 | Sito con fuso diverso da Roma |
-| | **15** | **totale del catalogo esistente** |
+**Righe già a catalogo quando l'unità è partita**: C-10..C-21, i dodici percorsi di lettura;
+C-22, il contenuto **non** scaduto visibile su tutti e dodici; C-23, il cambio d'ora in
+entrambe le direzioni; C-24, il sito con fuso diverso da Roma. Quindici.
 
-**Il cron fermo non è una prova in più: è la condizione in cui girano tutte le dodici** di
-C-10..C-21. Nessun test di questa unità pianifica o esegue il compito automatico, perché
-l'unità non lo usa.
+**Il compito pianificato fermo non è una prova in più: è la condizione in cui girano tutte.**
+Nessun test di questa unità pianifica o esegue il compito automatico, perché l'unità non lo
+usa.
 
-Righe nuove da aggiungere al catalogo, numerate dopo C-86:
+**Righe aggiunte durante il lavoro**, ognuna al catalogo prima del proprio test:
 
 | Riga | Cosa verifica |
 |---|---|
-| C-87 | Ora corrente **esattamente uguale** all'istante di scadenza: scaduto. E un istante **immediatamente precedente**: non scaduto |
-| C-88 | Data mancante e data corrotta: invisibile al pubblico, **visibile in amministrazione** |
+| C-87 | Ora corrente uguale all'istante di scadenza, e un istante prima |
+| C-88 | Data mancante o corrotta: invisibile al pubblico, visibile in amministrazione |
 | C-89 | Bozza e contenuto privato: il filtro non li tratta come scaduti né li rende pubblici |
-| C-90 | Tipo di WordPress non registrato in core: **non toccato**, nessun filtro applicato |
-| C-91 | **La differenza fra le due politiche**: con `irraggiungibile` l'indirizzo proprio risponde "non trovato" anche all'utente con la capability di archivio; con `archivio` risponde 200 a lui e "non trovato" all'anonimo. Nei due ordini di caricamento |
-| C-92 | Utente con la capability di archivio sulle superfici pubbliche: **non fa ricomparire niente**, su nessuna delle dodici |
-| C-93 | `WP_Query` con `suppress_filters`: il contenuto scaduto **passa**. **Non è una prova di conformità: è la documentazione eseguibile di un limite noto**, e il suo nome lo dice |
-| C-94 | Guardia difensiva: sezione con politica di scadenza registrata a motore non pronto, registrazione rifiutata |
-| C-95 | Identificativo di sezione con il trattino: rifiutato. **Restrizione del contratto prima del rilascio**, non correzione di una collisione |
-| C-96 | Scansione delle anomalie senza la capability richiesta: rifiutata. E il percorso di lettura non scrive niente, verificato contando le scritture |
-| C-97 | Nessuna contaminazione fra tipi e sezioni: il filtro di una sezione non tocca i contenuti di un'altra |
-| C-98 | Avvio idempotente: il motore acceso due volte non aggiunge i filtri due volte e non produce errori |
-| C-99 | `conformita_core_imposta_fine_pubblicazione()` chiamata due volte con lo stesso valore: `true`, non errore |
+| C-90 | Tipi non registrati in core: non toccati |
+| C-92 | Capability sulle superfici pubbliche: non fa ricomparire niente |
+| C-93 | `suppress_filters`: documentazione eseguibile di un limite, non prova di conformità |
+| C-94 | Guardia difensiva: sezione registrata a motore non avviato, rifiutata |
+| C-95 | Identificativo di sezione con il trattino: rifiutato |
+| C-97 | Nessuna contaminazione fra sezioni |
+| C-98 | Avvio idempotente, e stato osservabile degli agganci |
+| C-99 | Impostazione della stessa data due volte: `true`, non errore |
+| C-100 | Valore fuori formato e data inesistente: rifiutati con codici distinti |
+| C-101 | Superficie di amministrazione: il contenuto scaduto resta visibile |
+| C-102 | `fields => 'ids'`: limite dichiarato, agisce il solo primo strato |
+| C-103 | `meta_query` di terzi in `OR`: la clausola di core resta in AND |
+| C-104 | Clausola di terzi sulla stessa chiave: si riconosce la clausola intera |
+| C-105 | La collezione dell'interfaccia informatica resta ben formata |
+| C-106..C-110 | Le cinque prove di non vacuità, una per famiglia di aggancio |
+| C-111 | L'aggancio della mappa trasforma davvero gli argomenti |
+| C-112 | Contesto di modifica: l'atto scaduto resta correggibile |
+| C-113 | Vicino con data corrotta: mai il vicino, e le date valide restano |
+| C-114 | Più di un valore per la chiave: anomalia, e la scrittura ripara |
 
-Totale: **15 esistenti più 13 nuove, 28**.
+**Righe che NON appartengono a questa unità**: C-91 e C-96, che sono l'unità S10. Il catalogo
+le tiene in una sezione a parte proprio perché non si contino qui.
 
 ### Che cosa è cambiato in questo elenco durante l'implementazione
 
@@ -418,7 +421,12 @@ aggancio, ognuna documentata con il test che diventa rosso:
 
 ---
 
-## 11. Le decisioni prese in questa revisione
+## 11. Nota storica: le decisioni della revisione del 2026-09-09
+
+**Registro di una revisione precedente, non contratto corrente.** Le righe 1 e 3 descrivono
+cose che allora si pensava appartenessero a questa unità e che oggi sono l'unità S10: le
+sezioni operative qui sopra dicono il perimetro vero. Il registro resta perché il ragionamento
+che portò a quelle decisioni vale ancora, e servirà a chi costruirà S10.
 
 | # | Punto sollevato | Decisione |
 |---|---|---|
@@ -434,7 +442,7 @@ aggancio, ognuna documentata con il test che diventa rosso:
 | 10 | C-87 verificava solo l'istante esatto | Adesso verifica anche l'istante immediatamente precedente |
 | 11 | C-93 era classificata come prova di conformità | **Riclassificata** come documentazione eseguibile di un limite noto |
 
-## 12. Che cosa resta da sapere prima di scrivere
+## 12. Nota storica: che cosa restava da sapere prima di scrivere
 
 **Il vincolo sui caratteri delle sezioni tocca codice già in `main`.** Nessun componente
 registra ancora sezioni, quindi il costo è zero, ed è il momento giusto.
@@ -581,11 +589,14 @@ argomenti: una rete di sicurezza che nessuno prova può rompersi restando verde.
 
 ---
 
-## 15. Il perimetro davvero consegnato, e quello che questa scheda prometteva in più
+## 15. Nota storica: il perimetro che questa scheda prometteva in più
 
-**Correzione di un difetto di contratto, non di codice**, segnalato in revisione l'11
-settembre. Questa scheda progettava quattro cose che l'unità non ha costruito e che
-altrove sono state contate come se fossero sue:
+**Nota storica, non errata corrige.** Le sezioni operative qui sopra sono state riscritte e
+dicono già il perimetro vero: questa nota resta per chi si chiede perché altrove, per esempio
+in una richiesta di unione o in un messaggio, possa aver letto qualcosa di diverso.
+
+Segnalato in revisione l'11 settembre. Questa scheda progettava quattro cose che l'unità non
+ha costruito e che contava come sue:
 
 | Cosa | Dove era promessa | Stato vero |
 |---|---|---|

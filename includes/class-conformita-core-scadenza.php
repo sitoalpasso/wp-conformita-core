@@ -177,9 +177,19 @@ final class Conformita_Core_Scadenza {
 	 * obbligatorio, altrimenti il secondo salvataggio della stessa data
 	 * diventerebbe un errore.
 	 *
+	 * **Ripara i duplicati, e verifica di esserci riuscita.** Se il contenuto ha
+	 * più valori per la chiave li rimuove e ne scrive uno solo. Sia la rimozione
+	 * sia l'esito finale si controllano: la rimozione può fallire, e la scrittura
+	 * può riferire successo avendo aggiornato più righe invece di lasciarne una.
+	 * In entrambi i casi questa funzione restituisce errore, perché dichiarare un
+	 * successo che non c'è stato è il difetto peggiore dei due: chi ha chiamato
+	 * crederebbe di aver riparato un contenuto che resta anomalo, e quindi
+	 * invisibile, e nessuno andrebbe a verificare. Riga C-114.
+	 *
 	 * @param int    $post_id Identificativo del contenuto.
 	 * @param string $data    Data di fine, formato AAAA-MM-GG.
-	 * @return true|WP_Error
+	 * @return true|WP_Error Vero se al termine il contenuto ha esattamente quella
+	 *                       data e nessun'altra, errore altrimenti.
 	 */
 	public static function imposta( $post_id, $data ) {
 		$post_id = (int) $post_id;
@@ -209,7 +219,13 @@ final class Conformita_Core_Scadenza {
 		 * perché questa è la strada per cui il dato entra correttamente.
 		 */
 		if ( count( $valori ) > 1 ) {
-			delete_post_meta( $post_id, self::CHIAVE );
+			if ( ! delete_post_meta( $post_id, self::CHIAVE ) ) {
+				return new WP_Error(
+					'conformita_core_dato_non_riparato',
+					__( 'Fine pubblicazione: il contenuto ha più di una data registrata e non è stato possibile rimuoverle. Il contenuto resta anomalo, quindi scaduto.', 'conformita-core' )
+				);
+			}
+
 			$valori = array();
 		}
 
@@ -221,6 +237,23 @@ final class Conformita_Core_Scadenza {
 			return new WP_Error(
 				'conformita_core_data_non_scritta',
 				__( 'Fine pubblicazione: il valore non è stato scritto.', 'conformita-core' )
+			);
+		}
+
+		/*
+		 * Rilettura di controllo. La scrittura di WordPress può riferire successo
+		 * avendo aggiornato più righe invece di lasciarne una, e in quel caso
+		 * questa funzione restituirebbe vero mentre la lettura continua a dare
+		 * anomalia: chi ha chiamato crederebbe di aver riparato un contenuto che
+		 * resta invisibile. Fra le due, dichiarare un successo che non c'è è il
+		 * difetto peggiore, perché nessuno lo va a verificare.
+		 */
+		$scritti = get_post_meta( $post_id, self::CHIAVE, false );
+
+		if ( array( $data ) !== ( is_array( $scritti ) ? $scritti : array() ) ) {
+			return new WP_Error(
+				'conformita_core_dato_non_riparato',
+				__( 'Fine pubblicazione: dopo la scrittura il contenuto non ha esattamente una data di fine, quindi resta anomalo e scaduto.', 'conformita-core' )
 			);
 		}
 
