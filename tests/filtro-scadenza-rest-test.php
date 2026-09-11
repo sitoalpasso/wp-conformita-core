@@ -49,9 +49,16 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 		$this->fuso_originale = get_option( 'timezone_string' );
 		update_option( 'timezone_string', 'Europe/Rome' );
 
-		// Le anteprime incorporate si chiedono per indirizzo, quindi il tipo
-		// deve avere un indirizzo leggibile.
-		$this->set_permalink_structure( '/%postname%/' );
+		/*
+		 * Indirizzi semplici e nessuna variabile d'interrogazione propria per il
+		 * tipo. Serve alla prova C-17, che parte da un indirizzo: cosi'
+		 * l'indirizzo del contenuto porta l'identificativo, e WordPress risale al
+		 * contenuto leggendolo, senza passare dalle regole di riscrittura. Con gli
+		 * indirizzi leggibili il percorso dipenderebbe da quelle regole, e una
+		 * prova che fallisce perche' una regola non c'e' dice che il filtro non
+		 * funziona mentre il filtro non c'entra niente.
+		 */
+		$this->set_permalink_structure( '' );
 
 		$this->assertTrue(
 			conformita_core_registra_sezione(
@@ -72,6 +79,7 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 					'argomenti'    => array(
 						'public'      => true,
 						'has_archive' => true,
+						'query_var'   => false,
 					),
 				)
 			)
@@ -79,8 +87,6 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 
 		// Le rotte si costruiscono a tipo gia' registrato: un server preparato
 		// prima non conoscerebbe questo tipo.
-		flush_rewrite_rules();
-
 		$GLOBALS['wp_rest_server'] = new WP_REST_Server();
 		do_action( 'rest_api_init', $GLOBALS['wp_rest_server'] );
 	}
@@ -90,7 +96,6 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 	 */
 	public function tear_down() {
 		$GLOBALS['wp_rest_server'] = null;
-		$this->set_permalink_structure( '' );
 		update_option( 'timezone_string', $this->fuso_originale );
 		Conformita_Core_Scadenza::azzera_orologio();
 		Conformita_Core_Filtro_Scadenza::avvia();
@@ -248,13 +253,23 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 		$valido  = $this->contenuto( '2026-09-30' );
 		$scaduto = $this->contenuto( '2026-09-08' );
 
+		/*
+		 * Prima si verifica che WordPress risalga al contenuto partendo dal suo
+		 * indirizzo, per tutti e due. Senza questo controllo la prova sarebbe
+		 * vuota: se l'indirizzo dello scaduto non portasse a niente, l'anteprima
+		 * mancherebbe lo stesso, e la prova sarebbe verde senza che il filtro
+		 * abbia fatto niente.
+		 */
+		$this->assertSame( $valido, url_to_postid( get_permalink( $valido ) ), 'L\'indirizzo del contenuto valido deve portare al contenuto.' );
+		$this->assertSame( $scaduto, url_to_postid( get_permalink( $scaduto ) ), 'Anche l\'indirizzo dello scaduto deve portare al contenuto: e\' il filtro a doverne negare l\'anteprima, non l\'indirizzo a essere irraggiungibile.' );
+
 		$buona = $this->chiedi( '/oembed/1.0/embed?url=' . rawurlencode( get_permalink( $valido ) ) );
 
 		$this->assertSame( 200, $buona->get_status(), 'L\'anteprima del contenuto valido deve essere servita: senza questa asserzione un filtro che nega tutto passerebbe la prova.' );
 
 		$negata = $this->chiedi( '/oembed/1.0/embed?url=' . rawurlencode( get_permalink( $scaduto ) ) );
 
-		$this->assertNotSame( 200, $negata->get_status(), 'L\'anteprima di un contenuto scaduto non deve essere servita.' );
+		$this->assertSame( 404, $negata->get_status(), 'L\'anteprima di un contenuto scaduto non deve essere servita.' );
 	}
 
 	/**
