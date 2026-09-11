@@ -137,11 +137,41 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 	/**
 	 * Esegue una richiesta sull'interfaccia informatica.
 	 *
-	 * @param string $percorso Percorso della rotta.
+	 * **I parametri si passano uno per uno, non attaccati al percorso.** Il
+	 * percorso di una richiesta costruita a mano viene confrontato per intero con
+	 * la rotta: attaccarci la parte dopo il punto interrogativo non la fa
+	 * interpretare, fa semplicemente sbagliare il confronto, e la risposta e'
+	 * "nessuna rotta corrispondente". Che e' un 404, quindi indistinguibile da un
+	 * rifiuto vero se non si guarda il motivo.
+	 *
+	 * @param string $percorso  Percorso della rotta, senza parametri.
+	 * @param array  $parametri Parametri della richiesta.
 	 * @return WP_REST_Response
 	 */
-	private function chiedi( $percorso ) {
-		return rest_get_server()->dispatch( new WP_REST_Request( 'GET', $percorso ) );
+	private function chiedi( $percorso, array $parametri = array() ) {
+		$richiesta = new WP_REST_Request( 'GET', $percorso );
+
+		foreach ( $parametri as $nome => $valore ) {
+			$richiesta->set_param( $nome, $valore );
+		}
+
+		return rest_get_server()->dispatch( $richiesta );
+	}
+
+	/**
+	 * Il motivo di una risposta, per i messaggi di fallimento.
+	 *
+	 * Una prova che fallisce dicendo soltanto "404 invece di 200" non dice se il
+	 * rifiuto viene dal filtro o da una rotta sbagliata, e i due casi si
+	 * correggono in posti diversi.
+	 *
+	 * @param WP_REST_Response $risposta Risposta ottenuta.
+	 * @return string
+	 */
+	private function motivo( $risposta ) {
+		$dati = $risposta->get_data();
+
+		return isset( $dati['code'] ) ? (string) $dati['code'] : 'nessun codice';
 	}
 
 	/**
@@ -263,13 +293,18 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 		$this->assertSame( $valido, url_to_postid( get_permalink( $valido ) ), 'L\'indirizzo del contenuto valido deve portare al contenuto.' );
 		$this->assertSame( $scaduto, url_to_postid( get_permalink( $scaduto ) ), 'Anche l\'indirizzo dello scaduto deve portare al contenuto: e\' il filtro a doverne negare l\'anteprima, non l\'indirizzo a essere irraggiungibile.' );
 
-		$buona = $this->chiedi( '/oembed/1.0/embed?url=' . rawurlencode( get_permalink( $valido ) ) );
+		$buona = $this->chiedi( '/oembed/1.0/embed', array( 'url' => get_permalink( $valido ) ) );
 
-		$this->assertSame( 200, $buona->get_status(), 'L\'anteprima del contenuto valido deve essere servita: senza questa asserzione un filtro che nega tutto passerebbe la prova.' );
+		$this->assertSame( 200, $buona->get_status(), 'L\'anteprima del contenuto valido deve essere servita. Motivo del rifiuto: ' . $this->motivo( $buona ) );
 
-		$negata = $this->chiedi( '/oembed/1.0/embed?url=' . rawurlencode( get_permalink( $scaduto ) ) );
+		$negata = $this->chiedi( '/oembed/1.0/embed', array( 'url' => get_permalink( $scaduto ) ) );
 
 		$this->assertSame( 404, $negata->get_status(), 'L\'anteprima di un contenuto scaduto non deve essere servita.' );
+		$this->assertSame(
+			'oembed_invalid_url',
+			$this->motivo( $negata ),
+			'Il rifiuto deve venire dal filtro e non da una rotta che non esiste: sono due 404 che si correggono in posti diversi.'
+		);
 	}
 
 	/**
