@@ -109,8 +109,9 @@ file: **il percorso non si pubblica mai**.
 
 **La protezione si verifica, non si presume.** Nella cartella c'è anche un file esca con un
 gettone dentro; il componente lo chiede al sito stesso e legge la risposta. Un rifiuto vale
-`verificata`, il gettone che torna indietro vale `non_coperta`, e tutto il resto (richiesta
-fallita, oppure `200` con qualcosa che non è il nostro file) vale `ignota`. La richiesta si
+`verificata`, il gettone che torna indietro vale `non_coperta`, e tutto il resto vale
+`ignota`: la richiesta fallita, il `200` con qualcosa che non è il nostro file, e il
+reindirizzamento, che non è un rifiuto perché di dove porta non si sa niente. La richiesta si
 fa all'attivazione, quando i file di regole vengono scritti o riscritti, e su richiesta
 esplicita con `conformita_core_verifica_protezione_allegati()`; **non a ogni deposito**.
 L'esito si conserva con il proprio istante e si rilegge con

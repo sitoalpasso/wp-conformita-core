@@ -2,7 +2,7 @@
 /**
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
- * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158.
+ * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -165,6 +165,22 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 				'message' => 'OK',
 			),
 			'body'     => Conformita_Core_Allegati::contenuto_esca(),
+		);
+	}
+
+	/**
+	 * La risposta di un server che reindirizza il percorso altrove.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function reindirizzamento_del_server() {
+		return array(
+			'response' => array(
+				'code'    => 302,
+				'message' => 'Found',
+			),
+			'headers'  => array( 'location' => 'https://esempio.invalid/accesso' ),
+			'body'     => '',
 		);
 	}
 
@@ -689,6 +705,34 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$this->assertSame( 'ignota', $estranea['copertura'] );
 		$this->assertSame( 200, $estranea['stato_http'] );
 		$this->assertNotSame( $fallita['motivo'], $estranea['motivo'] );
+	}
+
+	/**
+	 * C-163: il server reindirizza il percorso, quindi l'esito e' `ignota`.
+	 *
+	 * Un reindirizzamento non e' un rifiuto. La richiesta all'esca non segue i
+	 * reindirizzamenti, quindi di dove porta questo non si sa niente, e il caso
+	 * comune e' un sito che manda da http a https: li' il file arriverebbe lo
+	 * stesso, un passo piu' in la'. Leggerlo come un rifiuto sarebbe l'unico
+	 * punto in cui questo meccanismo sbaglia aprendo, perche' autorizzerebbe il
+	 * deposito su una cartella che nessuno ha dimostrato protetta.
+	 */
+	public function test_c163_reindirizzamento_vale_ignota() {
+		$this->risposta_finta = $this->reindirizzamento_del_server();
+
+		$stato = conformita_core_verifica_protezione_allegati();
+
+		$this->assertSame( 'ignota', $stato['copertura'] );
+		$this->assertSame( 302, $stato['stato_http'] );
+
+		$esito = conformita_core_deposita_allegato(
+			$this->atto_valido(),
+			$this->file_da_depositare(),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
 	}
 
 	/**

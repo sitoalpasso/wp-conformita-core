@@ -149,10 +149,20 @@ poi la lettura della risposta:
 
 | Risposta | Esito | Perché |
 |---|---|---|
-| Un rifiuto: qualunque stato che non sia 2xx | **`verificata`** | il server nega il percorso: la protezione è attiva |
+| Un rifiuto: 4xx o 5xx | **`verificata`** | il server nega il percorso: la protezione è attiva |
 | 200 e nel corpo c'è il gettone dell'esca | **`non_coperta`** | il file viene servito: la cartella è aperta |
 | 200 ma il gettone non c'è | **`ignota`** | è tornato qualcosa che non è il nostro file: una pagina di accesso, un catch-all, un proxy che sostituisce. Non è una prova di rifiuto |
+| Un reindirizzamento: 3xx | **`ignota`** | la richiesta non segue i reindirizzamenti, quindi di dove porta non si sa niente. Vedi il riquadro qui sotto |
 | La richiesta non riesce (`WP_Error`) | **`ignota`** | giro su se stessi bloccato, autenticazione HTTP davanti a un ambiente di prova, DNS interno diverso |
+
+**Il reindirizzamento non è un rifiuto, e questa riga è arrivata in revisione.** La prima
+stesura del codice leggeva come rifiuto qualunque stato fuori dall'intervallo 2xx, quindi anche
+un 301 e un 302. Il caso comune che rompe quella lettura è un sito il cui indirizzo dei
+caricamenti è in `http` mentre il server manda tutto su `https`: l'esca risponde 301, la
+verifica direbbe `verificata`, e il deposito partirebbe su una cartella che un passo più in là
+potrebbe servire i file senza problemi. Stessa cosa con un firewall applicativo che manda a una
+pagina di sfida. Era l'unico punto in cui questa lettura sbagliava aprendo invece che
+chiudendo, ed è la riga C-163.
 
 Il gettone casuale serve a distinguere "il server ha negato" da "è tornata una pagina
 qualsiasi con stato 200", che sono due cose diverse e che senza gettone si confonderebbero.
@@ -724,6 +734,7 @@ Nessun file del repository dell'albo.
 | Regole cancellate a mano dopo il deposito | il deposito successivo trova il file mancante, lo riscrive, **rifà la verifica** e decide con l'esito nuovo | sì |
 | Configurazione del server cambiata dopo la verifica | non viene notata finché qualcuno non rifà la verifica. **Limite dichiarato**: l'esito porta il suo istante apposta | **no** |
 | Giro su se stessi bloccato | la verifica dà `ignota`, il deposito si rifiuta finché non si sistema o non si dichiara lo scavalcamento | sì |
+| Il server reindirizza il percorso dell'esca | la verifica dà `ignota` e non `verificata`, perché dove porta il reindirizzamento non si sa; il deposito si rifiuta | sì |
 | Scavalcamento dichiarato su un server davvero scoperto | i file si depositano in una cartella aperta | **no**, ed è il senso di uno scavalcamento: la responsabilità passa a chi lo dichiara |
 | File cancellato dal disco | la consegna risponde "non trovato" | sì |
 | Metadato dell'impronta perso | la consegna funziona, l'impronta non è leggibile e il referto se ne accorge | sì |
@@ -767,7 +778,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Quarantotto righe, da C-115 a C-162.**
+convenzione di questo repository. **Quarantanove righe, da C-115 a C-163.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -800,6 +811,7 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-156 | fatto | La richiesta fallisce, oppure riceve 200 senza il gettone: esito `ignota` in tutti e due i casi, con motivi distinti |
 | C-157 | fatto | La verifica si fa su richiesta esplicita e quando le regole si riscrivono. **Un deposito che non riscrive niente non fa nessuna richiesta**, e la riga lo verifica contandole |
 | C-158 | fatto | Regole cancellate a mano: il deposito successivo le riscrive **e rifà la verifica**, e decide con l'esito nuovo e non con quello conservato |
+| C-163 | fatto | La richiesta all'esca riceve un reindirizzamento: esito `ignota` e non `verificata`, e il deposito si rifiuta |
 
 ### Indirizzi
 
@@ -878,10 +890,11 @@ parametro `$adesso`.
 | C-138 | Da "i nove rifiuti" a "gli otto rifiuti costruibili": il nono è una guardia difensiva che l'API non permette di raggiungere, e contarlo fra i collaudati sarebbe stato contare una prova che non esiste |
 | C-148, C-149, C-151, C-152, C-161 | Da prove della suite a righe verificate dalla tabella dei guasti, con il costo dichiarato |
 | C-162 | Nuova. Non era prevista: serve a dimostrare che le prove sui rifiuti passano davvero dall'aggancio del punto pubblico, e non sono verdi perché la richiesta non arriva da nessuna parte |
+| C-163 | Nuova, e arrivata dopo: la rilettura del ramo ha trovato che un reindirizzamento all'esca veniva letto come un rifiuto. La riga è stata scritta prima della correzione e vista rossa sul comportamento, con `verificata` al posto di `ignota` |
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **197 prove e 1067 asserzioni**, di cui 43 prove nuove. È un **controllo
+La verifica riporta **198 prove e 1074 asserzioni**, di cui 44 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -890,16 +903,16 @@ rosse quando il comportamento si rompe.
 
 ## 12. Stato dell'implementazione, e che cosa il lavoro ha trovato
 
-**Fatto per intero.** Il perimetro del punto 1 è costruito, le quarantotto righe di collaudo
+**Fatto per intero.** Il perimetro del punto 1 è costruito, le quarantanove righe di collaudo
 sono verdi nella verifica continua, e la tabella dei guasti del punto 13 dice quali righe
 misurano davvero che cosa.
 
-Verifica locale su **tutti e due i rami** della matrice della verifica continua: WordPress
-6.5 con PHP 8.1, che è la versione minima dichiarata, e WordPress 7.1.1 con PHP 8.3, che è
-l'ultima. **197 prove e 1067 asserzioni, verdi in entrambi**; PHPCS senza errori e senza
-avvisi. Le prove nuove sono 43, le altre 154 sono quelle che c'erano.
+Verifica locale sulla versione minima dichiarata, WordPress 6.5: **198 prove e 1074
+asserzioni verdi**, PHPCS senza errori e senza avvisi. Le prove nuove sono 44, le altre 154
+sono quelle che c'erano.
 
-*Il secondo ramo è stato eseguito apposta e non dato per scontato: questa unità poggia su
+*La verifica continua esegue tutti e due i rami della matrice, WordPress 6.5 con PHP 8.1 e
+l'ultima con PHP 8.3, e per questa unità il secondo ramo non è una formalità: poggia su
 `wp_handle_sideload()`, su `_wp_relative_upload_path()` e sul filtro `upload_dir`, cioè su
 tre punti di WordPress dove un cambiamento fra una versione e l'altra non produrrebbe un
 errore ma un percorso diverso.*
@@ -960,6 +973,12 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 Undici guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
+
+*La tabella non è stata rifatta quando è stata corretta la lettura dei reindirizzamenti, e il
+motivo è che quella correzione non tocca la catena di controlli della consegna, che è ciò che
+questi undici guasti misurano: cambia un ramo dentro `verifica()`, e quel ramo ha la sua riga
+verde nella suite, la C-163, vista rossa prima della correzione. La tabella si rifà quando
+cambia la catena.*
 
 | Guasto | Che cosa ho rotto | Righe diventate rosse |
 |---|---|---|

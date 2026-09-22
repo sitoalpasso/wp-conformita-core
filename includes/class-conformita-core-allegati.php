@@ -36,7 +36,7 @@
  * mentre un deposito rifiutato è un messaggio a chi sta installando, nel
  * momento in cui può ancora rimediare.
  *
- * Righe di collaudo C-115..C-125, C-146, C-154..C-158.
+ * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163.
  *
  * @package Conformita_Core
  */
@@ -299,7 +299,7 @@ final class Conformita_Core_Allegati {
 	 * certificato non riconosciuto l'esito è `ignota`, cioè il deposito si
 	 * rifiuta, che è la direzione sicura.
 	 *
-	 * Righe C-154, C-155, C-156.
+	 * Righe C-154, C-155, C-156, C-163.
 	 *
 	 * @return array<string, mixed> Lo stato, con l'esito appena misurato.
 	 */
@@ -344,13 +344,34 @@ final class Conformita_Core_Allegati {
 		$stato = (int) wp_remote_retrieve_response_code( $risposta );
 		$corpo = (string) wp_remote_retrieve_body( $risposta );
 
-		if ( $stato < 200 || $stato > 299 ) {
+		if ( $stato >= 400 ) {
 			return self::conserva(
 				array(
 					'copertura'  => 'verificata',
 					'istante'    => self::adesso(),
 					'stato_http' => $stato,
 					'motivo'     => __( 'Il server nega il percorso della cartella protetta.', 'conformita-core' ),
+				)
+			);
+		}
+
+		/*
+		 * Un reindirizzamento non e' un rifiuto, ed e' l'unico posto dove
+		 * questa lettura poteva sbagliare aprendo. La richiesta non segue i
+		 * reindirizzamenti apposta, quindi di dove porta questo non si sa
+		 * niente: il caso comune e' un sito che manda da http a https, e li'
+		 * il file arriverebbe lo stesso un passo piu' in la'. Vale `ignota`,
+		 * cioe' il deposito si rifiuta, che e' la direzione sicura. Nello
+		 * stesso ramo finisce ogni risposta che non e' ne' 2xx ne' 4xx ne'
+		 * 5xx, perche' di quelle non si sa dire niente di piu'.
+		 */
+		if ( $stato < 200 || $stato > 299 ) {
+			return self::conserva(
+				array(
+					'copertura'  => 'ignota',
+					'istante'    => self::adesso(),
+					'stato_http' => $stato,
+					'motivo'     => __( 'Il server non serve e non nega: risponde con un reindirizzamento o con una risposta interlocutoria, e dove porta non si sa.', 'conformita-core' ),
 				)
 			);
 		}
