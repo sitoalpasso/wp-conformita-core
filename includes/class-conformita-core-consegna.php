@@ -443,7 +443,7 @@ final class Conformita_Core_Consegna {
 	 *
 	 * **Nessun anello scrive niente**, e nessuno guarda le capability sul punto
 	 * pubblico: l'esenzione è della superficie e non dell'utente, come al punto
-	 * 3 della scheda di S4. Righe C-131..C-137, C-167, C-168.
+	 * 3 della scheda di S4. Righe C-131..C-137, C-167, C-168, C-171.
 	 *
 	 * L'ultimo anello controlla il percorso normalizzato. Il percorso non arriva
 	 * mai dall'esterno, perché l'indirizzo porta due numeri e niente altro, ma
@@ -511,7 +511,14 @@ final class Conformita_Core_Consegna {
 			 * entra con il nonce e la capability del tipo, cioe' con
 			 * un'autorizzazione piu' forte di una password di lettura.
 			 */
-			if ( post_password_required( $atto ) ) {
+			/*
+			 * La password si guarda su tutti e due. Quella del padre copre
+			 * l'atto e cio' che gli appartiene; ma anche un allegato puo'
+			 * averne una propria, e `post_password_required()` non risale al
+			 * padre, quindi nessuna delle due domande risponde per l'altra.
+			 * Riga C-171.
+			 */
+			if ( post_password_required( $atto ) || post_password_required( $allegato ) ) {
 				return false;
 			}
 

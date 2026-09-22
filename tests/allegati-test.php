@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170.
+ * C-169, C-170, C-172, C-173.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -1043,5 +1043,106 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			Conformita_Core_Allegati::chiave_ambito( Conformita_Core_Allegati::sottocartella_corrente(), 'txt' ),
 			$ambiti
 		);
+	}
+
+	/**
+	 * C-172: sottocartella che la riduzione cambierebbe.
+	 *
+	 * La riduzione del nome serve a costruire un percorso e un indirizzo senza
+	 * sorprese, ma chi sposta i byte usa il nome vero. Se i due non coincidono
+	 * si proverebbe un percorso e se ne scriverebbe un altro, che e' lo stesso
+	 * difetto della riga C-169 per un'altra via. Il caso lo produce un aggancio
+	 * di qualcun altro sui caricamenti, non la configurazione normale.
+	 */
+	public function test_c172_sottocartella_non_provabile() {
+		$atto = $this->atto_valido();
+
+		add_filter( 'upload_dir', array( $this, 'sottocartella_con_un_punto' ), 5 );
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'upload_dir', array( $this, 'sottocartella_con_un_punto' ), 5 );
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_destinazione_non_provabile', $esito->get_error_code() );
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			),
+			'Nessun file deve essere entrato.'
+		);
+	}
+
+	/**
+	 * Una sottocartella con un punto nel nome, che la riduzione toglierebbe.
+	 *
+	 * @param array<string, string> $caricamenti Cartella dei caricamenti.
+	 * @return array<string, string>
+	 */
+	public function sottocartella_con_un_punto( $caricamenti ) {
+		$caricamenti['subdir'] = '/documenti.v1';
+		$caricamenti['path']   = $caricamenti['basedir'] . '/documenti.v1';
+		$caricamenti['url']    = $caricamenti['baseurl'] . '/documenti.v1';
+
+		return $caricamenti;
+	}
+
+	/**
+	 * C-173: regole riscritte durante la verifica di un ambito.
+	 *
+	 * Se le regole mancavano, la cartella era aperta, e tutto quello che si
+	 * sapeva parla di una configurazione cambiata due volte. Non basta
+	 * dimenticare quando la verifica chiesta e' quella generale: anche quella
+	 * di un ambito solo, se riscrive, deve dimenticare tutto e rimisurare il
+	 * generale, altrimenti il deposito successivo trova le regole a posto e
+	 * riusa un giudizio vecchio.
+	 */
+	public function test_c173_regole_riscritte_durante_la_verifica_di_un_ambito() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'primo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+		$this->assertSame(
+			'verificata',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura']
+		);
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: si tocca il disco direttamente perche' e' il disco cio' che si sta verificando.
+		unlink( Conformita_Core_Allegati::cartella() . '/.htaccess' );
+
+		$this->risposta_finta = $this->esca_servita();
+
+		Conformita_Core_Allegati::verifica( $sotto, 'png' );
+
+		$this->assertSame(
+			'ignota',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'],
+			'L\'esito dei PDF parlava di una configurazione che non c\'e\' piu\'.'
+		);
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'secondo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito );
 	}
 }

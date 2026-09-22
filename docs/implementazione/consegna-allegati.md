@@ -500,6 +500,7 @@ dire. Quindi **tutti** i rifiuti del punto pubblico sono lo stesso rifiuto.
 | Contenuto non pubblicato (bozza, privato, in revisione) | non trovato | C-136 |
 | Contenuto pubblicato ma protetto da password, chiesto senza la password | non trovato | C-167 |
 | Allegato cestinato, contenuto padre ancora pubblicato | non trovato | C-168 |
+| Allegato con una password propria, chiesto senza la password | non trovato | C-171 |
 | Contenuto scaduto | non trovato | C-131 |
 | Contenuto scaduto e richiedente con tutte le capability | non trovato | C-132 |
 | Sezione senza politica valida | non trovato | vedi sotto |
@@ -614,7 +615,7 @@ cambia firma o comportamento, e nessun vincolo si restringe. L'albo dovrà richi
 
 | Funzione | Parametri | Ritorno | Errori |
 |---|---|---|---|
-| `conformita_core_deposita_allegato( $post_id, $file, $opzioni )` | `int`, `array` nella forma di una voce di `$_FILES`, `array` con `origine` obbligatoria | `int` identificativo dell'allegato, oppure `WP_Error` | `conformita_core_tipo_non_gestito`, `conformita_core_origine_non_dichiarata`, `conformita_core_origine_incoerente`, `conformita_core_tipo_file_non_ammesso`, `conformita_core_protezione_non_verificata`, `conformita_core_cartella_non_protetta`, `conformita_core_deposito_fallito` |
+| `conformita_core_deposita_allegato( $post_id, $file, $opzioni )` | `int`, `array` nella forma di una voce di `$_FILES`, `array` con `origine` obbligatoria | `int` identificativo dell'allegato, oppure `WP_Error` | `conformita_core_tipo_non_gestito`, `conformita_core_origine_non_dichiarata`, `conformita_core_origine_incoerente`, `conformita_core_tipo_file_non_ammesso`, `conformita_core_protezione_non_verificata`, `conformita_core_destinazione_non_provabile`, `conformita_core_cartella_non_protetta`, `conformita_core_deposito_fallito` |
 | `conformita_core_indirizzo_consegna( $allegato_id )` | `int` | `string`, oppure `WP_Error` | `conformita_core_allegato_non_gestito` |
 | `conformita_core_indirizzo_consegna_amministrativa( $allegato_id )` | `int` | `string` con il nonce, oppure `WP_Error` | come sopra |
 | `conformita_core_allegato_protetto( $allegato_id )` | `int` | `bool` | nessuno: è chiamata anche nel percorso di lettura |
@@ -702,8 +703,9 @@ In un posto solo, in quest'ordine, e nessun aggancio la salta.
 5. Il tipo del contenuto è registrato attraverso il core.
 6. La sezione del tipo ha una politica valida.
 7. Lo stato del contenuto è `publish`.
-8. Il contenuto non chiede una password che la richiesta non porta, secondo
-   `post_password_required()`.
+8. Né il contenuto né l'allegato chiedono una password che la richiesta non porta,
+   secondo `post_password_required()`: si guardano tutti e due, perché quella funzione non
+   risale dal file al contenuto padre.
 9. L'allegato stesso è in stato `inherit`, cioè quello che il deposito produce: un
    allegato cestinato non si consegna, anche se il suo contenuto padre è a posto.
 10. Il contenuto non è scaduto, secondo `Conformita_Core_Scadenza::scaduto()`, cioè la stessa
@@ -819,6 +821,8 @@ Nessun file del repository dell'albo.
 | Un aggancio di un altro componente solleva un'eccezione durante lo spostamento dei byte | il dirottamento dei caricamenti si spegne comunque, perché la rimozione del filtro sta in un `finally` | sì |
 | Scavalcamento dichiarato su un server davvero scoperto | i file si depositano in una cartella aperta | **no**, ed è il senso di uno scavalcamento: la responsabilità passa a chi lo dichiara |
 | Il server nega la cartella ma serve i file di una certa estensione | l'esca di quell'ambito torna con il gettone, quindi vale `non_coperta`: il primo deposito di quell'estensione si rifiuta, e l'esito generale diventa `non_coperta` | sì |
+| Un aggancio di un altro componente cambia la sottocartella dei caricamenti in un nome che la riduzione non conserva | il deposito si rifiuta con un codice suo: si proverebbe un percorso e se ne scriverebbe un altro | sì |
+| Le regole vengono riscritte durante la verifica di un ambito | si dimentica tutto quello che si sapeva, generale compreso, e il generale si rimisura subito | sì |
 | Una regola del server dipende dal nome del singolo file e non dall'estensione | non viene vista: l'esca prova l'estensione e la cartella, non il nome. **Limite dichiarato** | **no** |
 | Allegato cestinato con il padre ancora pubblicato | il punto pubblico non trova niente; l'amministrazione lo vede ancora, perche' resti ripristinabile | sì |
 | Contenuto pubblicato con una password, allegato chiesto senza | la consegna pubblica rifiuta come per ogni altro motivo; quella amministrativa, che pretende nonce e capability, consegna | sì |
@@ -864,7 +868,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Cinquantasei righe, da C-115 a C-170.**
+convenzione di questo repository. **Cinquantanove righe, da C-115 a C-173.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -902,6 +906,8 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-164 | fatto | Uno stato di errore che non è un diniego (500, 503, 429, 401) vale `ignota` e non `verificata`, e il deposito si rifiuta |
 | C-165 | fatto | Il gettone vince sullo stato: l'esca servita con uno stato di errore vale `non_coperta` |
 | C-169 | fatto | Esca `.txt` negata nella radice ma file dell'estensione servito nella sottocartella di destinazione: il deposito si rifiuta, e l'esito generale diventa `non_coperta` perché il gettone è uscito |
+| C-172 | fatto | Sottocartella di destinazione che la riduzione cambierebbe: il deposito si rifiuta con un codice suo, e nessun file si muove |
+| C-173 | fatto | Regole riscritte durante la verifica di un ambito: gli esiti conservati si dimenticano tutti, il generale si rimisura, e il deposito successivo riprova il proprio ambito |
 | C-170 | fatto | L'esito di un ambito si conserva con la sua chiave: il secondo deposito della stessa estensione nella stessa sottocartella non fa nessuna richiesta, e un'estensione nuova ne fa una |
 
 ### Indirizzi
@@ -931,6 +937,7 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-134 | fatto | Allegato che non appartiene al contenuto dichiarato: non trovato, mentre l'accoppiata giusta consegna |
 | C-135 | fatto | Contenuto di un tipo non registrato attraverso il core: non trovato |
 | C-136 | fatto | Contenuto in bozza, privato o in attesa di revisione: non trovato |
+| C-171 | fatto | Allegato con una password propria, diversa da quella del padre: il punto pubblico non trova niente; con la password giusta consegna, e la scadenza continua a valere |
 | C-168 | fatto | Allegato cestinato, con il contenuto padre ancora pubblicato e non scaduto: il punto pubblico non trova niente, quello amministrativo consegna |
 | C-167 | fatto | Contenuto pubblicato e protetto da password: senza la password non trovato, con la password giusta consegna, e da scaduto non trovato nemmeno con la password |
 | C-137 | fatto | File mancante sul disco: non trovato, e nel corpo della risposta non c'è né il percorso né il nome della cartella |
@@ -987,6 +994,7 @@ parametro `$adesso`.
 | C-164, C-165 | Nuove, dal primo giro di revisione indipendente. La correzione della C-163 aveva lasciato in piedi la stessa famiglia con un confine diverso: ogni stato dal 400 in su valeva diniego, e il gettone si guardava dopo lo stato. Tutte e due viste rosse sul comportamento prima della correzione |
 | C-167 | Nuova, dal secondo giro di revisione indipendente. Lo stato `publish` non dice che il contenuto si legga: con una password sopra, l'allegato usciva lo stesso dall'indirizzo di consegna. La riga è stata scritta prima della correzione e vista rossa sul comportamento |
 | C-138 | Da otto rifiuti confrontati a nove, perché il caso della password è costruibile e va confrontato con gli altri |
+| C-171, C-172, C-173 | Nuove, dal quarto giro di revisione indipendente. Sono tre crepe nelle correzioni dei giri precedenti: la password guardata solo sul padre, la sottocartella provata che poteva non essere quella scritta, e la dimenticanza degli esiti che guardava solo la verifica generale. Tutte e tre viste rosse spegnendo il controllo e rieseguendo la suite |
 | C-168, C-169, C-170 | Nuove, dal terzo giro di revisione indipendente. La C-168 chiude l'allegato cestinato che continuava a uscire; le altre due chiudono il fatto che il diniego dell'esca `.txt` nella radice veniva letto come una prova su tutta la cartella. Tutte viste rosse prima della correzione, la C-169 con il deposito che riusciva |
 | C-157 | Da "un deposito che non riscrive niente non fa nessuna richiesta" a "un deposito in un ambito già provato non fa nessuna richiesta": il primo deposito di ogni estensione nuova adesso ne fa una, ed è il prezzo dichiarato della C-169 |
 | C-158 | Il conteggio delle richieste passa da due a tre, per la stessa ragione |
@@ -994,7 +1002,7 @@ parametro `$adesso`.
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **205 prove e 1135 asserzioni**, di cui 51 prove nuove. È un **controllo
+La verifica riporta **208 prove e 1155 asserzioni**, di cui 54 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1070,18 +1078,19 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Quattordici guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Diciassette guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti G12, G13 e G14 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G17 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; il G14 spegnendo davvero il controllo dell'ambito e rieseguendo la suite, che ha dato
-quattro righe rosse, fra cui la C-169 con il deposito che riusciva. **Gli altri undici non
+lì; dal G14 al G17 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
+con il deposito che riusciva. **Gli altri undici non
 sono stati rieseguiti**, e il costo è dichiarato: le correzioni aggiungono anelli e non ne
 cambiano nessuno, ma che gli undici continuino a misurare quello che misuravano è
 un'inferenza, non una cosa vista.*
@@ -1121,6 +1130,9 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G12 | Tolto il controllo sulla password del contenuto | C-138, C-167 |
 | G13 | Tolto il controllo dello stato dell'allegato | C-168 |
 | G14 | Tolto il controllo dell'ambito nel deposito | C-157, C-158, C-169, C-170 |
+| G15 | Tolto il controllo della password propria dell'allegato | C-171 |
+| G16 | Tolto il controllo sulla provabilità della sottocartella | C-172 |
+| G17 | Tolta la dimenticanza degli esiti alla riscrittura delle regole | C-173 |
 
 ### Che cosa ha trovato il secondo giro di revisione indipendente
 
@@ -1169,6 +1181,30 @@ quella che serve.** `publish` sul padre al posto di "questo allegato è consegna
 diniego di un percorso al posto del diniego della cartella. Non sono errori di scrittura, sono
 errori di domanda, e non è un caso che a trovarli sia stato un lettore esterno: chi ha scritto
 il codice sa che cosa intendeva chiedere, e rilegge la riga come se lo chiedesse davvero.
+
+### Che cosa ha trovato il quarto giro di revisione indipendente
+
+Tre rilievi, accolti tutti e tre. Nessuno è una scoperta nuova sul piano del disegno: sono tre
+crepe nelle correzioni dei giri precedenti, e questo di per sé dice qualcosa su quanto sia
+facile chiudere male un buco che si è appena capito.
+
+**La password si guardava solo sul padre.** `post_password_required()` risponde sul contenuto
+che le si passa e non risale dal file all'atto, quindi la domanda sul padre non rispondeva per
+l'allegato, che una password propria può averla. Riga C-171, e adesso si guardano tutti e due.
+
+**La sottocartella provata poteva non essere quella scritta.** La riduzione del nome serve a
+costruire un percorso e un indirizzo senza sorprese, ma chi sposta i byte usa il nome vero: se
+un aggancio di un altro componente mette nella sottocartella un carattere che la riduzione
+toglie, si prova un percorso e se ne scrive un altro. È lo stesso difetto della C-169 per
+un'altra via. Adesso il deposito si rifiuta, con un codice suo, quando i due nomi non
+coincidono; e l'istante si fissa una volta sola e si passa a `wp_handle_sideload()`, così la
+sottocartella provata è quella scritta anche la notte del primo del mese. Riga C-172.
+
+**La dimenticanza degli esiti guardava solo la verifica generale.** Se a riscrivere le regole
+era la verifica di un ambito, gli esiti vecchi sopravvivevano, incluso quello generale, e il
+deposito successivo trovava le regole a posto e riusava un giudizio che parlava di una
+configurazione cambiata due volte. Adesso qualunque riscrittura fa dimenticare tutto e
+rimisurare subito il generale. Riga C-173.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 

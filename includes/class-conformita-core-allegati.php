@@ -259,7 +259,7 @@ final class Conformita_Core_Allegati {
 	public static function sottocartella_corrente() {
 		$caricamenti = wp_upload_dir();
 
-		return isset( $caricamenti['subdir'] ) ? self::sotto( $caricamenti['subdir'] ) : '';
+		return isset( $caricamenti['subdir'] ) ? (string) $caricamenti['subdir'] : '';
 	}
 
 	/**
@@ -477,11 +477,28 @@ final class Conformita_Core_Allegati {
 		$riscritto = false;
 		$scrittura = self::scrivi( $riscritto );
 
+		self::$in_verifica = false;
+
+		/*
+		 * **Se qui si e' dovuto riscrivere, tutto quello che si sapeva non vale
+		 * piu'.** Vale anche quando la verifica chiesta e' quella di un ambito
+		 * solo: le regole mancavano, quindi la cartella era aperta, e gli esiti
+		 * conservati parlano di una configurazione che nel frattempo e'
+		 * cambiata due volte. Si dimenticano prima di ogni altra cosa, anche
+		 * prima di un'uscita per errore, e l'esito generale si rimisura invece
+		 * di restare quello di prima. Riga C-173.
+		 */
+		if ( $riscritto ) {
+			self::dimentica();
+
+			if ( ! self::generale( $sotto, $estensione ) ) {
+				self::verifica();
+			}
+		}
+
 		if ( ! is_wp_error( $scrittura ) && ! self::generale( $sotto, $estensione ) ) {
 			$scrittura = self::scrivi_esca( $sotto, $estensione );
 		}
-
-		self::$in_verifica = false;
 
 		if ( is_wp_error( $scrittura ) ) {
 			return self::conserva_esito(
@@ -652,6 +669,35 @@ final class Conformita_Core_Allegati {
 		}
 
 		return self::conserva( $nuovi );
+	}
+
+	/**
+	 * Dimentica ogni esito conservato, generale e di ambito.
+	 *
+	 * Si chiama quando le regole della cartella sono state riscritte: da quel
+	 * momento nessuna delle prove fatte prima parla della configurazione che
+	 * c'è adesso.
+	 *
+	 * @return void
+	 */
+	private static function dimentica() {
+		$conservato = get_option( self::OPZIONE, array() );
+		$conservato = is_array( $conservato ) ? $conservato : array();
+
+		update_option(
+			self::OPZIONE,
+			array_merge(
+				$conservato,
+				array(
+					'copertura'  => 'ignota',
+					'istante'    => '',
+					'stato_http' => 0,
+					'motivo'     => __( 'I file di regole sono stati riscritti: quello che si sapeva prima non vale più.', 'conformita-core' ),
+					'ambiti'     => array(),
+				)
+			),
+			false
+		);
 	}
 
 	/**
@@ -869,6 +915,38 @@ final class Conformita_Core_Allegati {
 		}
 
 		/*
+		 * **L'istante si fissa qui e si passa a chi sposta i byte.** La
+		 * sottocartella dipende dalla data, quindi calcolarla adesso e lasciare
+		 * che `wp_handle_sideload()` la ricalcoli per conto suo significa
+		 * provare un percorso e scriverne un altro, la notte del primo del
+		 * mese. Riga C-172.
+		 */
+		$tempo       = current_time( 'mysql' );
+		$caricamenti = wp_upload_dir( $tempo );
+		$sotto       = isset( $caricamenti['subdir'] ) ? (string) $caricamenti['subdir'] : '';
+
+		/*
+		 * **Se il nome della sottocartella non sopravvive alla riduzione, non
+		 * si deposita.** La riduzione serve a costruire un percorso e un
+		 * indirizzo senza sorprese, ma chi scrive i byte usa il nome vero: se i
+		 * due non coincidono si proverebbe un percorso e se ne scriverebbe un
+		 * altro. Fra allargare il filtro e rifiutare, si rifiuta, perche' il
+		 * caso lo produce un aggancio di qualcun altro e non la configurazione
+		 * normale. Riga C-172.
+		 */
+		if ( self::sotto( $sotto ) !== $sotto ) {
+			return new WP_Error(
+				'conformita_core_destinazione_non_provabile',
+				sprintf(
+					/* translators: %s: sottocartella di destinazione. */
+					__( 'Deposito rifiutato: la sottocartella di destinazione «%s» non è provabile, perché il suo nome non coincide con quello che la verifica saprebbe chiedere al server.', 'conformita-core' ),
+					$sotto
+				),
+				array( 'sottocartella' => $sotto )
+			);
+		}
+
+		/*
 		 * **L'ambito di questo deposito, provato prima di muovere i byte.**
 		 * L'esito generale dice che la radice della cartella e' negata a una
 		 * richiesta per un `.txt`. Questo file non e' quello: ha un'altra
@@ -879,7 +957,6 @@ final class Conformita_Core_Allegati {
 		 * richiesta. Righe C-169 e C-170.
 		 */
 		if ( ! $stato['scavalcata'] ) {
-			$sotto  = self::sottocartella_corrente();
 			$ambito = self::stato_ambito( $sotto, $tipo_file['ext'] );
 
 			if ( 'verificata' !== $ambito['copertura'] ) {
@@ -922,7 +999,8 @@ final class Conformita_Core_Allegati {
 				array(
 					'test_form' => false,
 					'action'    => 'wp_handle_sideload',
-				)
+				),
+				$tempo
 			);
 		} finally {
 			remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );

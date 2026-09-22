@@ -2,7 +2,7 @@
 /**
  * I due punti di consegna: indirizzi, catena di controlli, intestazioni.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171.
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -1005,6 +1005,51 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			200,
 			$risposta['stato'],
 			'Dall\'amministrazione si deve poter ancora vedere cio\' che e\' nel cestino.'
+		);
+	}
+
+	/**
+	 * C-171: l'allegato ha una password propria.
+	 *
+	 * `post_password_required()` guarda il contenuto che le si passa e non
+	 * risale al padre, quindi la domanda sul padre non risponde per l'allegato.
+	 * Un allegato depositato regolarmente puo' ricevere una password sua da una
+	 * scrittura successiva, e da quel momento e' un contenuto che non si legge
+	 * senza password come qualunque altro.
+	 */
+	public function test_c171_allegato_con_una_password_propria() {
+		$atto     = $this->atto();
+		$allegato = $this->allegato( $atto, 'riservato-suo.pdf' );
+
+		$this->assertSame( 200, $this->chiedi( $atto, $allegato )['stato'] );
+
+		wp_update_post(
+			array(
+				'ID'            => $allegato,
+				'post_password' => 'suo',
+			)
+		);
+
+		$this->assertSame(
+			404,
+			$this->chiedi( $atto, $allegato )['stato'],
+			'La password dell\'allegato non deve essere ignorata.'
+		);
+
+		$this->presenta_password( 'suo' );
+
+		$this->assertSame( 200, $this->chiedi( $atto, $allegato )['stato'] );
+
+		update_post_meta(
+			$atto,
+			conformita_core_chiave_fine_pubblicazione(),
+			gmdate( 'Y-m-d', strtotime( '-1 day' ) )
+		);
+
+		$this->assertSame(
+			404,
+			$this->chiedi( $atto, $allegato )['stato'],
+			'La password dell\'allegato non scavalca la scadenza dell\'atto.'
 		);
 	}
 
