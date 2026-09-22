@@ -288,3 +288,124 @@ if ( ! function_exists( 'conformita_core_avvia_componente' ) ) {
 		return Conformita_Core_Dipendenza::avvia_componente( $nome, $file, $api_richiesta );
 	}
 }
+
+if ( ! function_exists( 'conformita_core_deposita_allegato' ) ) {
+	/**
+	 * Deposita un file su un contenuto di tipo gestito.
+	 *
+	 * Il componente non sposta i file per conto proprio: se lo facesse, la
+	 * cartella protetta sarebbe facoltativa e l'impronta non esisterebbe.
+	 *
+	 * **`origine` è obbligatoria e non ha valore predefinito.** Vale
+	 * `caricamento`, e allora la funzione pretende che il file provenga davvero
+	 * da un caricamento HTTP, oppure `percorso_locale`, e allora chi chiama
+	 * dichiara di sapere che i byte sono già sul disco. Un predefinito sarebbe
+	 * sbagliato in tutte e due le direzioni: `caricamento` renderebbe
+	 * impossibile l'importazione, `percorso_locale` trasformerebbe un percorso
+	 * ricevuto dall'esterno in una lettura di file arbitrari.
+	 *
+	 * **Si rifiuta se la protezione della cartella non risulta verificata.** Fra
+	 * scrivere un file che non si è in grado di proteggere e non scriverlo, non
+	 * si scrive.
+	 *
+	 * @param int                  $post_id Contenuto padre.
+	 * @param array<string, mixed> $file    Voce nella forma di `$_FILES`.
+	 * @param array<string, mixed> $opzioni Opzioni: `origine` è obbligatoria.
+	 * @return int|WP_Error Identificativo dell'allegato, oppure errore.
+	 */
+	function conformita_core_deposita_allegato( $post_id, array $file, array $opzioni = array() ) {
+		return Conformita_Core_Allegati::deposita( $post_id, $file, $opzioni );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_indirizzo_consegna' ) ) {
+	/**
+	 * L'indirizzo pubblico da cui si scarica un allegato depositato.
+	 *
+	 * È l'unico indirizzo da stampare: il percorso del file non si pubblica mai,
+	 * e `wp_get_attachment_url()` restituisce già questo.
+	 *
+	 * @param int $allegato_id Identificativo dell'allegato.
+	 * @return string|WP_Error
+	 */
+	function conformita_core_indirizzo_consegna( $allegato_id ) {
+		return Conformita_Core_Consegna::indirizzo( $allegato_id );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_indirizzo_consegna_amministrativa' ) ) {
+	/**
+	 * L'indirizzo amministrativo, con il proprio nonce.
+	 *
+	 * Serve il file anche quando il contenuto è scaduto, e pretende la
+	 * capability del tipo: è la stessa esenzione che l'amministrazione ha sulle
+	 * pagine, non l'archivio riservato, che è un'unità successiva.
+	 *
+	 * @param int $allegato_id Identificativo dell'allegato.
+	 * @return string|WP_Error
+	 */
+	function conformita_core_indirizzo_consegna_amministrativa( $allegato_id ) {
+		return Conformita_Core_Consegna::indirizzo_amministrativo( $allegato_id );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_allegato_protetto' ) ) {
+	/**
+	 * L'allegato è stato depositato attraverso il core.
+	 *
+	 * Non restituisce mai un errore: è chiamata nel percorso di lettura.
+	 *
+	 * @param int $allegato_id Identificativo dell'allegato.
+	 * @return bool
+	 */
+	function conformita_core_allegato_protetto( $allegato_id ) {
+		return Conformita_Core_Allegati::protetto( $allegato_id );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_impronta_allegato' ) ) {
+	/**
+	 * L'impronta calcolata al momento del deposito.
+	 *
+	 * Calcolata al deposito e non alla scadenza, perché alla scadenza si potrebbe
+	 * solo fotografare quello che sta sul disco in quel momento, che non attesta
+	 * ciò che è stato pubblicato. Non si ricalcola alla lettura.
+	 *
+	 * @param int $allegato_id Identificativo dell'allegato.
+	 * @return array<string, mixed>|WP_Error Con `algoritmo`, `valore`, `dimensione`, `deposito`.
+	 */
+	function conformita_core_impronta_allegato( $allegato_id ) {
+		return Conformita_Core_Allegati::impronta( $allegato_id );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_stato_protezione_allegati' ) ) {
+	/**
+	 * Lo stato della protezione della cartella, letto e non misurato.
+	 *
+	 * **Non fa nessuna richiesta.** `copertura` vale `verificata`, `non_coperta`
+	 * oppure `ignota`, e riporta sempre l'esito vero anche quando lo
+	 * scavalcamento è dichiarato: la costante cambia che cosa il deposito fa,
+	 * non che cosa lo stato dice.
+	 *
+	 * @return array<string, mixed>
+	 */
+	function conformita_core_stato_protezione_allegati() {
+		return Conformita_Core_Allegati::stato();
+	}
+}
+
+if ( ! function_exists( 'conformita_core_verifica_protezione_allegati' ) ) {
+	/**
+	 * Rifà la verifica della protezione e conserva il nuovo esito.
+	 *
+	 * Chiede l'esca al sito stesso e legge la risposta. Costa una richiesta
+	 * HTTP, quindi è una cosa che si chiede e non che capita: il deposito la
+	 * rifà da sé solo quando ha dovuto riscrivere i file di regole.
+	 *
+	 * @return array<string, mixed> Lo stato con l'esito appena misurato.
+	 */
+	function conformita_core_verifica_protezione_allegati() {
+		return Conformita_Core_Allegati::verifica();
+	}
+}

@@ -18,8 +18,9 @@ supportato.
   conformità non dipende dall'esecuzione del compito pianificato.
 - **Controllo dell'indicizzazione**, con la politica dichiarata dal componente che
   registra la sezione e nessun valore predefinito.
-- **Consegna degli allegati** da endpoint PHP, con cartella protetta e verifica della
-  scadenza a ogni richiesta.
+- **Consegna degli allegati**: i file stanno in una cartella che l'accesso diretto non
+  raggiunge e si scaricano solo da un punto di consegna che a ogni richiesta rifà tutti i
+  controlli. La protezione della cartella non si presume: si verifica.
 - **Registro delle modifiche** in sola aggiunta, consultabile con una capability
   dedicata.
 - **Verificatore dei collegamenti** per le voci che rinviano ad altre pagine o ad altri
@@ -95,6 +96,55 @@ Non sono coperti, e vanno considerati limiti noti: `WP_Query` con `suppress_filt
 identificativo; le interrogazioni SQL dirette; la lettura diretta dei metadati; le pagine
 servite da una memoria che risponde prima di WordPress. Il controllo non avviene a ogni
 richiesta del contenuto: avviene a ogni richiesta che arriva a WordPress.
+
+### Allegati: dove stanno, e perché un deposito può essere rifiutato
+
+È la parte che un componente dipendente deve sapere prima di scrivere una riga.
+
+**I file non stanno nella cartella pubblica dei caricamenti.** Stanno in
+`wp-content/uploads/conformita-core-protetto/`, dove il componente scrive `.htaccess`,
+`web.config` e un indice muto. Il percorso memorizzato sull'allegato porta quel segmento per
+intero, e `wp_get_attachment_url()` restituisce l'indirizzo di consegna e non il percorso del
+file: **il percorso non si pubblica mai**.
+
+**La protezione si verifica, non si presume.** Nella cartella c'è anche un file esca con un
+gettone dentro; il componente lo chiede al sito stesso e legge la risposta. Un rifiuto vale
+`verificata`, il gettone che torna indietro vale `non_coperta`, e tutto il resto (richiesta
+fallita, oppure `200` con qualcosa che non è il nostro file) vale `ignota`. La richiesta si
+fa all'attivazione, quando i file di regole vengono scritti o riscritti, e su richiesta
+esplicita con `conformita_core_verifica_protezione_allegati()`; **non a ogni deposito**.
+L'esito si conserva con il proprio istante e si rilegge con
+`conformita_core_stato_protezione_allegati()`, che non fa nessuna richiesta.
+
+**Dove la protezione non risulta verificata, il deposito si rifiuta.** Non è un avviso: è un
+rifiuto, e su un server che non legge i file di regole (nginx, Caddy, Apache con
+`AllowOverride None`) nessun file si deposita finché non si aggiunge la regola alla
+configurazione del server. Fra scrivere un file che non si è in grado di proteggere e non
+scriverlo, non si scrive: un file già finito in una cartella aperta non si richiama indietro.
+L'installazione che ha verificato la protezione a mano, e in cui il giro sul sito stesso non
+funziona per costruzione, può dichiarare la costante
+`CONFORMITA_CORE_PROTEZIONE_CONFERMATA`; lo stato continua a riportare l'esito vero accanto
+allo scavalcamento.
+
+**Due punti di consegna, non uno.** Quello pubblico applica la scadenza **a chiunque**,
+permessi compresi, e risponde "non trovato" a ogni rifiuto: un file che esiste ma è scaduto
+non deve confessare di esistere. Quello amministrativo sta su `admin-post.php`, pretende il
+nonce e la capability del tipo, e serve il file anche dopo la scadenza. Sono due indirizzi e
+non un indirizzo con due comportamenti, perché su `admin-post.php` `is_admin()` è vero anche
+per un visitatore anonimo: un punto pubblico messo lì risulterebbe esente dal filtro di
+scadenza per l'indirizzo scelto.
+
+**Come esce il file.** PDF e immagini raster di un elenco chiuso e non configurabile escono
+dentro la pagina, con una politica di sicurezza dei contenuti che li isola; ogni altro tipo si
+scarica. Su tutto: nessuna memoria di pagina, nessuna richiesta parziale.
+
+**Limiti dichiarati.** L'esito della verifica invecchia, e una modifica alla configurazione
+del server fatta dopo non si nota finché qualcuno non rifà la verifica. La richiesta parte dal
+server e non da Internet, quindi non vede quello che sta davanti al sito: un proxy, una rete
+di distribuzione, un firewall applicativo. L'impronta si calcola al deposito e non si
+ricontrolla, quindi un file sostituito sul disco non si nota. E `wp_get_attachment_url()`
+restituisce l'indirizzo pubblico anche in amministrazione, perché l'indirizzo amministrativo
+porta un nonce e un nonce si genera dove lo si usa.
 
 ## Requisiti normativi di riferimento
 
