@@ -113,11 +113,17 @@ Il gettone che torna indietro vale `non_coperta`, con qualunque stato sia tornat
 usciti. Un `403` o un `404` valgono `verificata`, e sono un elenco chiuso. Tutto il resto vale
 `ignota`, quindi niente deposito: la richiesta fallita, il `200` con qualcosa che non è il
 nostro file, il reindirizzamento, e ogni stato che parla del momento e non delle regole della
-cartella, come un `503` o il `401` di un sito ancora chiuso al pubblico. La richiesta si
-fa all'attivazione, quando i file di regole vengono scritti o riscritti, e su richiesta
-esplicita con `conformita_core_verifica_protezione_allegati()`; **non a ogni deposito**.
-L'esito si conserva con il proprio istante e si rilegge con
-`conformita_core_stato_protezione_allegati()`, che non fa nessuna richiesta.
+cartella, come un `503` o il `401` di un sito ancora chiuso al pubblico.
+
+**Un diniego prova un percorso, non una cartella.** Un server può negare la cartella e servire
+lo stesso i file di una certa estensione, perché fra due regole non vince sempre quella che
+parla della cartella. Perciò l'esito si conserva per **ambito**, cioè per la coppia
+sottocartella più estensione, e il primo deposito di un'estensione nuova prova il percorso
+vero prima di scrivere i byte. La richiesta si fa all'attivazione, quando i file di regole
+vengono scritti o riscritti, su richiesta esplicita con
+`conformita_core_verifica_protezione_allegati()`, e la prima volta che si deposita in un
+ambito non ancora provato; **non a ogni deposito**. L'esito si conserva con il proprio istante
+e si rilegge con `conformita_core_stato_protezione_allegati()`, che non fa nessuna richiesta.
 
 **Dove la protezione non risulta verificata, il deposito si rifiuta.** Non è un avviso: è un
 rifiuto, e su un server che non legge i file di regole (nginx, Caddy, Apache con

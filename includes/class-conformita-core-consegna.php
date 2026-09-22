@@ -443,7 +443,7 @@ final class Conformita_Core_Consegna {
 	 *
 	 * **Nessun anello scrive niente**, e nessuno guarda le capability sul punto
 	 * pubblico: l'esenzione è della superficie e non dell'utente, come al punto
-	 * 3 della scheda di S4. Righe C-131..C-137, C-167.
+	 * 3 della scheda di S4. Righe C-131..C-137, C-167, C-168.
 	 *
 	 * L'ultimo anello controlla il percorso normalizzato. Il percorso non arriva
 	 * mai dall'esterno, perché l'indirizzo porta due numeri e niente altro, ma
@@ -512,6 +512,28 @@ final class Conformita_Core_Consegna {
 			 * un'autorizzazione piu' forte di una password di lettura.
 			 */
 			if ( post_password_required( $atto ) ) {
+				return false;
+			}
+
+			/*
+			 * Lo stato dell'allegato, non solo quello del padre. Con
+			 * `MEDIA_TRASH` dichiarata, cestinare un allegato non cancella
+			 * niente: restano il file, la marca del deposito e il padre, e
+			 * cambia soltanto lo stato. Senza questo anello un indirizzo
+			 * vecchio continuerebbe a servire un documento ritirato mentre il
+			 * suo contenuto padre e' ancora pubblicato e non scaduto.
+			 *
+			 * Si ammette `inherit`, che e' lo stato che `deposita()` produce, e
+			 * non si elencano gli stati da rifiutare: un elenco di ammessi non
+			 * si allarga da se' quando WordPress inventa uno stato nuovo. E'
+			 * la stessa ragione per cui i dinieghi dell'esca sono un elenco
+			 * chiuso. Riga C-168.
+			 *
+			 * Dall'amministrazione l'allegato cestinato si vede ancora, per lo
+			 * stesso motivo per cui si vede quello scaduto: perche' resti
+			 * controllabile e ripristinabile.
+			 */
+			if ( 'inherit' !== $allegato->post_status ) {
 				return false;
 			}
 

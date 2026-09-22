@@ -2,7 +2,7 @@
 /**
  * I due punti di consegna: indirizzi, catena di controlli, intestazioni.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-167.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168.
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -965,6 +965,46 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			404,
 			$this->chiedi( $atto, $allegato )['stato'],
 			'La password non e\' un lasciapassare per la scadenza.'
+		);
+	}
+
+	/**
+	 * C-168: allegato cestinato, contenuto padre ancora a posto.
+	 *
+	 * Con `MEDIA_TRASH` dichiarata, cestinare un allegato non cancella niente:
+	 * restano il file, la marca del deposito e il padre, e cambia soltanto lo
+	 * stato dell'allegato. Un indirizzo di consegna vecchio continuerebbe a
+	 * servire un documento ritirato. La prova mette l'allegato in quello stato
+	 * senza passare dalla costante, perche' cio' che la catena deve guardare e'
+	 * lo stato, non il modo in cui ci e' arrivato.
+	 */
+	public function test_c168_allegato_cestinato() {
+		$atto     = $this->atto();
+		$allegato = $this->allegato( $atto, 'ritirato.pdf' );
+
+		$this->assertSame( 200, $this->chiedi( $atto, $allegato )['stato'] );
+
+		wp_update_post(
+			array(
+				'ID'          => $allegato,
+				'post_status' => 'trash',
+			)
+		);
+
+		$this->assertSame(
+			404,
+			$this->chiedi( $atto, $allegato )['stato'],
+			'Un allegato cestinato non deve uscire dal punto pubblico.'
+		);
+
+		wp_set_current_user( $this->utente_del_tipo() );
+
+		$risposta = $this->chiedi_da_amministrazione( $atto, $allegato );
+
+		$this->assertSame(
+			200,
+			$risposta['stato'],
+			'Dall\'amministrazione si deve poter ancora vedere cio\' che e\' nel cestino.'
 		);
 	}
 

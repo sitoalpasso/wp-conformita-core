@@ -2,7 +2,8 @@
 /**
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
- * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166.
+ * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
+ * C-169, C-170.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -131,9 +132,20 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * @return mixed
 	 */
 	public function server_finto( $esito, $argomenti = array(), $indirizzo = '' ) {
-		unset( $esito, $argomenti, $indirizzo );
+		unset( $esito, $argomenti );
 
 		++$this->richieste;
+
+		/*
+		 * Quando la risposta finta e' una funzione, la decide l'indirizzo: serve
+		 * alle righe in cui il server tratta due percorsi in modo diverso, che
+		 * e' esattamente il caso che l'esca sola non vedeva.
+		 */
+		if ( $this->risposta_finta instanceof Closure ) {
+			$funzione = $this->risposta_finta;
+
+			return $funzione( (string) $indirizzo );
+		}
 
 		return $this->risposta_finta;
 	}
@@ -882,7 +894,7 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		);
 
 		$this->assertIsInt( $primo );
-		$this->assertSame( 1, $this->richieste, 'Il primo deposito scrive le regole, quindi verifica.' );
+		$this->assertSame( 2, $this->richieste, 'Il primo deposito scrive le regole e prova il suo ambito.' );
 
 		$secondo = conformita_core_deposita_allegato(
 			$atto,
@@ -891,11 +903,11 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		);
 
 		$this->assertIsInt( $secondo );
-		$this->assertSame( 1, $this->richieste, 'Un deposito che non riscrive niente non deve fare richieste.' );
+		$this->assertSame( 2, $this->richieste, 'Un deposito che non riscrive niente e resta nel suo ambito non deve fare richieste.' );
 
 		conformita_core_verifica_protezione_allegati();
 
-		$this->assertSame( 2, $this->richieste, 'La richiesta esplicita, invece, la fa.' );
+		$this->assertSame( 3, $this->richieste, 'La richiesta esplicita, invece, la fa.' );
 	}
 
 	/**
@@ -929,8 +941,107 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			array( 'origine' => 'percorso_locale' )
 		);
 
-		$this->assertSame( 2, $this->richieste, 'La riscrittura delle regole rifa\' la verifica.' );
+		$this->assertSame( 3, $this->richieste, 'La riscrittura delle regole rifa\' la verifica.' );
 		$this->assertWPError( $esito );
 		$this->assertSame( 'non_coperta', conformita_core_stato_protezione_allegati()['copertura'] );
+	}
+
+	/**
+	 * C-169: l'esca `.txt` negata non prova il PDF nella sottocartella.
+	 *
+	 * Il caso vero: una regola che nega la cartella e, accanto, una regola per
+	 * estensione che serve i file statici. Su nginx la seconda vince sulla
+	 * prima, e non serve che nessuno cambi niente dopo. L'esca `.txt` risponde
+	 * 403 senza gettone, quindi l'esito generale dice `verificata`, ma i PDF di
+	 * quella cartella sono scaricabili dal loro percorso.
+	 */
+	public function test_c169_il_diniego_del_txt_non_prova_il_pdf() {
+		$atto = $this->atto_valido();
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( '.pdf' === substr( $indirizzo, -4 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			),
+			'Nessun file deve essere entrato.'
+		);
+
+		$this->assertSame(
+			'non_coperta',
+			conformita_core_stato_protezione_allegati()['copertura'],
+			'Il gettone e\' uscito, quindi non e\' un fatto della sola estensione.'
+		);
+	}
+
+	/**
+	 * C-170: l'esito di un ambito si conserva, e il deposito dopo non chiede.
+	 *
+	 * La verifica per ambito non deve diventare una richiesta a ogni deposito:
+	 * il primo file di un'estensione nuova la paga, i successivi no.
+	 */
+	public function test_c170_lesito_dellambito_si_conserva() {
+		$atto = $this->atto_valido();
+
+		$this->assertSame( 0, $this->richieste );
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'primo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+		$this->assertSame( 2, $this->richieste, 'Le regole appena scritte, piu\' l\'ambito dei PDF.' );
+
+		$secondo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'secondo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $secondo, is_wp_error( $secondo ) ? $secondo->get_error_message() : '' );
+		$this->assertSame( 2, $this->richieste, 'Stesso ambito: nessuna richiesta in piu\'.' );
+
+		$terzo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'terzo.txt', "Un documento in chiaro.\n" ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $terzo, is_wp_error( $terzo ) ? $terzo->get_error_message() : '' );
+		$this->assertSame( 3, $this->richieste, 'Estensione nuova, ambito nuovo, una richiesta.' );
+
+		$ambiti = conformita_core_stato_protezione_allegati()['ambiti'];
+
+		$this->assertArrayHasKey(
+			Conformita_Core_Allegati::chiave_ambito( Conformita_Core_Allegati::sottocartella_corrente(), 'pdf' ),
+			$ambiti
+		);
+		$this->assertArrayHasKey(
+			Conformita_Core_Allegati::chiave_ambito( Conformita_Core_Allegati::sottocartella_corrente(), 'txt' ),
+			$ambiti
+		);
 	}
 }

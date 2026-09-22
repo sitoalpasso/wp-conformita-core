@@ -64,6 +64,19 @@ final class Conformita_Core_Allegati {
 	const ESCA = 'prova-accesso-diretto.txt';
 
 	/**
+	 * Il nome dell'esca senza estensione.
+	 *
+	 * L'estensione non è un dettaglio: un server può negare una cartella e
+	 * servire lo stesso i file di una certa estensione, perché la regola che
+	 * decide non è sempre quella che si legge per prima. Su nginx una
+	 * `location` con espressione regolare per i PDF vince su una `location`
+	 * di prefisso per la cartella; su Apache un `FilesMatch` fa lo stesso.
+	 * L'esca `.txt` nella radice prova il diniego di quel percorso e di quella
+	 * estensione, non di tutta la cartella.
+	 */
+	const ESCA_PREFISSO = 'prova-accesso-diretto';
+
+	/**
 	 * L'opzione che conserva l'esito della verifica.
 	 */
 	const OPZIONE = 'conformita_core_protezione_allegati';
@@ -164,12 +177,89 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
-	 * Indirizzo dell'esca.
+	 * Indirizzo dell'esca di un ambito.
+	 *
+	 * @param string $sotto      Sottocartella, vuota per la radice.
+	 * @param string $estensione Estensione dell'esca, senza punto.
+	 * @return string
+	 */
+	public static function indirizzo_esca( $sotto = '', $estensione = 'txt' ) {
+		return self::indirizzo_cartella() . self::sotto( $sotto ) . '/' . self::nome_esca( $estensione );
+	}
+
+	/**
+	 * Il nome dell'esca per un'estensione.
+	 *
+	 * @param string $estensione Estensione, senza punto.
+	 * @return string
+	 */
+	private static function nome_esca( $estensione ) {
+		return self::ESCA_PREFISSO . '.' . self::estensione( $estensione );
+	}
+
+	/**
+	 * L'estensione ridotta a quello che può stare in un nome di file.
+	 *
+	 * @param string $estensione Estensione dichiarata.
+	 * @return string
+	 */
+	private static function estensione( $estensione ) {
+		$estensione = strtolower( preg_replace( '/[^A-Za-z0-9]/', '', (string) $estensione ) );
+
+		return '' === $estensione ? 'txt' : $estensione;
+	}
+
+	/**
+	 * La sottocartella ridotta a una forma sicura: vuota, oppure con la barra
+	 * davanti e nessuna barra in fondo.
+	 *
+	 * @param string $sotto Sottocartella dichiarata.
+	 * @return string
+	 */
+	private static function sotto( $sotto ) {
+		$sotto = preg_replace( '#[^A-Za-z0-9/_-]#', '', str_replace( '\\', '/', (string) $sotto ) );
+		$sotto = trim( (string) $sotto, '/' );
+
+		return '' === $sotto ? '' : '/' . $sotto;
+	}
+
+	/**
+	 * La chiave con cui l'esito di un ambito si conserva.
+	 *
+	 * Un ambito è la coppia sottocartella più estensione, cioè esattamente
+	 * quello che un deposito produce e quello che una regola di server può
+	 * trattare in modo diverso dal resto.
+	 *
+	 * @param string $sotto      Sottocartella.
+	 * @param string $estensione Estensione.
+	 * @return string
+	 */
+	public static function chiave_ambito( $sotto, $estensione ) {
+		$sotto = self::sotto( $sotto );
+
+		return ( '' === $sotto ? '/' : $sotto ) . '|' . self::estensione( $estensione );
+	}
+
+	/**
+	 * L'ambito è quello generale, cioè l'esca `.txt` nella radice.
+	 *
+	 * @param string $sotto      Sottocartella.
+	 * @param string $estensione Estensione.
+	 * @return bool
+	 */
+	private static function generale( $sotto, $estensione ) {
+		return '' === self::sotto( $sotto ) && 'txt' === self::estensione( $estensione );
+	}
+
+	/**
+	 * La sottocartella in cui un deposito fatto adesso finirebbe.
 	 *
 	 * @return string
 	 */
-	public static function indirizzo_esca() {
-		return self::indirizzo_cartella() . '/' . self::ESCA;
+	public static function sottocartella_corrente() {
+		$caricamenti = wp_upload_dir();
+
+		return isset( $caricamenti['subdir'] ) ? self::sotto( $caricamenti['subdir'] ) : '';
 	}
 
 	/**
@@ -282,6 +372,50 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
+	 * Scrive l'esca di un ambito, creando la sottocartella se manca.
+	 *
+	 * @param string $sotto      Sottocartella.
+	 * @param string $estensione Estensione.
+	 * @return true|WP_Error
+	 */
+	private static function scrivi_esca( $sotto, $estensione ) {
+		$cartella = self::cartella() . self::sotto( $sotto );
+
+		if ( ! wp_mkdir_p( $cartella ) ) {
+			return new WP_Error(
+				'conformita_core_cartella_non_protetta',
+				sprintf(
+					/* translators: %s: percorso della sottocartella. */
+					__( 'Sottocartella dei depositi non creabile: %s.', 'conformita-core' ),
+					$cartella
+				)
+			);
+		}
+
+		$percorso  = $cartella . '/' . self::nome_esca( $estensione );
+		$contenuto = self::contenuto_esca();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- si confronta il contenuto di un file locale appena scritto, non si scarica un indirizzo remoto.
+		if ( is_readable( $percorso ) && file_get_contents( $percorso ) === $contenuto ) {
+			return true;
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- la protezione della cartella non può dipendere da credenziali FTP.
+		if ( false === file_put_contents( $percorso, $contenuto, LOCK_EX ) ) {
+			return new WP_Error(
+				'conformita_core_cartella_non_protetta',
+				sprintf(
+					/* translators: %s: nome del file esca. */
+					__( 'Esca %s non scrivibile: senza, il diniego del server non dimostrerebbe niente.', 'conformita-core' ),
+					self::nome_esca( $estensione )
+				)
+			);
+		}
+
+		return true;
+	}
+
+	/**
 	 * Prepara la cartella, e rifà la verifica se ha dovuto scrivere.
 	 *
 	 * La riscrittura delle regole è uno dei tre momenti in cui la verifica si
@@ -319,20 +453,40 @@ final class Conformita_Core_Allegati {
 	 * certificato non riconosciuto l'esito è `ignota`, cioè il deposito si
 	 * rifiuta, che è la direzione sicura.
 	 *
+	 * **Che cosa dimostra una verifica, e che cosa no.** Dimostra che quel
+	 * percorso, con quell'estensione, è negato. Non dimostra niente sugli
+	 * altri: un server può negare una cartella e servire lo stesso i file di
+	 * una certa estensione, perché fra due regole non vince sempre quella che
+	 * parla della cartella. Perciò l'esito si conserva per ambito, cioè per la
+	 * coppia sottocartella più estensione, e il deposito guarda l'ambito suo.
+	 * Righe C-169 e C-170.
+	 *
+	 * Una verifica dell'ambito generale azzera gli ambiti già provati: se le
+	 * regole sono cambiate, quelle prove parlano di una configurazione che non
+	 * c'è più.
+	 *
 	 * Righe C-154, C-155, C-156, C-163, C-164, C-165.
 	 *
+	 * @param string $sotto      Sottocartella da provare, vuota per la radice.
+	 * @param string $estensione Estensione da provare.
 	 * @return array<string, mixed> Lo stato, con l'esito appena misurato.
 	 */
-	public static function verifica() {
+	public static function verifica( $sotto = '', $estensione = 'txt' ) {
 		self::$in_verifica = true;
 
 		$riscritto = false;
 		$scrittura = self::scrivi( $riscritto );
 
+		if ( ! is_wp_error( $scrittura ) && ! self::generale( $sotto, $estensione ) ) {
+			$scrittura = self::scrivi_esca( $sotto, $estensione );
+		}
+
 		self::$in_verifica = false;
 
 		if ( is_wp_error( $scrittura ) ) {
-			return self::conserva(
+			return self::conserva_esito(
+				$sotto,
+				$estensione,
 				array(
 					'copertura'  => 'ignota',
 					'istante'    => self::adesso(),
@@ -343,7 +497,7 @@ final class Conformita_Core_Allegati {
 		}
 
 		$risposta = wp_remote_get(
-			self::indirizzo_esca(),
+			self::indirizzo_esca( $sotto, $estensione ),
 			array(
 				'timeout'     => 10,
 				'redirection' => 0,
@@ -351,7 +505,9 @@ final class Conformita_Core_Allegati {
 		);
 
 		if ( is_wp_error( $risposta ) ) {
-			return self::conserva(
+			return self::conserva_esito(
+				$sotto,
+				$estensione,
 				array(
 					'copertura'  => 'ignota',
 					'istante'    => self::adesso(),
@@ -373,7 +529,9 @@ final class Conformita_Core_Allegati {
 		 * configurata davanti all'origine. Riga C-165.
 		 */
 		if ( false !== strpos( $corpo, self::gettone() ) ) {
-			return self::conserva(
+			return self::conserva_esito(
+				$sotto,
+				$estensione,
 				array(
 					'copertura'  => 'non_coperta',
 					'istante'    => self::adesso(),
@@ -384,7 +542,9 @@ final class Conformita_Core_Allegati {
 		}
 
 		if ( in_array( $stato, self::DINIEGHI, true ) ) {
-			return self::conserva(
+			return self::conserva_esito(
+				$sotto,
+				$estensione,
 				array(
 					'copertura'  => 'verificata',
 					'istante'    => self::adesso(),
@@ -395,7 +555,9 @@ final class Conformita_Core_Allegati {
 		}
 
 		if ( $stato >= 200 && $stato <= 299 ) {
-			return self::conserva(
+			return self::conserva_esito(
+				$sotto,
+				$estensione,
 				array(
 					'copertura'  => 'ignota',
 					'istante'    => self::adesso(),
@@ -412,7 +574,9 @@ final class Conformita_Core_Allegati {
 		 * delle regole della cartella; uno stato fuori posto. Vale `ignota`, cioe'
 		 * il deposito si rifiuta, che e' la direzione sicura. Righe C-163 e C-164.
 		 */
-		return self::conserva(
+		return self::conserva_esito(
+			$sotto,
+			$estensione,
 			array(
 				'copertura'  => 'ignota',
 				'istante'    => self::adesso(),
@@ -447,6 +611,77 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
+	 * Conserva l'esito di un ambito, e quando serve anche quello generale.
+	 *
+	 * Due regole, e tutte e due hanno un motivo.
+	 *
+	 * La verifica dell'ambito generale **azzera gli ambiti già provati**: se si
+	 * rifà quella, o le regole sono cambiate o qualcuno l'ha chiesta, e in
+	 * tutti e due i casi le prove vecchie parlano di una configurazione che non
+	 * c'è più.
+	 *
+	 * Un esito `non_coperta` di qualunque ambito **diventa anche quello
+	 * generale**: il gettone è uscito, quindi la cartella serve i suoi file, e
+	 * non è una cosa che riguardi solo quell'estensione. In tutti gli altri
+	 * casi un ambito parla solo di sé, perché un diniego su un percorso non
+	 * dimostra niente sugli altri.
+	 *
+	 * @param string               $sotto      Sottocartella provata.
+	 * @param string               $estensione Estensione provata.
+	 * @param array<string, mixed> $campi      Esito misurato.
+	 * @return array<string, mixed> Lo stato completo.
+	 */
+	private static function conserva_esito( $sotto, $estensione, array $campi ) {
+		$generale = self::generale( $sotto, $estensione );
+
+		$conservato = get_option( self::OPZIONE, array() );
+		$conservato = is_array( $conservato ) ? $conservato : array();
+
+		$ambiti = isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ? $conservato['ambiti'] : array();
+
+		if ( $generale ) {
+			$ambiti = array();
+		}
+
+		$ambiti[ self::chiave_ambito( $sotto, $estensione ) ] = $campi;
+
+		$nuovi = array( 'ambiti' => $ambiti );
+
+		if ( $generale || 'non_coperta' === $campi['copertura'] ) {
+			$nuovi = array_merge( $campi, $nuovi );
+		}
+
+		return self::conserva( $nuovi );
+	}
+
+	/**
+	 * L'esito conservato per un ambito, letto e non misurato.
+	 *
+	 * @param string $sotto      Sottocartella.
+	 * @param string $estensione Estensione.
+	 * @return array<string, mixed>
+	 */
+	public static function stato_ambito( $sotto, $estensione ) {
+		$conservato = get_option( self::OPZIONE, array() );
+		$conservato = is_array( $conservato ) ? $conservato : array();
+
+		$ambiti = isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ? $conservato['ambiti'] : array();
+		$chiave = self::chiave_ambito( $sotto, $estensione );
+
+		if ( ! isset( $ambiti[ $chiave ] ) || ! is_array( $ambiti[ $chiave ] ) ) {
+			return array(
+				'copertura'  => 'ignota',
+				'istante'    => '',
+				'stato_http' => 0,
+				'motivo'     => __( 'Questo percorso, con questa estensione, non è mai stato provato.', 'conformita-core' ),
+				'ambito'     => $chiave,
+			);
+		}
+
+		return array_merge( $ambiti[ $chiave ], array( 'ambito' => $chiave ) );
+	}
+
+	/**
 	 * Lo stato della protezione, letto e non misurato.
 	 *
 	 * **Non fa nessuna richiesta.** Leggere lo stato è una cosa che capita
@@ -476,6 +711,7 @@ final class Conformita_Core_Allegati {
 			'cartella'   => $cartella,
 			'esiste'     => is_dir( $cartella ),
 			'regole'     => $regole,
+			'ambiti'     => isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ? $conservato['ambiti'] : array(),
 			'scavalcata' => self::scavalcata(),
 		);
 	}
@@ -630,6 +866,41 @@ final class Conformita_Core_Allegati {
 					$file['name']
 				)
 			);
+		}
+
+		/*
+		 * **L'ambito di questo deposito, provato prima di muovere i byte.**
+		 * L'esito generale dice che la radice della cartella e' negata a una
+		 * richiesta per un `.txt`. Questo file non e' quello: ha un'altra
+		 * estensione e finisce in un'altra sottocartella, e fra due regole di
+		 * server non vince sempre quella che parla della cartella. Quindi
+		 * prima di scrivere si prova il percorso vero, una volta per ambito e
+		 * non a ogni deposito: se l'esito c'e' gia' non parte nessuna
+		 * richiesta. Righe C-169 e C-170.
+		 */
+		if ( ! $stato['scavalcata'] ) {
+			$sotto  = self::sottocartella_corrente();
+			$ambito = self::stato_ambito( $sotto, $tipo_file['ext'] );
+
+			if ( 'verificata' !== $ambito['copertura'] ) {
+				self::verifica( $sotto, $tipo_file['ext'] );
+				$ambito = self::stato_ambito( $sotto, $tipo_file['ext'] );
+			}
+
+			if ( 'verificata' !== $ambito['copertura'] ) {
+				return new WP_Error(
+					'conformita_core_protezione_non_verificata',
+					sprintf(
+						/* translators: 1: estensione del file, 2: sottocartella di destinazione, 3: esito della verifica, 4: motivo. */
+						__( 'Deposito rifiutato: per i file «%1$s» in «%2$s» la protezione risulta «%3$s». %4$s Finché non è verificata non si scrive nessun file.', 'conformita-core' ),
+						$tipo_file['ext'],
+						'' === $sotto ? '/' : $sotto,
+						$ambito['copertura'],
+						$ambito['motivo']
+					),
+					$ambito
+				);
+			}
 		}
 
 		require_once ABSPATH . 'wp-admin/includes/file.php';

@@ -120,7 +120,8 @@ l'impressione di una protezione che non c'è.
 | `.htaccess` | nega ogni richiesta, nelle due forme di Apache 2.2 e 2.4 | Apache con `AllowOverride` sufficiente, LiteSpeed |
 | `web.config` | nega ogni richiesta | IIS |
 | `index.php` | un file muto, contro l'elenco della cartella | tutti |
-| `prova-accesso-diretto.txt` | l'**esca**: contiene un gettone casuale, generato quando il file viene scritto e conservato accanto all'esito della verifica | è il bersaglio della verifica |
+| `prova-accesso-diretto.txt` | l'**esca generale**: contiene un gettone casuale, generato quando il file viene scritto e conservato accanto all'esito della verifica | è il bersaglio della verifica |
+| `prova-accesso-diretto.<estensione>` | l'**esca di un ambito**, scritta nella sottocartella dove i file di quell'estensione finiscono davvero | è il bersaglio della verifica per quell'ambito |
 
 **La copertura, per server, detta come sta.**
 
@@ -191,6 +192,34 @@ configurata davanti all'origine. Riga C-165.
 Il gettone casuale serve anche a distinguere "il server ha negato" da "è tornata una pagina
 qualsiasi con stato 200", che sono due cose diverse e che senza gettone si confonderebbero.
 
+**Un diniego prova un percorso, non una cartella, e questo è il rilievo del terzo giro di
+revisione.** L'esca è un `.txt` nella radice della cartella protetta; i documenti sono PDF e
+immagini dentro `2026/09`. Fra le due cose c'è una distanza che su un server vero si vede: su
+nginx una `location` con espressione regolare per i PDF **vince** su una `location` di
+prefisso per la cartella, e su Apache un `FilesMatch` fa lo stesso. Un'installazione così nega
+l'esca `.txt` e serve i PDF, e non serve che nessuno cambi niente dopo: è la configurazione
+sbagliata dal primo giorno. La verifica diceva `verificata` e il deposito partiva.
+
+**Quindi l'esito si conserva per ambito, dove un ambito è la coppia sottocartella più
+estensione**, cioè esattamente quello che un deposito produce e quello che una regola di server
+può trattare in modo diverso dal resto. Prima di scrivere i byte, il deposito guarda l'ambito
+suo: se non risulta provato, scrive l'esca con quell'estensione in quella sottocartella e la
+chiede al server, con la stessa lettura della tabella qui sopra. Righe C-169 e C-170.
+
+Due conseguenze, e tutte e due sono scelte:
+
+- **Una verifica generale azzera gli ambiti già provati.** Se si rifà quella, o le regole sono
+  cambiate o qualcuno l'ha chiesta: in tutti e due i casi le prove vecchie parlano di una
+  configurazione che potrebbe non esserci più.
+- **Un esito `non_coperta` di qualunque ambito diventa anche quello generale.** Il gettone è
+  uscito, quindi la cartella serve i suoi file, e non è un fatto della sola estensione.
+
+*Quello che resta scoperto, e va detto: l'ambito è provato per la sottocartella del mese in
+cui si deposita. Il mese dopo è un ambito nuovo e si prova da capo, il che è giusto, ma una
+regola che dipendesse dal nome del singolo file, e non dalla sua estensione o dalla sua
+cartella, continuerebbe a non essere vista. Un'esca per file significherebbe una richiesta HTTP
+per ogni deposito, che è il costo che questo meccanismo esiste per non pagare.*
+
 **Lo stato `presunta` non esiste.** Era nella stesura precedente di questa scheda e significava
 "il file di regole c'è e il server dice di leggerlo": con una verifica vera non serve più, ed
 era proprio il valore che avrebbe lasciato passare Apache con `AllowOverride None`, cioè il
@@ -198,15 +227,19 @@ caso che si voleva prendere. Gli esiti sono tre: `verificata`, `non_coperta`, `i
 
 **Quando si fa la richiesta, e quando no.** Non a ogni deposito: un meccanismo che fa una
 richiesta HTTP per ogni file caricato paga un costo a ogni scrittura e si ferma quando il giro
-su se stessi è lento. Si fa in tre momenti:
+su se stessi è lento. Si fa in quattro momenti:
 
 1. **all'attivazione** del plugin;
 2. **ogni volta che i file di regole vengono scritti o riscritti**, quindi al primo deposito e
    a ogni deposito successivo che trovi un file di regole mancante o diverso da quello atteso;
-3. **su richiesta esplicita**, con `conformita_core_verifica_protezione_allegati()`.
+3. **su richiesta esplicita**, con `conformita_core_verifica_protezione_allegati()`;
+4. **la prima volta che si deposita in un ambito non ancora provato**, cioè la prima volta che
+   si scrive un'estensione in una sottocartella. Una sola richiesta per ambito: il secondo file
+   con la stessa estensione nello stesso mese non ne fa nessuna.
 
 L'esito si conserva in un'opzione insieme al proprio istante, allo stato HTTP osservato e al
-gettone, e si rilegge. Un deposito normale legge l'opzione e non fa nessuna richiesta.
+gettone, con una voce per ogni ambito provato, e si rilegge. Un deposito in un ambito già
+provato legge l'opzione e non fa nessuna richiesta.
 
 **Il deposito si rifiuta su `non_coperta` e su `ignota`, e procede su `verificata`.** Il motivo
 è la regola di questo progetto sul dubbio: fra depositare un file che non si è in grado di
@@ -466,6 +499,7 @@ dire. Quindi **tutti** i rifiuti del punto pubblico sono lo stesso rifiuto.
 | Contenuto di un tipo non registrato attraverso il core | non trovato | C-135 |
 | Contenuto non pubblicato (bozza, privato, in revisione) | non trovato | C-136 |
 | Contenuto pubblicato ma protetto da password, chiesto senza la password | non trovato | C-167 |
+| Allegato cestinato, contenuto padre ancora pubblicato | non trovato | C-168 |
 | Contenuto scaduto | non trovato | C-131 |
 | Contenuto scaduto e richiedente con tutte le capability | non trovato | C-132 |
 | Sezione senza politica valida | non trovato | vedi sotto |
@@ -586,7 +620,7 @@ cambia firma o comportamento, e nessun vincolo si restringe. L'albo dovrà richi
 | `conformita_core_allegato_protetto( $allegato_id )` | `int` | `bool` | nessuno: è chiamata anche nel percorso di lettura |
 | `conformita_core_impronta_allegato( $allegato_id )` | `int` | `array` con `algoritmo`, `valore`, `dimensione`, `deposito`, oppure `WP_Error` | `conformita_core_allegato_non_gestito`, `conformita_core_impronta_assente` |
 | `conformita_core_stato_protezione_allegati()` | nessuno | `array`: legge l'esito conservato, **non fa nessuna richiesta** | nessuno |
-| `conformita_core_verifica_protezione_allegati()` | nessuno | `array`: **rifà la richiesta all'esca**, conserva il nuovo esito e lo restituisce | nessuno: un fallimento della richiesta è l'esito `ignota`, non un errore |
+| `conformita_core_verifica_protezione_allegati()` | nessuno | `array`: **rifà la richiesta all'esca generale**, azzera gli ambiti già provati, conserva il nuovo esito e lo restituisce | nessuno: un fallimento della richiesta è l'esito `ignota`, non un errore |
 
 Le due funzioni sullo stato sono separate apposta: leggere non deve costare una richiesta
 HTTP, e rifare la verifica deve essere una cosa che si chiede, non che capita. Lo stato
@@ -600,6 +634,7 @@ restituito da entrambe ha la stessa forma:
 | `motivo` | perché l'esito è quello, in una riga leggibile |
 | `cartella` | il percorso della cartella protetta |
 | `regole` | quali file di regole ci sono |
+| `ambiti` | l'esito conservato per ogni ambito già provato, con la chiave che unisce sottocartella ed estensione |
 | `scavalcata` | vero se `CONFORMITA_CORE_PROTEZIONE_CONFERMATA` è definita |
 
 `copertura` riporta sempre l'esito vero della verifica, anche quando lo scavalcamento è
@@ -669,9 +704,11 @@ In un posto solo, in quest'ordine, e nessun aggancio la salta.
 7. Lo stato del contenuto è `publish`.
 8. Il contenuto non chiede una password che la richiesta non porta, secondo
    `post_password_required()`.
-9. Il contenuto non è scaduto, secondo `Conformita_Core_Scadenza::scaduto()`, cioè la stessa
-   funzione che decide la scadenza in ogni altro punto del componente.
-10. Il file esiste sul disco, dentro la cartella protetta, e il percorso normalizzato con
+9. L'allegato stesso è in stato `inherit`, cioè quello che il deposito produce: un
+   allegato cestinato non si consegna, anche se il suo contenuto padre è a posto.
+10. Il contenuto non è scaduto, secondo `Conformita_Core_Scadenza::scaduto()`, cioè la stessa
+    funzione che decide la scadenza in ogni altro punto del componente.
+11. Il file esiste sul disco, dentro la cartella protetta, e il percorso normalizzato con
     `realpath()` sta ancora dentro quella cartella.
 
 Al primo anello che non regge, il rifiuto. Nessun anello scrive niente.
@@ -682,7 +719,7 @@ riagganciato a un altro contenuto, gli indirizzi vecchi smetterebbero di funzion
 cominciare in silenzio a obbedire alla scadenza di un atto diverso. È il caso limite che la
 domanda 7 nomina, e con un solo identificativo nell'indirizzo non sarebbe nemmeno esprimibile.
 
-**Perché l'anello 10 controlla il percorso normalizzato.** Il percorso non arriva mai
+**Perché l'anello 11 controlla il percorso normalizzato.** Il percorso non arriva mai
 dall'esterno, perché l'indirizzo porta due numeri e niente altro, come prescrive la checklist
 di sicurezza dell'albo, ma `_wp_attached_file` è un dato memorizzato, e un dato memorizzato può
 essere stato scritto da una migrazione. Fra fidarsi e controllare, si controlla.
@@ -781,6 +818,9 @@ Nessun file del repository dell'albo.
 | Il server serve l'esca accompagnandola con uno stato di errore | vale `non_coperta`, perché il gettone si guarda prima dello stato | sì |
 | Un aggancio di un altro componente solleva un'eccezione durante lo spostamento dei byte | il dirottamento dei caricamenti si spegne comunque, perché la rimozione del filtro sta in un `finally` | sì |
 | Scavalcamento dichiarato su un server davvero scoperto | i file si depositano in una cartella aperta | **no**, ed è il senso di uno scavalcamento: la responsabilità passa a chi lo dichiara |
+| Il server nega la cartella ma serve i file di una certa estensione | l'esca di quell'ambito torna con il gettone, quindi vale `non_coperta`: il primo deposito di quell'estensione si rifiuta, e l'esito generale diventa `non_coperta` | sì |
+| Una regola del server dipende dal nome del singolo file e non dall'estensione | non viene vista: l'esca prova l'estensione e la cartella, non il nome. **Limite dichiarato** | **no** |
+| Allegato cestinato con il padre ancora pubblicato | il punto pubblico non trova niente; l'amministrazione lo vede ancora, perche' resti ripristinabile | sì |
 | Contenuto pubblicato con una password, allegato chiesto senza | la consegna pubblica rifiuta come per ogni altro motivo; quella amministrativa, che pretende nonce e capability, consegna | sì |
 | File cancellato dal disco | la consegna risponde "non trovato" | sì |
 | Metadato dell'impronta perso | la consegna funziona, l'impronta non è leggibile e il referto se ne accorge | sì |
@@ -824,7 +864,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Cinquantatré righe, da C-115 a C-167.**
+convenzione di questo repository. **Cinquantasei righe, da C-115 a C-170.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -856,11 +896,13 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-154 | fatto | La richiesta all'esca riceve un diniego, 403 oppure 404: esito `verificata`, con l'istante e lo stato osservato |
 | C-155 | fatto | La richiesta all'esca riceve 200 con dentro il gettone: esito `non_coperta` |
 | C-156 | fatto | La richiesta fallisce, oppure riceve 200 senza il gettone: esito `ignota` in tutti e due i casi, con motivi distinti |
-| C-157 | fatto | La verifica si fa su richiesta esplicita e quando le regole si riscrivono. **Un deposito che non riscrive niente non fa nessuna richiesta**, e la riga lo verifica contandole |
+| C-157 | fatto | La verifica si fa su richiesta esplicita, quando le regole si riscrivono, e la prima volta che si deposita in un ambito non ancora provato. **Un deposito in un ambito già provato non fa nessuna richiesta**, e la riga lo verifica contandole |
 | C-158 | fatto | Regole cancellate a mano: il deposito successivo le riscrive **e rifà la verifica**, e decide con l'esito nuovo e non con quello conservato |
 | C-163 | fatto | La richiesta all'esca riceve un reindirizzamento: esito `ignota` e non `verificata`, e il deposito si rifiuta |
 | C-164 | fatto | Uno stato di errore che non è un diniego (500, 503, 429, 401) vale `ignota` e non `verificata`, e il deposito si rifiuta |
 | C-165 | fatto | Il gettone vince sullo stato: l'esca servita con uno stato di errore vale `non_coperta` |
+| C-169 | fatto | Esca `.txt` negata nella radice ma file dell'estensione servito nella sottocartella di destinazione: il deposito si rifiuta, e l'esito generale diventa `non_coperta` perché il gettone è uscito |
+| C-170 | fatto | L'esito di un ambito si conserva con la sua chiave: il secondo deposito della stessa estensione nella stessa sottocartella non fa nessuna richiesta, e un'estensione nuova ne fa una |
 
 ### Indirizzi
 
@@ -889,6 +931,7 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-134 | fatto | Allegato che non appartiene al contenuto dichiarato: non trovato, mentre l'accoppiata giusta consegna |
 | C-135 | fatto | Contenuto di un tipo non registrato attraverso il core: non trovato |
 | C-136 | fatto | Contenuto in bozza, privato o in attesa di revisione: non trovato |
+| C-168 | fatto | Allegato cestinato, con il contenuto padre ancora pubblicato e non scaduto: il punto pubblico non trova niente, quello amministrativo consegna |
 | C-167 | fatto | Contenuto pubblicato e protetto da password: senza la password non trovato, con la password giusta consegna, e da scaduto non trovato nemmeno con la password |
 | C-137 | fatto | File mancante sul disco: non trovato, e nel corpo della risposta non c'è né il percorso né il nome della cartella |
 | C-138 | fatto | I nove rifiuti costruibili sono indistinguibili fra loro: stesso stato, stesso corpo, stesse intestazioni |
@@ -944,11 +987,14 @@ parametro `$adesso`.
 | C-164, C-165 | Nuove, dal primo giro di revisione indipendente. La correzione della C-163 aveva lasciato in piedi la stessa famiglia con un confine diverso: ogni stato dal 400 in su valeva diniego, e il gettone si guardava dopo lo stato. Tutte e due viste rosse sul comportamento prima della correzione |
 | C-167 | Nuova, dal secondo giro di revisione indipendente. Lo stato `publish` non dice che il contenuto si legga: con una password sopra, l'allegato usciva lo stesso dall'indirizzo di consegna. La riga è stata scritta prima della correzione e vista rossa sul comportamento |
 | C-138 | Da otto rifiuti confrontati a nove, perché il caso della password è costruibile e va confrontato con gli altri |
+| C-168, C-169, C-170 | Nuove, dal terzo giro di revisione indipendente. La C-168 chiude l'allegato cestinato che continuava a uscire; le altre due chiudono il fatto che il diniego dell'esca `.txt` nella radice veniva letto come una prova su tutta la cartella. Tutte viste rosse prima della correzione, la C-169 con il deposito che riusciva |
+| C-157 | Da "un deposito che non riscrive niente non fa nessuna richiesta" a "un deposito in un ambito già provato non fa nessuna richiesta": il primo deposito di ogni estensione nuova adesso ne fa una, ed è il prezzo dichiarato della C-169 |
+| C-158 | Il conteggio delle richieste passa da due a tre, per la stessa ragione |
 | C-166 | Nuova, dallo stesso giro. La rimozione del filtro sui caricamenti non stava in un `finally`, quindi un'eccezione sollevata da un aggancio altrui lo lasciava acceso per il resto della richiesta |
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **202 prove e 1110 asserzioni**, di cui 48 prove nuove. È un **controllo
+La verifica riporta **205 prove e 1135 asserzioni**, di cui 51 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1024,20 +1070,21 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Dodici guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Quattordici guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. Il G12 è invece
-l'anello nuovo, quello sulla password, e non è stato simulato: il codice senza quell'anello è
-lo stato in cui il ramo si trovava, e le righe C-138 e C-167 sono state viste rosse lì prima
-che l'anello esistesse. **Gli altri undici non sono stati rieseguiti**, e il costo è
-dichiarato: la correzione aggiunge un anello in mezzo alla catena e non ne cambia nessuno, ma
-che gli altri undici continuino a misurare quello che misuravano è un'inferenza, non una cosa
-vista.*
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti G12, G13 e G14 sono invece gli
+anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
+il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
+lì; il G14 spegnendo davvero il controllo dell'ambito e rieseguendo la suite, che ha dato
+quattro righe rosse, fra cui la C-169 con il deposito che riusciva. **Gli altri undici non
+sono stati rieseguiti**, e il costo è dichiarato: le correzioni aggiungono anelli e non ne
+cambiano nessuno, ma che gli undici continuino a misurare quello che misuravano è
+un'inferenza, non una cosa vista.*
 
 ### Che cosa ha trovato il primo giro di revisione indipendente
 
@@ -1072,6 +1119,8 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G10 | Lasciato acceso il filtro sui caricamenti durante la registrazione | C-115, C-117, C-126, C-129, C-131, C-134, C-139, C-140, C-141, C-142, C-157, C-158, C-159, C-160, C-162 |
 | G11 | Tolto il filtro sull'indirizzo dell'allegato | C-127, C-150 |
 | G12 | Tolto il controllo sulla password del contenuto | C-138, C-167 |
+| G13 | Tolto il controllo dello stato dell'allegato | C-168 |
+| G14 | Tolto il controllo dell'ambito nel deposito | C-157, C-158, C-169, C-170 |
 
 ### Che cosa ha trovato il secondo giro di revisione indipendente
 
@@ -1093,6 +1142,33 @@ dimostra niente letta come prova. Questo sta nella catena della consegna, ed è 
 famiglia: **un anello che controlla una proprietà vicina a quella che serve.** `publish`
 risponde a "è pubblicato?", la domanda era "è leggibile da chiunque?", e le due coincidono in
 tutti i casi tranne uno. Il guasto G12 della tabella misura proprio questo anello.
+
+### Che cosa ha trovato il terzo giro di revisione indipendente
+
+Due rilievi, tutti e due accolti, e tutti e due in punti che i giri precedenti avevano
+guardato senza trovare niente.
+
+**L'allegato cestinato continuava a uscire.** La catena controllava lo stato del contenuto
+padre e non quello dell'allegato. Con `MEDIA_TRASH` dichiarata, cestinare un allegato non
+cancella niente: restano il file, la marca del deposito e il padre, e cambia soltanto lo stato
+dell'allegato. Un indirizzo di consegna vecchio serviva un documento ritirato mentre il suo
+atto era ancora pubblicato e non scaduto. È la riga C-168, e l'anello nuovo ammette `inherit`
+invece di elencare gli stati da rifiutare, per la stessa ragione per cui i dinieghi dell'esca
+sono un elenco chiuso: un elenco di ammessi non si allarga da sé quando WordPress inventa uno
+stato nuovo.
+
+**Il diniego dell'esca provava meno di quello che autorizzava.** È il rilievo che vale il
+giro, ed è descritto per esteso al punto 1.2. In breve: l'esca è un `.txt` nella radice, i
+documenti sono PDF dentro `2026/09`, e un server può benissimo negare il primo percorso e
+servire i secondi. Adesso l'esito si conserva per ambito, e il deposito prova il proprio prima
+di scrivere.
+
+Vale la pena notare la forma che questi due rilievi hanno in comune con quello del giro
+precedente, perché è la terza volta di fila: **un controllo che guarda una proprietà vicina a
+quella che serve.** `publish` sul padre al posto di "questo allegato è consegnabile"; il
+diniego di un percorso al posto del diniego della cartella. Non sono errori di scrittura, sono
+errori di domanda, e non è un caso che a trovarli sia stato un lettore esterno: chi ha scritto
+il codice sa che cosa intendeva chiedere, e rilegge la riga come se lo chiedesse davvero.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 
