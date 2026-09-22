@@ -443,7 +443,7 @@ final class Conformita_Core_Consegna {
 	 *
 	 * **Nessun anello scrive niente**, e nessuno guarda le capability sul punto
 	 * pubblico: l'esenzione è della superficie e non dell'utente, come al punto
-	 * 3 della scheda di S4. Righe C-131..C-137.
+	 * 3 della scheda di S4. Righe C-131..C-137, C-167.
 	 *
 	 * L'ultimo anello controlla il percorso normalizzato. Il percorso non arriva
 	 * mai dall'esterno, perché l'indirizzo porta due numeri e niente altro, ma
@@ -497,6 +497,21 @@ final class Conformita_Core_Consegna {
 
 		if ( ! $amministrativa ) {
 			if ( 'publish' !== $atto->post_status ) {
+				return false;
+			}
+
+			/*
+			 * Lo stato `publish` dice che il contenuto e' pubblicato, non che
+			 * si legga. Con una password sopra, il corpo non si vede senza
+			 * averla, ma l'allegato uscirebbe lo stesso da qui, che di numeri
+			 * ne chiede due e di password nessuna. La password e' del contenuto
+			 * padre e vale per tutto cio' che gli appartiene. Riga C-167.
+			 *
+			 * Sul punto amministrativo non si applica, ed e' deliberato: li' si
+			 * entra con il nonce e la capability del tipo, cioe' con
+			 * un'autorizzazione piu' forte di una password di lettura.
+			 */
+			if ( post_password_required( $atto ) ) {
 				return false;
 			}
 

@@ -2,7 +2,7 @@
 /**
  * I due punti di consegna: indirizzi, catena di controlli, intestazioni.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-167.
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -120,6 +120,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		Conformita_Core_Allegati::azzera();
 
 		unset( $_SERVER['HTTP_RANGE'] );
+		unset( $_COOKIE[ 'wp-postpass_' . COOKIEHASH ] );
 		$_GET     = array();
 		$_REQUEST = array();
 
@@ -695,10 +696,10 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 	 * la differenza direbbe "c'e', ma non per te", che e' esattamente cio' che
 	 * la politica `irraggiungibile` non vuole dire.
 	 *
-	 * Il nono caso della tabella della scheda, la sezione senza politica valida,
-	 * non e' costruibile attraverso l'API, perche' un tipo si registra solo
-	 * dentro una sezione che ha gia' dichiarato la politica, ed e' una guardia
-	 * difensiva, come la riga C-94 di S4.
+	 * Il decimo caso della tabella della scheda, la sezione senza politica
+	 * valida, non e' costruibile attraverso l'API, perche' un tipo si registra
+	 * solo dentro una sezione che ha gia' dichiarato la politica, ed e' una
+	 * guardia difensiva, come la riga C-94 di S4.
 	 */
 	public function test_c138_i_rifiuti_sono_tutti_uguali() {
 		$atto     = $this->atto();
@@ -722,6 +723,15 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: si tocca il disco direttamente perche' e' il disco cio' che si sta verificando.
 		unlink( get_attached_file( $senza_file ) );
 
+		$con_password = $this->atto();
+		$alleg_passw  = $this->allegato( $con_password, 'con-password.pdf' );
+		wp_update_post(
+			array(
+				'ID'            => $con_password,
+				'post_password' => 'segreto',
+			)
+		);
+
 		$rifiuti = array(
 			'contenuto inesistente'   => $this->chiedi( 999999, $allegato ),
 			'allegato inesistente'    => $this->chiedi( $atto, 999999 ),
@@ -731,6 +741,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			'contenuto scaduto'       => $this->chiedi( $scaduto, $alleg_scad ),
 			'file mancante sul disco' => $this->chiedi( $atto, $senza_file ),
 			'allegato non depositato' => $this->chiedi( $atto, $alleg_estran ),
+			'contenuto con password'  => $this->chiedi( $con_password, $alleg_passw ),
 		);
 
 		$riferimento = null;
@@ -907,5 +918,67 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$this->assertSame( 404, $this->chiedi( $atto, $allegato )['stato'] );
 		$this->assertFileExists( $percorso );
 		$this->assertSame( $impronta, conformita_core_impronta_allegato( $allegato ) );
+	}
+
+	/**
+	 * C-167: contenuto pubblicato e protetto da password.
+	 *
+	 * Lo stato `publish` dice che il contenuto e' pubblicato, non che si legga.
+	 * Con una password sopra, il corpo non si vede senza averla, ma l'allegato
+	 * uscirebbe lo stesso dall'indirizzo di consegna, che di numeri ne chiede
+	 * due e di password nessuna. La password e' del contenuto padre e vale per
+	 * tutto cio' che gli appartiene.
+	 *
+	 * Le tre cose che la prova pretende, in quest'ordine: senza la password il
+	 * rifiuto e' quello uniforme; con la password giusta il file esce; la
+	 * password non scavalca la scadenza.
+	 */
+	public function test_c167_atto_protetto_da_password() {
+		$atto     = $this->atto();
+		$allegato = $this->allegato( $atto, 'riservato.pdf' );
+
+		wp_update_post(
+			array(
+				'ID'            => $atto,
+				'post_password' => 'segreto',
+			)
+		);
+
+		$senza = $this->chiedi( $atto, $allegato );
+
+		$this->assertSame( 404, $senza['stato'], 'Senza la password il file non deve uscire.' );
+		$this->assertStringNotContainsString( 'riservato', $senza['corpo'] );
+
+		$this->presenta_password( 'segreto' );
+
+		$con = $this->chiedi( $atto, $allegato );
+
+		$this->assertSame( 200, $con['stato'], 'Con la password giusta il file deve uscire.' );
+
+		update_post_meta(
+			$atto,
+			conformita_core_chiave_fine_pubblicazione(),
+			gmdate( 'Y-m-d', strtotime( '-1 day' ) )
+		);
+
+		$this->assertSame(
+			404,
+			$this->chiedi( $atto, $allegato )['stato'],
+			'La password non e\' un lasciapassare per la scadenza.'
+		);
+	}
+
+	/**
+	 * Mette nella richiesta il biscotto che WordPress scrive quando la password
+	 * viene indovinata, calcolato con lo stesso arnese del nucleo.
+	 *
+	 * @param string $password Password del contenuto.
+	 */
+	private function presenta_password( $password ) {
+		require_once ABSPATH . WPINC . '/class-phpass.php';
+
+		$arnese = new PasswordHash( 8, true );
+
+		$_COOKIE[ 'wp-postpass_' . COOKIEHASH ] = $arnese->HashPassword( wp_unslash( $password ) );
 	}
 }

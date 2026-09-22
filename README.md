@@ -131,7 +131,9 @@ allo scavalcamento.
 
 **Due punti di consegna, non uno.** Quello pubblico applica la scadenza **a chiunque**,
 permessi compresi, e risponde "non trovato" a ogni rifiuto: un file che esiste ma è scaduto
-non deve confessare di esistere. Quello amministrativo sta su `admin-post.php`, pretende il
+non deve confessare di esistere. Applica anche la password del contenuto padre, quando c'è:
+lo stato `publish` dice che il contenuto è pubblicato, non che si legga, e senza quell'anello
+l'indirizzo di consegna farebbe uscire il documento che la pagina tiene chiuso. Quello amministrativo sta su `admin-post.php`, pretende il
 nonce e la capability del tipo, e serve il file anche dopo la scadenza. Sono due indirizzi e
 non un indirizzo con due comportamenti, perché su `admin-post.php` `is_admin()` è vero anche
 per un visitatore anonimo: un punto pubblico messo lì risulterebbe esente dal filtro di

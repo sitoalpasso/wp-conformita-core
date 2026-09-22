@@ -465,6 +465,7 @@ dire. Quindi **tutti** i rifiuti del punto pubblico sono lo stesso rifiuto.
 | Allegato che non appartiene al contenuto dichiarato | non trovato | C-134 |
 | Contenuto di un tipo non registrato attraverso il core | non trovato | C-135 |
 | Contenuto non pubblicato (bozza, privato, in revisione) | non trovato | C-136 |
+| Contenuto pubblicato ma protetto da password, chiesto senza la password | non trovato | C-167 |
 | Contenuto scaduto | non trovato | C-131 |
 | Contenuto scaduto e richiedente con tutte le capability | non trovato | C-132 |
 | Sezione senza politica valida | non trovato | vedi sotto |
@@ -474,8 +475,8 @@ dire. Quindi **tutti** i rifiuti del punto pubblico sono lo stesso rifiuto.
 
 **I rifiuti sono indistinguibili fra loro**: stesso stato, stesso corpo, stesse
 intestazioni, e nessun dettaglio del percorso sul disco nel corpo. La riga C-138 li confronta
-uno con l'altro. Otto dei nove casi della tabella sono costruibili e vengono confrontati; il
-nono, la sezione senza politica valida, attraverso l'API non è raggiungibile, perché un tipo
+uno con l'altro. Nove dei dieci casi della tabella sono costruibili e vengono confrontati; il
+decimo, la sezione senza politica valida, attraverso l'API non è raggiungibile, perché un tipo
 si registra solo dentro una sezione che ha già dichiarato la politica, ed è una guardia
 difensiva, come quella della riga C-94 di S4.
 
@@ -483,6 +484,19 @@ difensiva, come quella della riga C-94 di S4.
 delle prove: il rifiuto lo costruisce una funzione senza argomenti, quindi non ha niente da
 cui variare. La riga C-138 serve per il giorno in cui qualcuno le dà un argomento, ed è
 quello che il guasto G5 della tabella del punto 13 simula.*
+
+**Il contenuto protetto da password.** Un contenuto con la password è pubblicato, quindi
+l'anello sullo stato non lo ferma, ma il suo corpo non si legge senza la password. Consegnare
+il suo allegato lo farebbe uscire lo stesso, per l'indirizzo di consegna invece che per la
+pagina: chi conosce i due numeri si porterebbe via il documento che la password doveva
+chiudere. La password è del contenuto padre e vale per tutto ciò che gli appartiene, quindi
+l'anello nuovo chiede `post_password_required()` sul contenuto e rifiuta come tutti gli altri
+rifiuti. Con la password giusta la consegna riprende, e la scadenza continua a valere: la
+password non è un lasciapassare, è una condizione in più.
+
+Sul punto amministrativo non si applica, ed è deliberato: lì si entra con il nonce e la
+capability del tipo, cioè con un'autorizzazione più forte di una password di lettura, e quel
+punto serve il file anche dopo la scadenza per lo stesso motivo.
 
 **Limite dichiarato, e non è chiuso:** resta un canale per differenza di tempo. Un rifiuto che
 arriva dopo aver letto due contenuti e un metadato impiega più di un rifiuto immediato, e in
@@ -653,10 +667,12 @@ In un posto solo, in quest'ordine, e nessun aggancio la salta.
 5. Il tipo del contenuto è registrato attraverso il core.
 6. La sezione del tipo ha una politica valida.
 7. Lo stato del contenuto è `publish`.
-8. Il contenuto non è scaduto, secondo `Conformita_Core_Scadenza::scaduto()`, cioè la stessa
+8. Il contenuto non chiede una password che la richiesta non porta, secondo
+   `post_password_required()`.
+9. Il contenuto non è scaduto, secondo `Conformita_Core_Scadenza::scaduto()`, cioè la stessa
    funzione che decide la scadenza in ogni altro punto del componente.
-9. Il file esiste sul disco, dentro la cartella protetta, e il percorso normalizzato con
-   `realpath()` sta ancora dentro quella cartella.
+10. Il file esiste sul disco, dentro la cartella protetta, e il percorso normalizzato con
+    `realpath()` sta ancora dentro quella cartella.
 
 Al primo anello che non regge, il rifiuto. Nessun anello scrive niente.
 
@@ -666,7 +682,7 @@ riagganciato a un altro contenuto, gli indirizzi vecchi smetterebbero di funzion
 cominciare in silenzio a obbedire alla scadenza di un atto diverso. È il caso limite che la
 domanda 7 nomina, e con un solo identificativo nell'indirizzo non sarebbe nemmeno esprimibile.
 
-**Perché l'anello 9 controlla il percorso normalizzato.** Il percorso non arriva mai
+**Perché l'anello 10 controlla il percorso normalizzato.** Il percorso non arriva mai
 dall'esterno, perché l'indirizzo porta due numeri e niente altro, come prescrive la checklist
 di sicurezza dell'albo, ma `_wp_attached_file` è un dato memorizzato, e un dato memorizzato può
 essere stato scritto da una migrazione. Fra fidarsi e controllare, si controlla.
@@ -686,6 +702,7 @@ riga C-132 la verifica qui.
 | Atto pubblicato, scaduto | **non trovato** | consegna |
 | Atto scaduto, richiedente con capability | **non trovato** | consegna |
 | Atto in bozza | **non trovato** | consegna |
+| Atto protetto da password, chiesto senza la password | **non trovato** | consegna |
 | Richiedente anonimo | secondo le righe sopra | **non trovato** |
 | Richiedente senza la capability del tipo | secondo le righe sopra | **non trovato** |
 | Nonce mancante o di un altro allegato | non pertinente | **rifiutato** |
@@ -764,6 +781,7 @@ Nessun file del repository dell'albo.
 | Il server serve l'esca accompagnandola con uno stato di errore | vale `non_coperta`, perché il gettone si guarda prima dello stato | sì |
 | Un aggancio di un altro componente solleva un'eccezione durante lo spostamento dei byte | il dirottamento dei caricamenti si spegne comunque, perché la rimozione del filtro sta in un `finally` | sì |
 | Scavalcamento dichiarato su un server davvero scoperto | i file si depositano in una cartella aperta | **no**, ed è il senso di uno scavalcamento: la responsabilità passa a chi lo dichiara |
+| Contenuto pubblicato con una password, allegato chiesto senza | la consegna pubblica rifiuta come per ogni altro motivo; quella amministrativa, che pretende nonce e capability, consegna | sì |
 | File cancellato dal disco | la consegna risponde "non trovato" | sì |
 | Metadato dell'impronta perso | la consegna funziona, l'impronta non è leggibile e il referto se ne accorge | sì |
 | `_wp_attached_file` che punta fuori dalla cartella protetta | la consegna rifiuta | sì |
@@ -806,7 +824,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Cinquantadue righe, da C-115 a C-166.**
+convenzione di questo repository. **Cinquantatré righe, da C-115 a C-167.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -871,8 +889,9 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-134 | fatto | Allegato che non appartiene al contenuto dichiarato: non trovato, mentre l'accoppiata giusta consegna |
 | C-135 | fatto | Contenuto di un tipo non registrato attraverso il core: non trovato |
 | C-136 | fatto | Contenuto in bozza, privato o in attesa di revisione: non trovato |
+| C-167 | fatto | Contenuto pubblicato e protetto da password: senza la password non trovato, con la password giusta consegna, e da scaduto non trovato nemmeno con la password |
 | C-137 | fatto | File mancante sul disco: non trovato, e nel corpo della risposta non c'è né il percorso né il nome della cartella |
-| C-138 | fatto | Gli otto rifiuti costruibili sono indistinguibili fra loro: stesso stato, stesso corpo, stesse intestazioni |
+| C-138 | fatto | I nove rifiuti costruibili sono indistinguibili fra loro: stesso stato, stesso corpo, stesse intestazioni |
 | C-139 | fatto | Richiesta con `Range`: risposta intera, stato 200, `Accept-Ranges: none`, nessun `Content-Range` |
 | C-140 | fatto | Il percorso di consegna non scrive niente e non chiede niente: righe di metadati e di opzioni invariate, stato della protezione intatto, zero richieste HTTP, sia quando consegna sia quando rifiuta |
 
@@ -923,11 +942,13 @@ parametro `$adesso`.
 | C-162 | Nuova. Non era prevista: serve a dimostrare che le prove sui rifiuti passano davvero dall'aggancio del punto pubblico, e non sono verdi perché la richiesta non arriva da nessuna parte |
 | C-163 | Nuova, e arrivata dopo: la rilettura del ramo ha trovato che un reindirizzamento all'esca veniva letto come un rifiuto. La riga è stata scritta prima della correzione e vista rossa sul comportamento, con `verificata` al posto di `ignota` |
 | C-164, C-165 | Nuove, dal primo giro di revisione indipendente. La correzione della C-163 aveva lasciato in piedi la stessa famiglia con un confine diverso: ogni stato dal 400 in su valeva diniego, e il gettone si guardava dopo lo stato. Tutte e due viste rosse sul comportamento prima della correzione |
+| C-167 | Nuova, dal secondo giro di revisione indipendente. Lo stato `publish` non dice che il contenuto si legga: con una password sopra, l'allegato usciva lo stesso dall'indirizzo di consegna. La riga è stata scritta prima della correzione e vista rossa sul comportamento |
+| C-138 | Da otto rifiuti confrontati a nove, perché il caso della password è costruibile e va confrontato con gli altri |
 | C-166 | Nuova, dallo stesso giro. La rimozione del filtro sui caricamenti non stava in un `finally`, quindi un'eccezione sollevata da un aggancio altrui lo lasciava acceso per il resto della richiesta |
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **201 prove e 1099 asserzioni**, di cui 47 prove nuove. È un **controllo
+La verifica riporta **202 prove e 1110 asserzioni**, di cui 48 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1003,15 +1024,20 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Undici guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Dodici guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
-*La tabella non è stata rifatta per le correzioni arrivate dopo, e il motivo è che nessuna di
-quelle tocca la catena di controlli della consegna, che è ciò che questi undici guasti
-misurano: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. La tabella si rifà
-quando cambia la catena.*
+*I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
+revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
+consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. Il G12 è invece
+l'anello nuovo, quello sulla password, e non è stato simulato: il codice senza quell'anello è
+lo stato in cui il ramo si trovava, e le righe C-138 e C-167 sono state viste rosse lì prima
+che l'anello esistesse. **Gli altri undici non sono stati rieseguiti**, e il costo è
+dichiarato: la correzione aggiunge un anello in mezzo alla catena e non ne cambia nessuno, ma
+che gli altri undici continuino a misurare quello che misuravano è un'inferenza, non una cosa
+vista.*
 
 ### Che cosa ha trovato il primo giro di revisione indipendente
 
@@ -1045,6 +1071,28 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G9 | Non riscritto il file di regole quando manca | C-116, C-117, C-158 |
 | G10 | Lasciato acceso il filtro sui caricamenti durante la registrazione | C-115, C-117, C-126, C-129, C-131, C-134, C-139, C-140, C-141, C-142, C-157, C-158, C-159, C-160, C-162 |
 | G11 | Tolto il filtro sull'indirizzo dell'allegato | C-127, C-150 |
+| G12 | Tolto il controllo sulla password del contenuto | C-138, C-167 |
+
+### Che cosa ha trovato il secondo giro di revisione indipendente
+
+Il secondo giro ha confermato che le correzioni del primo chiudono i rilievi, e che
+l'esclusione del `401` regge: il revisore l'ha letta come coerente con la scelta di rifiutare
+nel dubbio. Ha però trovato un difetto nuovo, ed è nel primo anello della catena di controlli,
+cioè nella parte che il primo giro aveva dichiarato solida.
+
+**Lo stato `publish` non dice che il contenuto si legga.** Un contenuto con una password è
+pubblicato, quindi l'anello sullo stato lo lascia passare, ma la sua pagina non mostra niente
+a chi la password non ce l'ha. L'allegato, invece, usciva: l'indirizzo di consegna chiede due
+numeri e nessuna password. È la riga C-167, scritta prima della correzione e vista rossa
+insieme alla C-138, che qui fa da secondo testimone perché il caso è un rifiuto costruibile e
+va confrontato con gli altri.
+
+Vale la pena notare dove il difetto stava, perché è diverso dai tre di prima. Quelli erano
+tutti nella verifica della protezione, ed erano la stessa famiglia: una risposta che non
+dimostra niente letta come prova. Questo sta nella catena della consegna, ed è un'altra
+famiglia: **un anello che controlla una proprietà vicina a quella che serve.** `publish`
+risponde a "è pubblicato?", la domanda era "è leggibile da chiunque?", e le due coincidono in
+tutti i casi tranne uno. Il guasto G12 della tabella misura proprio questo anello.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 
