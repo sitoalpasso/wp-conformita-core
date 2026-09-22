@@ -2,7 +2,7 @@
 /**
  * I due punti di consegna: indirizzi, catena di controlli, intestazioni.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176.
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -310,12 +310,13 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Un utente che possiede le capability del tipo.
+	 * Un utente che possiede le capability del tipo indicato.
 	 *
+	 * @param string|null $tipo Tipo di contenuto, o null per quello della prova.
 	 * @return int
 	 */
-	private function utente_del_tipo() {
-		$capacita = conformita_core_capacita_tipo( self::TIPO );
+	private function utente_del_tipo( $tipo = null ) {
+		$capacita = conformita_core_capacita_tipo( null === $tipo ? self::TIPO : $tipo );
 		$utente   = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$oggetto  = new WP_User( $utente );
 
@@ -1005,6 +1006,56 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			200,
 			$risposta['stato'],
 			'Dall\'amministrazione si deve poter ancora vedere cio\' che e\' nel cestino.'
+		);
+	}
+
+	/**
+	 * C-176: tipo gestito ma non consultabile dal pubblico.
+	 *
+	 * Registrato attraverso il core e pubblicato non vuol dire consultabile:
+	 * un tipo puo' nascere non consultabile, e un altro componente puo' renderlo
+	 * tale con `register_post_type_args`. Se le sue pagine non si aprono, i suoi
+	 * allegati non si scaricano.
+	 */
+	public function test_c176_tipo_non_consultabile_dal_pubblico() {
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'prova_riservata',
+				array(
+					'sezione'      => self::SEZIONE,
+					'show_in_rest' => false,
+					'argomenti'    => array( 'public' => false ),
+				)
+			)
+		);
+
+		$atto = self::factory()->post->create(
+			array(
+				'post_type'   => 'prova_riservata',
+				'post_status' => 'publish',
+			)
+		);
+
+		update_post_meta(
+			$atto,
+			conformita_core_chiave_fine_pubblicazione(),
+			gmdate( 'Y-m-d', strtotime( '+30 days' ) )
+		);
+
+		$allegato = $this->allegato( $atto, 'riservato-tipo.pdf' );
+
+		$this->assertSame(
+			404,
+			$this->chiedi( $atto, $allegato )['stato'],
+			'Un tipo che il pubblico non puo\' consultare non deve consegnare allegati.'
+		);
+
+		wp_set_current_user( $this->utente_del_tipo( 'prova_riservata' ) );
+
+		$this->assertSame(
+			200,
+			$this->chiedi_da_amministrazione( $atto, $allegato )['stato'],
+			'Dall\'amministrazione si deve poter vedere lo stesso.'
 		);
 	}
 

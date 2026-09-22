@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172, C-173.
+ * C-169, C-170, C-172..C-175.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -1046,16 +1046,46 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-172: sottocartella che la riduzione cambierebbe.
+	 * C-172: la sottocartella si prova com'e' scritta, e quella che non si sa
+	 * chiedere si rifiuta.
 	 *
-	 * La riduzione del nome serve a costruire un percorso e un indirizzo senza
-	 * sorprese, ma chi sposta i byte usa il nome vero. Se i due non coincidono
-	 * si proverebbe un percorso e se ne scriverebbe un altro, che e' lo stesso
-	 * difetto della riga C-169 per un'altra via. Il caso lo produce un aggancio
-	 * di qualcun altro sui caricamenti, non la configurazione normale.
+	 * Il percorso che si chiede al server deve essere esattamente quello in cui
+	 * i byte finiscono. Una riduzione del nome, per quanto prudente, fa provare
+	 * un percorso e scriverne un altro: e' lo stesso difetto della riga C-169
+	 * per un'altra via. Quindi il nome non si corregge in silenzio. O lo si sa
+	 * chiedere com'e', e allora si prova com'e', oppure non si deposita.
+	 *
+	 * La prova fa tutte e due le meta'. Nella prima il server nega **solo** i
+	 * due indirizzi esatti, quello generale e quello della sottocartella col
+	 * punto: se il codice avesse tolto il punto, l'esca sarebbe stata chiesta
+	 * altrove, il server l'avrebbe servita e il deposito sarebbe stato
+	 * rifiutato. Nella seconda la sottocartella ha uno spazio, che in un
+	 * indirizzo si scrive in un altro modo: il deposito si rifiuta prima di
+	 * scrivere un byte e senza chiedere niente al server.
 	 */
-	public function test_c172_sottocartella_non_provabile() {
+	public function test_c172_la_sottocartella_si_prova_come_e_scritta() {
 		$atto = $this->atto_valido();
+
+		/*
+		 * Gli indirizzi negati si scrivono per esteso, non si chiedono al codice
+		 * che si sta provando: chiederli a lui li farebbe ridurre tutti e due
+		 * allo stesso modo, e la prova non vedrebbe piu' niente.
+		 */
+		$radice = Conformita_Core_Allegati::indirizzo_cartella();
+		$esca   = Conformita_Core_Allegati::ESCA_PREFISSO;
+
+		$this->risposta_finta = function ( $indirizzo ) use ( $radice, $esca ) {
+			$negati = array(
+				$radice . '/' . $esca . '.txt',
+				$radice . '/documenti.v1/' . $esca . '.pdf',
+			);
+
+			if ( in_array( $indirizzo, $negati, true ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			return $this->esca_servita();
+		};
 
 		add_filter( 'upload_dir', array( $this, 'sottocartella_con_un_punto' ), 5 );
 
@@ -1067,11 +1097,37 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		remove_filter( 'upload_dir', array( $this, 'sottocartella_con_un_punto' ), 5 );
 
-		$this->assertWPError( $esito );
-		$this->assertSame( 'conformita_core_destinazione_non_provabile', $esito->get_error_code() );
+		$this->assertIsInt( $esito, is_wp_error( $esito ) ? $esito->get_error_message() : '' );
 
 		$this->assertSame(
-			array(),
+			'verificata',
+			Conformita_Core_Allegati::stato_ambito( '/documenti.v1', 'pdf' )['copertura'],
+			'L\'ambito provato e\' quello col punto, non una sua riduzione.'
+		);
+
+		$chieste = $this->richieste;
+
+		add_filter( 'upload_dir', array( $this, 'sottocartella_con_uno_spazio' ), 5 );
+
+		$rifiutato = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'altro.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'upload_dir', array( $this, 'sottocartella_con_uno_spazio' ), 5 );
+
+		$this->assertWPError( $rifiutato );
+		$this->assertSame( 'conformita_core_destinazione_non_provabile', $rifiutato->get_error_code() );
+
+		$this->assertSame(
+			$chieste,
+			$this->richieste,
+			'Un percorso che non si sa chiedere non si chiede nemmeno.'
+		);
+
+		$this->assertCount(
+			1,
 			get_posts(
 				array(
 					'post_type'   => 'attachment',
@@ -1080,20 +1136,41 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 					'fields'      => 'ids',
 				)
 			),
-			'Nessun file deve essere entrato.'
+			'Solo il primo file deve essere entrato.'
 		);
 	}
 
 	/**
-	 * Una sottocartella con un punto nel nome, che la riduzione toglierebbe.
+	 * Una sottocartella con un punto nel nome: si sa chiedere com'e'.
 	 *
 	 * @param array<string, string> $caricamenti Cartella dei caricamenti.
 	 * @return array<string, string>
 	 */
 	public function sottocartella_con_un_punto( $caricamenti ) {
-		$caricamenti['subdir'] = '/documenti.v1';
-		$caricamenti['path']   = $caricamenti['basedir'] . '/documenti.v1';
-		$caricamenti['url']    = $caricamenti['baseurl'] . '/documenti.v1';
+		return $this->sottocartella_finta( $caricamenti, '/documenti.v1' );
+	}
+
+	/**
+	 * Una sottocartella con uno spazio nel nome: non si sa chiedere com'e'.
+	 *
+	 * @param array<string, string> $caricamenti Cartella dei caricamenti.
+	 * @return array<string, string>
+	 */
+	public function sottocartella_con_uno_spazio( $caricamenti ) {
+		return $this->sottocartella_finta( $caricamenti, '/documenti v1' );
+	}
+
+	/**
+	 * Mette una sottocartella decisa dalla prova al posto di quella per data.
+	 *
+	 * @param array<string, string> $caricamenti Cartella dei caricamenti.
+	 * @param string                $sotto       Sottocartella voluta.
+	 * @return array<string, string>
+	 */
+	private function sottocartella_finta( $caricamenti, $sotto ) {
+		$caricamenti['subdir'] = $sotto;
+		$caricamenti['path']   = $caricamenti['basedir'] . $sotto;
+		$caricamenti['url']    = $caricamenti['baseurl'] . $sotto;
 
 		return $caricamenti;
 	}
@@ -1144,5 +1221,222 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		);
 
 		$this->assertWPError( $esito );
+	}
+
+	/**
+	 * C-174: l'estensione si prova com'e' finira' sul disco.
+	 *
+	 * Stesso difetto della riga C-172 per l'altra meta' del percorso. Quello
+	 * che il server tratta in modo diverso non e' "un PDF": e' un indirizzo che
+	 * finisce in un certo modo. WordPress ripulisce il nome del file prima di
+	 * scriverlo, ma non abbassa le maiuscole e non toglie il trattino: se la
+	 * verifica riduce l'estensione mentre chi scrive i byte non la riduce, si
+	 * prova un indirizzo e se ne apre un altro.
+	 *
+	 * Nella prima meta' il file si chiama `.PDF`, e WordPress lo scrivera'
+	 * `.pdf`, perche' abbassa le maiuscole dell'estensione. Il server nega
+	 * **solo** l'indirizzo minuscolo e serve quello maiuscolo: il deposito
+	 * riesce, quindi l'esca chiesta era quella del file vero e non quella del
+	 * nome dichiarato. Nella seconda l'installazione ammette `pdf-x` e il
+	 * server si comporta come il caso che si teme: nega tutto tranne `.pdf-x`,
+	 * che serve. Il deposito deve essere rifiutato, perche' il percorso vero e'
+	 * quello aperto.
+	 */
+	public function test_c174_lestensione_si_prova_come_e_scritta() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		// Per esteso, per lo stesso motivo della riga C-172.
+		$radice = Conformita_Core_Allegati::indirizzo_cartella();
+		$esca   = Conformita_Core_Allegati::ESCA_PREFISSO;
+
+		$this->risposta_finta = function ( $indirizzo ) use ( $radice, $esca, $sotto ) {
+			$negati = array(
+				$radice . '/' . $esca . '.txt',
+				$radice . $sotto . '/' . $esca . '.pdf',
+			);
+
+			if ( in_array( $indirizzo, $negati, true ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			return $this->esca_servita();
+		};
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.PDF' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $esito, is_wp_error( $esito ) ? $esito->get_error_message() : '' );
+
+		$this->assertSame(
+			'verificata',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'],
+			'L\'ambito provato e\' quello che il file avra\' davvero.'
+		);
+
+		$this->assertSame(
+			'ignota',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'PDF' )['copertura'],
+			'L\'estensione dichiarata non e\' quella che si prova.'
+		);
+
+		$this->assertSame(
+			'pdf',
+			pathinfo( get_post_meta( $esito, '_wp_attached_file', true ), PATHINFO_EXTENSION ),
+			'Il file sul disco ha l\'estensione che si e\' provata.'
+		);
+
+		add_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( '.pdf-x' === substr( $indirizzo, -6 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		$rifiutato = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf-x' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+
+		$this->assertWPError( $rifiutato );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $rifiutato->get_error_code() );
+
+		$this->assertSame(
+			'non_coperta',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf-x' )['copertura'],
+			'Il gettone e\' uscito dall\'indirizzo vero, non da quello ridotto.'
+		);
+
+		$this->assertCount(
+			1,
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			),
+			'Solo il primo file deve essere entrato.'
+		);
+	}
+
+	/**
+	 * Ammette un\'estensione con un trattino, che la riduzione toglierebbe.
+	 *
+	 * @param array<string, string> $tipi Tipi ammessi dall\'installazione.
+	 * @return array<string, string>
+	 */
+	public function ammetti_pdf_x( $tipi ) {
+		$tipi['pdf-x'] = 'application/pdf';
+
+		return $tipi;
+	}
+
+	/**
+	 * C-175: una riscrittura fallita a meta' dimentica lo stesso.
+	 *
+	 * I file di regole si scrivono uno dopo l'altro. Se il primo viene riscritto
+	 * e il secondo non si riesce a scrivere, chi ha chiamato vede solo l'errore:
+	 * se la dimenticanza stesse li', gli esiti conservati resterebbero validi su
+	 * una cartella che nel frattempo e' stata riscritta a meta'. Basta poi che
+	 * qualcuno rimetta a mano il file mancante perche' il deposito successivo
+	 * non trovi piu' differenze e riusi un giudizio vecchio, su una
+	 * configurazione che nessuno ha piu' provato.
+	 *
+	 * La prova fa esattamente quel giro: primo deposito riuscito, `.htaccess`
+	 * alterato ma riscrivibile, `web.config` sostituito da una cartella, che
+	 * nessuno riesce a scrivere nemmeno da amministratore del sistema.
+	 */
+	public function test_c175_riscrittura_fallita_a_meta_dimentica_lo_stesso() {
+		$atto     = $this->atto_valido();
+		$cartella = Conformita_Core_Allegati::cartella();
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'primo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions -- prova: si tocca il disco direttamente perche' e' il disco cio' che si sta verificando.
+		$htaccess_atteso  = file_get_contents( $cartella . '/.htaccess' );
+		$webconfig_atteso = file_get_contents( $cartella . '/web.config' );
+
+		file_put_contents( $cartella . '/.htaccess', "# qualcuno ha cambiato le regole\n" );
+
+		unlink( $cartella . '/web.config' );
+		mkdir( $cartella . '/web.config' );
+		// phpcs:enable WordPress.WP.AlternativeFunctions
+
+		/*
+		 * Una cartella al posto di un file fa fallire la scrittura e fa emettere
+		 * a PHP i suoi avvisi. Qui sono previsti: si mettono a tacere per il
+		 * tempo della chiamata, altrimenti la suite li trasforma in eccezioni e
+		 * la prova fallirebbe prima di guardare quello che le interessa.
+		 */
+		set_error_handler( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- prova: gli avvisi di PHP sono il comportamento atteso, e la suite li trasformerebbe in eccezioni.
+			static function () {
+				return true;
+			}
+		);
+
+		$fallito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'secondo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		restore_error_handler();
+
+		$this->assertWPError( $fallito );
+		$this->assertSame( 'conformita_core_cartella_non_protetta', $fallito->get_error_code() );
+
+		$this->assertSame(
+			$htaccess_atteso,
+			file_get_contents( $cartella . '/.htaccess' ), // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- prova: si legge un file locale appena scritto.
+			'Il primo file e\' stato davvero riscritto: la riscrittura e\' fallita a meta\'.'
+		);
+
+		// Il ripristino a mano del file rimasto indietro.
+		// phpcs:disable WordPress.WP.AlternativeFunctions -- prova: come sopra.
+		rmdir( $cartella . '/web.config' );
+		file_put_contents( $cartella . '/web.config', $webconfig_atteso );
+		// phpcs:enable WordPress.WP.AlternativeFunctions
+
+		$dopo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'terzo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError(
+			$dopo,
+			'Le regole sono di nuovo a posto, ma nessuno ha piu\' provato questa configurazione.'
+		);
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $dopo->get_error_code() );
+
+		Conformita_Core_Allegati::verifica();
+
+		$ripreso = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'quarto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt(
+			$ripreso,
+			is_wp_error( $ripreso ) ? $ripreso->get_error_message() : ''
+		);
 	}
 }

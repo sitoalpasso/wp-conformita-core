@@ -36,7 +36,8 @@
  * mentre un deposito rifiutato è un messaggio a chi sta installando, nel
  * momento in cui può ancora rimediare.
  *
- * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166.
+ * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
+ * C-172..C-175.
  *
  * @package Conformita_Core
  */
@@ -204,23 +205,67 @@ final class Conformita_Core_Allegati {
 	 * @return string
 	 */
 	private static function estensione( $estensione ) {
-		$estensione = strtolower( preg_replace( '/[^A-Za-z0-9]/', '', (string) $estensione ) );
+		$estensione = (string) $estensione;
 
 		return '' === $estensione ? 'txt' : $estensione;
 	}
 
 	/**
-	 * La sottocartella ridotta a una forma sicura: vuota, oppure con la barra
-	 * davanti e nessuna barra in fondo.
+	 * La sottocartella con le barre a posto, **e niente altro**.
+	 *
+	 * Qui non si toglie nessun carattere, di proposito. Una riduzione che
+	 * cambia il nome fa provare un percorso e scriverne un altro, che è il
+	 * difetto della riga C-172: quello che la riduzione cambierebbe non si
+	 * corregge in silenzio, si rifiuta. Vedi `provabile()`.
 	 *
 	 * @param string $sotto Sottocartella dichiarata.
 	 * @return string
 	 */
 	private static function sotto( $sotto ) {
-		$sotto = preg_replace( '#[^A-Za-z0-9/_-]#', '', str_replace( '\\', '/', (string) $sotto ) );
-		$sotto = trim( (string) $sotto, '/' );
+		$sotto = rtrim( str_replace( '\\', '/', (string) $sotto ), '/' );
 
-		return '' === $sotto ? '' : '/' . $sotto;
+		if ( '' === $sotto ) {
+			return '';
+		}
+
+		return '/' === $sotto[0] ? $sotto : '/' . $sotto;
+	}
+
+	/**
+	 * L'ambito si sa provare: il percorso che si chiede al server è esattamente
+	 * quello in cui i byte finiscono.
+	 *
+	 * Passa quello che si può mettere in un percorso e in un indirizzo senza
+	 * trasformarlo: lettere, cifre, punto, trattino e trattino basso nei nomi
+	 * delle cartelle, e gli stessi meno il punto nell'estensione, che il punto
+	 * lo ha già davanti. Fuori restano gli spazi, che in un indirizzo vanno
+	 * scritti in un altro modo, e i due punti, che risalgono la cartella. Le
+	 * maiuscole restano maiuscole: un server può distinguerle.
+	 *
+	 * Righe C-172 e C-174.
+	 *
+	 * @param string $sotto      Sottocartella.
+	 * @param string $estensione Estensione.
+	 * @return bool
+	 */
+	private static function provabile( $sotto, $estensione ) {
+		if ( ! preg_match( '/^[A-Za-z0-9_-]{1,32}$/', self::estensione( $estensione ) ) ) {
+			return false;
+		}
+
+		$sotto = self::sotto( $sotto );
+
+		if ( '' === $sotto ) {
+			return true;
+		}
+
+		foreach ( explode( '/', ltrim( $sotto, '/' ) ) as $pezzo ) {
+			if ( '.' === $pezzo || '..' === $pezzo || ! preg_match( '/^[A-Za-z0-9._-]{1,64}$/', $pezzo ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
@@ -365,6 +410,19 @@ final class Conformita_Core_Allegati {
 				);
 			}
 
+			/*
+			 * **La dimenticanza sta qui, al primo file scritto davvero.** Se si
+			 * e' dovuto scrivere, le regole mancavano o erano diverse, quindi
+			 * la cartella era aperta e ogni giudizio conservato parla di una
+			 * configurazione che non c'e' piu'. Sta qui e non in chi chiama
+			 * perche' questa funzione puo' scrivere il primo file e fallire sul
+			 * secondo: chi chiama vedrebbe solo l'errore e conserverebbe
+			 * giudizi vecchi su una cartella riscritta a meta'. Riga C-175.
+			 */
+			if ( ! $riscritto ) {
+				self::dimentica();
+			}
+
 			$riscritto = true;
 		}
 
@@ -472,6 +530,25 @@ final class Conformita_Core_Allegati {
 	 * @return array<string, mixed> Lo stato, con l'esito appena misurato.
 	 */
 	public static function verifica( $sotto = '', $estensione = 'txt' ) {
+		/*
+		 * Un ambito che non si sa provare non si misura nemmeno: scrivere
+		 * un'esca in un percorso che non si sa chiedere darebbe una risposta
+		 * che parla di un altro file. Vale `ignota`, cioe' il deposito si
+		 * rifiuta. Righe C-172 e C-174.
+		 */
+		if ( ! self::provabile( $sotto, $estensione ) ) {
+			return self::conserva_esito(
+				$sotto,
+				$estensione,
+				array(
+					'copertura'  => 'ignota',
+					'istante'    => self::adesso(),
+					'stato_http' => 0,
+					'motivo'     => __( 'Questo percorso non si sa provare: il nome della sottocartella o dell\'estensione non si può chiedere al server così com\'è.', 'conformita-core' ),
+				)
+			);
+		}
+
 		self::$in_verifica = true;
 
 		$riscritto = false;
@@ -481,19 +558,16 @@ final class Conformita_Core_Allegati {
 
 		/*
 		 * **Se qui si e' dovuto riscrivere, tutto quello che si sapeva non vale
-		 * piu'.** Vale anche quando la verifica chiesta e' quella di un ambito
-		 * solo: le regole mancavano, quindi la cartella era aperta, e gli esiti
-		 * conservati parlano di una configurazione che nel frattempo e'
-		 * cambiata due volte. Si dimenticano prima di ogni altra cosa, anche
-		 * prima di un'uscita per errore, e l'esito generale si rimisura invece
-		 * di restare quello di prima. Riga C-173.
+		 * piu'.** Le regole mancavano, quindi la cartella era aperta, e gli
+		 * esiti conservati parlano di una configurazione che nel frattempo e'
+		 * cambiata due volte. A dimenticarli e' `scrivi()`, al primo file che
+		 * scrive davvero, cosi' vale anche quando poi fallisce a meta' e chi
+		 * chiama vede solo l'errore. Qui resta l'altra meta': se la verifica
+		 * chiesta era quella di un ambito solo, il giudizio generale non si
+		 * lascia vuoto, si rimisura. Righe C-173 e C-175.
 		 */
-		if ( $riscritto ) {
-			self::dimentica();
-
-			if ( ! self::generale( $sotto, $estensione ) ) {
-				self::verifica();
-			}
+		if ( $riscritto && ! self::generale( $sotto, $estensione ) ) {
+			self::verifica();
 		}
 
 		if ( ! is_wp_error( $scrittura ) && ! self::generale( $sotto, $estensione ) ) {
@@ -926,23 +1000,42 @@ final class Conformita_Core_Allegati {
 		$sotto       = isset( $caricamenti['subdir'] ) ? (string) $caricamenti['subdir'] : '';
 
 		/*
-		 * **Se il nome della sottocartella non sopravvive alla riduzione, non
-		 * si deposita.** La riduzione serve a costruire un percorso e un
-		 * indirizzo senza sorprese, ma chi scrive i byte usa il nome vero: se i
-		 * due non coincidono si proverebbe un percorso e se ne scriverebbe un
-		 * altro. Fra allargare il filtro e rifiutare, si rifiuta, perche' il
-		 * caso lo produce un aggancio di qualcun altro e non la configurazione
-		 * normale. Riga C-172.
+		 * **L'estensione e' quella che finira' sul disco, non quella
+		 * dichiarata.** Provare `pdf` mentre il file si chiama `.pdf-x`, o
+		 * `.PDF` mentre WordPress lo scrivera' `.pdf`, e' lo stesso difetto
+		 * della sottocartella per un'altra via: si prova un indirizzo e se ne
+		 * apre un altro.
+		 *
+		 * Il nome definitivo non si ricostruisce a mano, si chiede alla stessa
+		 * funzione che lo decidera' fra poche righe: `wp_unique_filename()`
+		 * ripulisce il nome, abbassa le maiuscole dell'estensione e per le
+		 * immagini tiene conto della conversione di formato. Rifarne il lavoro
+		 * qui significherebbe rifarlo per meta', e la meta' che manca e'
+		 * esattamente quella che apre un percorso non provato. Riga C-174.
+		 *
+		 * Quello che resta non provabile dopo questo passaggio, come
+		 * un'estensione con uno spazio, non si deposita: non si corregge in
+		 * silenzio a un nome vicino. Righe C-172 e C-174.
 		 */
-		if ( self::sotto( $sotto ) !== $sotto ) {
+		$nome_dichiarato = empty( $tipo_file['proper_filename'] )
+			? (string) $file['name']
+			: (string) $tipo_file['proper_filename'];
+		$nome_finale     = wp_unique_filename( self::cartella() . self::sotto( $sotto ), $nome_dichiarato );
+		$estensione      = (string) pathinfo( $nome_finale, PATHINFO_EXTENSION );
+
+		if ( ! self::provabile( $sotto, $estensione ) ) {
 			return new WP_Error(
 				'conformita_core_destinazione_non_provabile',
 				sprintf(
-					/* translators: %s: sottocartella di destinazione. */
-					__( 'Deposito rifiutato: la sottocartella di destinazione «%s» non è provabile, perché il suo nome non coincide con quello che la verifica saprebbe chiedere al server.', 'conformita-core' ),
-					$sotto
+					/* translators: 1: sottocartella di destinazione, 2: estensione del file. */
+					__( 'Deposito rifiutato: il percorso di destinazione («%1$s», estensione «%2$s») non è provabile, perché non si può chiedere al server esattamente com\'è.', 'conformita-core' ),
+					'' === $sotto ? '/' : $sotto,
+					$estensione
 				),
-				array( 'sottocartella' => $sotto )
+				array(
+					'sottocartella' => $sotto,
+					'estensione'    => $estensione,
+				)
 			);
 		}
 
@@ -957,11 +1050,11 @@ final class Conformita_Core_Allegati {
 		 * richiesta. Righe C-169 e C-170.
 		 */
 		if ( ! $stato['scavalcata'] ) {
-			$ambito = self::stato_ambito( $sotto, $tipo_file['ext'] );
+			$ambito = self::stato_ambito( $sotto, $estensione );
 
 			if ( 'verificata' !== $ambito['copertura'] ) {
-				self::verifica( $sotto, $tipo_file['ext'] );
-				$ambito = self::stato_ambito( $sotto, $tipo_file['ext'] );
+				self::verifica( $sotto, $estensione );
+				$ambito = self::stato_ambito( $sotto, $estensione );
 			}
 
 			if ( 'verificata' !== $ambito['copertura'] ) {
@@ -970,7 +1063,7 @@ final class Conformita_Core_Allegati {
 					sprintf(
 						/* translators: 1: estensione del file, 2: sottocartella di destinazione, 3: esito della verifica, 4: motivo. */
 						__( 'Deposito rifiutato: per i file «%1$s» in «%2$s» la protezione risulta «%3$s». %4$s Finché non è verificata non si scrive nessun file.', 'conformita-core' ),
-						$tipo_file['ext'],
+						$estensione,
 						'' === $sotto ? '/' : $sotto,
 						$ambito['copertura'],
 						$ambito['motivo']

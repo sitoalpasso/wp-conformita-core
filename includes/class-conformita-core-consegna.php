@@ -443,7 +443,7 @@ final class Conformita_Core_Consegna {
 	 *
 	 * **Nessun anello scrive niente**, e nessuno guarda le capability sul punto
 	 * pubblico: l'esenzione è della superficie e non dell'utente, come al punto
-	 * 3 della scheda di S4. Righe C-131..C-137, C-167, C-168, C-171.
+	 * 3 della scheda di S4. Righe C-131..C-137, C-167, C-168, C-171, C-176.
 	 *
 	 * L'ultimo anello controlla il percorso normalizzato. Il percorso non arriva
 	 * mai dall'esterno, perché l'indirizzo porta due numeri e niente altro, ma
@@ -497,6 +497,21 @@ final class Conformita_Core_Consegna {
 
 		if ( ! $amministrativa ) {
 			if ( 'publish' !== $atto->post_status ) {
+				return false;
+			}
+
+			/*
+			 * Essere registrato attraverso il core e pubblicato non vuol dire
+			 * essere consultabile dal pubblico: un tipo puo' essere dichiarato
+			 * non consultabile, e un altro componente puo' renderlo tale
+			 * attraverso `register_post_type_args`. Se le sue pagine non si
+			 * aprono, i suoi allegati non si scaricano. Riga C-176.
+			 *
+			 * `is_post_publicly_viewable()` guarda anche lo stato, ma il
+			 * controllo su `publish` resta sopra: due anelli che guardano cose
+			 * diverse restano due anelli, e la riga C-136 misura quello.
+			 */
+			if ( ! is_post_publicly_viewable( $atto ) ) {
 				return false;
 			}
 
