@@ -36,7 +36,7 @@
  * mentre un deposito rifiutato è un messaggio a chi sta installando, nel
  * momento in cui può ancora rimediare.
  *
- * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163.
+ * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166.
  *
  * @package Conformita_Core
  */
@@ -91,6 +91,26 @@ final class Conformita_Core_Allegati {
 	 * Chiave dell'istante di deposito.
 	 */
 	const DEPOSITO = '_conformita_core_deposito';
+
+	/**
+	 * Gli stati HTTP che valgono come diniego, e sono un elenco chiuso.
+	 *
+	 * **Elenco, e non un intervallo.** La prima stesura trattava come diniego
+	 * qualunque stato dal 400 in su, ed e' stato un difetto della stessa famiglia
+	 * del reindirizzamento letto come rifiuto: un 503 o un 429 li dice un proxy
+	 * che in quel momento non sta servendo niente, non un server che nega quel
+	 * percorso, e quando il proxy torna a servire i file sono li'. Il 401 e'
+	 * fuori per lo stesso motivo: lo dice un sito messo per intero dietro
+	 * un'autenticazione, cioe' tipicamente un'installazione in costruzione, e il
+	 * giorno che l'autenticazione si toglie l'esito conservato direbbe
+	 * `verificata` su una cartella che nessuno ha mai provato. Un'installazione
+	 * cosi' dichiara lo scavalcamento, che esiste per questo.
+	 *
+	 * Restano il 403, che e' quello che rispondono i file di regole scritti qui,
+	 * e il 404, che rispondono i server configurati per negare senza confermare
+	 * che il file esista.
+	 */
+	const DINIEGHI = array( 403, 404 );
 
 	/**
 	 * Algoritmo dell'impronta.
@@ -299,7 +319,7 @@ final class Conformita_Core_Allegati {
 	 * certificato non riconosciuto l'esito è `ignota`, cioè il deposito si
 	 * rifiuta, che è la direzione sicura.
 	 *
-	 * Righe C-154, C-155, C-156, C-163.
+	 * Righe C-154, C-155, C-156, C-163, C-164, C-165.
 	 *
 	 * @return array<string, mixed> Lo stato, con l'esito appena misurato.
 	 */
@@ -344,38 +364,14 @@ final class Conformita_Core_Allegati {
 		$stato = (int) wp_remote_retrieve_response_code( $risposta );
 		$corpo = (string) wp_remote_retrieve_body( $risposta );
 
-		if ( $stato >= 400 ) {
-			return self::conserva(
-				array(
-					'copertura'  => 'verificata',
-					'istante'    => self::adesso(),
-					'stato_http' => $stato,
-					'motivo'     => __( 'Il server nega il percorso della cartella protetta.', 'conformita-core' ),
-				)
-			);
-		}
-
 		/*
-		 * Un reindirizzamento non e' un rifiuto, ed e' l'unico posto dove
-		 * questa lettura poteva sbagliare aprendo. La richiesta non segue i
-		 * reindirizzamenti apposta, quindi di dove porta questo non si sa
-		 * niente: il caso comune e' un sito che manda da http a https, e li'
-		 * il file arriverebbe lo stesso un passo piu' in la'. Vale `ignota`,
-		 * cioe' il deposito si rifiuta, che e' la direzione sicura. Nello
-		 * stesso ramo finisce ogni risposta che non e' ne' 2xx ne' 4xx ne'
-		 * 5xx, perche' di quelle non si sa dire niente di piu'.
+		 * **Il gettone si guarda per primo, prima dello stato.** Se il contenuto
+		 * dell'esca e' tornato indietro, i byte sono usciti dalla cartella, e con
+		 * quale stato siano usciti non cambia niente. Guardare lo stato per primo
+		 * lasciava passare il server che serve il file accompagnandolo con uno
+		 * stato di errore, che e' quello che fa una rete di distribuzione mal
+		 * configurata davanti all'origine. Riga C-165.
 		 */
-		if ( $stato < 200 || $stato > 299 ) {
-			return self::conserva(
-				array(
-					'copertura'  => 'ignota',
-					'istante'    => self::adesso(),
-					'stato_http' => $stato,
-					'motivo'     => __( 'Il server non serve e non nega: risponde con un reindirizzamento o con una risposta interlocutoria, e dove porta non si sa.', 'conformita-core' ),
-				)
-			);
-		}
-
 		if ( false !== strpos( $corpo, self::gettone() ) ) {
 			return self::conserva(
 				array(
@@ -387,12 +383,41 @@ final class Conformita_Core_Allegati {
 			);
 		}
 
+		if ( in_array( $stato, self::DINIEGHI, true ) ) {
+			return self::conserva(
+				array(
+					'copertura'  => 'verificata',
+					'istante'    => self::adesso(),
+					'stato_http' => $stato,
+					'motivo'     => __( 'Il server nega il percorso della cartella protetta.', 'conformita-core' ),
+				)
+			);
+		}
+
+		if ( $stato >= 200 && $stato <= 299 ) {
+			return self::conserva(
+				array(
+					'copertura'  => 'ignota',
+					'istante'    => self::adesso(),
+					'stato_http' => $stato,
+					'motivo'     => __( 'Risposta positiva ma estranea: non è il nostro file, e non è un rifiuto. Può essere una schermata di accesso o una pagina generica.', 'conformita-core' ),
+				)
+			);
+		}
+
+		/*
+		 * Tutto il resto non dimostra niente, in nessuna delle due direzioni: un
+		 * reindirizzamento, di cui non si sa dove porti perche' la richiesta non
+		 * lo segue; un'indisponibilita' temporanea, che parla del momento e non
+		 * delle regole della cartella; uno stato fuori posto. Vale `ignota`, cioe'
+		 * il deposito si rifiuta, che e' la direzione sicura. Righe C-163 e C-164.
+		 */
 		return self::conserva(
 			array(
 				'copertura'  => 'ignota',
 				'istante'    => self::adesso(),
 				'stato_http' => $stato,
-				'motivo'     => __( 'Risposta positiva ma estranea: non è il nostro file, e non è un rifiuto. Può essere una schermata di accesso o una pagina generica.', 'conformita-core' ),
+				'motivo'     => __( 'Il server non serve e non nega: risponde con un reindirizzamento, con un\'indisponibilità temporanea o con un altro stato che non dice niente sulle regole della cartella.', 'conformita-core' ),
 			)
 		);
 	}
@@ -611,15 +636,26 @@ final class Conformita_Core_Allegati {
 
 		add_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
 
-		$spostato = wp_handle_sideload(
-			$file,
-			array(
-				'test_form' => false,
-				'action'    => 'wp_handle_sideload',
-			)
-		);
-
-		remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
+		/*
+		 * **Il `finally` non e' prudenza generica.** `wp_handle_sideload()` emette
+		 * agganci a cui si attacca chiunque, e un'eccezione sollevata la' dentro
+		 * salterebbe la riga che spegne il filtro: da quel punto in poi, per tutto
+		 * il resto della richiesta, ogni caricamento finirebbe nella cartella
+		 * protetta e ogni percorso memorizzato sarebbe calcolato rispetto a una
+		 * cartella diversa da quella vera. E' la stessa collisione silenziosa che
+		 * la riga C-115 sorveglia, per un'altra via. Riga C-166.
+		 */
+		try {
+			$spostato = wp_handle_sideload(
+				$file,
+				array(
+					'test_form' => false,
+					'action'    => 'wp_handle_sideload',
+				)
+			);
+		} finally {
+			remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
+		}
 
 		if ( ! is_array( $spostato ) || isset( $spostato['error'] ) || empty( $spostato['file'] ) ) {
 			return new WP_Error(

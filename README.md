@@ -108,10 +108,12 @@ intero, e `wp_get_attachment_url()` restituisce l'indirizzo di consegna e non il
 file: **il percorso non si pubblica mai**.
 
 **La protezione si verifica, non si presume.** Nella cartella c'è anche un file esca con un
-gettone dentro; il componente lo chiede al sito stesso e legge la risposta. Un rifiuto vale
-`verificata`, il gettone che torna indietro vale `non_coperta`, e tutto il resto vale
-`ignota`: la richiesta fallita, il `200` con qualcosa che non è il nostro file, e il
-reindirizzamento, che non è un rifiuto perché di dove porta non si sa niente. La richiesta si
+gettone dentro; il componente lo chiede al sito stesso e legge la risposta, in quest'ordine.
+Il gettone che torna indietro vale `non_coperta`, con qualunque stato sia tornato: i byte sono
+usciti. Un `403` o un `404` valgono `verificata`, e sono un elenco chiuso. Tutto il resto vale
+`ignota`, quindi niente deposito: la richiesta fallita, il `200` con qualcosa che non è il
+nostro file, il reindirizzamento, e ogni stato che parla del momento e non delle regole della
+cartella, come un `503` o il `401` di un sito ancora chiuso al pubblico. La richiesta si
 fa all'attivazione, quando i file di regole vengono scritti o riscritti, e su richiesta
 esplicita con `conformita_core_verifica_protezione_allegati()`; **non a ogni deposito**.
 L'esito si conserva con il proprio istante e si rilegge con

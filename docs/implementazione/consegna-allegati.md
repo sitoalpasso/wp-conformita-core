@@ -147,13 +147,15 @@ dentro PHP.
 WordPress fa nel proprio controllo di integrità. `wp_remote_get()` sull'indirizzo dell'esca, e
 poi la lettura della risposta:
 
-| Risposta | Esito | Perché |
-|---|---|---|
-| Un rifiuto: 4xx o 5xx | **`verificata`** | il server nega il percorso: la protezione è attiva |
-| 200 e nel corpo c'è il gettone dell'esca | **`non_coperta`** | il file viene servito: la cartella è aperta |
-| 200 ma il gettone non c'è | **`ignota`** | è tornato qualcosa che non è il nostro file: una pagina di accesso, un catch-all, un proxy che sostituisce. Non è una prova di rifiuto |
-| Un reindirizzamento: 3xx | **`ignota`** | la richiesta non segue i reindirizzamenti, quindi di dove porta non si sa niente. Vedi il riquadro qui sotto |
-| La richiesta non riesce (`WP_Error`) | **`ignota`** | giro su se stessi bloccato, autenticazione HTTP davanti a un ambiente di prova, DNS interno diverso |
+L'ordine in cui si guarda conta, ed è questo:
+
+| Ordine | Risposta | Esito | Perché |
+|---|---|---|---|
+| 1 | Nel corpo c'è il gettone dell'esca, **con qualunque stato** | **`non_coperta`** | i byte del nostro file sono usciti dalla cartella: con quale stato siano usciti non cambia niente |
+| 2 | Lo stato è **403** o **404** | **`verificata`** | sono i due modi in cui un server nega un percorso, e sono un elenco chiuso |
+| 3 | Lo stato è 2xx e il gettone non c'è | **`ignota`** | è tornato qualcosa che non è il nostro file: una pagina di accesso, un catch-all, un proxy che sostituisce. Non è una prova di rifiuto |
+| 4 | Ogni altro stato: 3xx, 401, 429, 5xx | **`ignota`** | nessuno di questi parla delle regole della cartella. Vedi i due riquadri qui sotto |
+| 5 | La richiesta non riesce (`WP_Error`) | **`ignota`** | giro su se stessi bloccato, DNS interno diverso, certificato non riconosciuto |
 
 **Il reindirizzamento non è un rifiuto, e questa riga è arrivata in revisione.** La prima
 stesura del codice leggeva come rifiuto qualunque stato fuori dall'intervallo 2xx, quindi anche
@@ -161,10 +163,32 @@ un 301 e un 302. Il caso comune che rompe quella lettura è un sito il cui indir
 caricamenti è in `http` mentre il server manda tutto su `https`: l'esca risponde 301, la
 verifica direbbe `verificata`, e il deposito partirebbe su una cartella che un passo più in là
 potrebbe servire i file senza problemi. Stessa cosa con un firewall applicativo che manda a una
-pagina di sfida. Era l'unico punto in cui questa lettura sbagliava aprendo invece che
-chiudendo, ed è la riga C-163.
+pagina di sfida. È la riga C-163.
 
-Il gettone casuale serve a distinguere "il server ha negato" da "è tornata una pagina
+**Il diniego è un elenco chiuso, e anche questo è arrivato in revisione, al giro dopo.** La
+correzione del reindirizzamento aveva lasciato in piedi la stessa famiglia di difetto con un
+confine diverso: trattava come diniego qualunque stato dal 400 in su. Una revisione
+indipendente ha fatto notare che così un 503 o un 429, che li dice un proxy che in quel momento
+non sta servendo niente, autorizzano il deposito su una cartella che nessuno ha provato; quando
+il proxy torna a servire, i file sono lì. Adesso il diniego è `403` e `404` e basta, dichiarati
+in una costante. Riga C-164.
+
+**Il 401 è fuori dall'elenco di proposito, e la revisione suggeriva di tenerlo dentro.** Un 401
+lo risponde un sito messo per intero dietro un'autenticazione, cioè tipicamente
+un'installazione in costruzione. Non è un giudizio sulla cartella: il giorno che
+l'autenticazione si toglie, l'esito conservato direbbe `verificata` su una cartella mai
+provata, ed è proprio la sequenza che capita, perché i file si depositano mentre il sito è
+ancora chiuso. Un'installazione che deve lavorare in quella condizione dichiara lo
+scavalcamento, che esiste per questo e sposta la responsabilità su chi lo dichiara. Il costo di
+questa scelta è dichiarato: dietro autenticazione, senza scavalcamento, non si deposita.
+
+**Il gettone si guarda prima dello stato, e anche questo è un rilievo della revisione.** Se il
+contenuto dell'esca torna indietro, la cartella è aperta, e con quale stato sia tornato non
+cambia niente. Guardare lo stato per primo lasciava passare il server che serve il file
+accompagnandolo con uno stato di errore, che è quello che fa una rete di distribuzione mal
+configurata davanti all'origine. Riga C-165.
+
+Il gettone casuale serve anche a distinguere "il server ha negato" da "è tornata una pagina
 qualsiasi con stato 200", che sono due cose diverse e che senza gettone si confonderebbero.
 
 **Lo stato `presunta` non esiste.** Era nella stesura precedente di questa scheda e significava
@@ -735,6 +759,10 @@ Nessun file del repository dell'albo.
 | Configurazione del server cambiata dopo la verifica | non viene notata finché qualcuno non rifà la verifica. **Limite dichiarato**: l'esito porta il suo istante apposta | **no** |
 | Giro su se stessi bloccato | la verifica dà `ignota`, il deposito si rifiuta finché non si sistema o non si dichiara lo scavalcamento | sì |
 | Il server reindirizza il percorso dell'esca | la verifica dà `ignota` e non `verificata`, perché dove porta il reindirizzamento non si sa; il deposito si rifiuta | sì |
+| Il server risponde all'esca con un'indisponibilità temporanea (429, 5xx) | la verifica dà `ignota`, perché quello stato parla del momento e non delle regole della cartella; il deposito si rifiuta | sì |
+| Il sito è per intero dietro un'autenticazione (401 all'esca) | la verifica dà `ignota`, e senza scavalcamento non si deposita finché il sito non è aperto | sì, al costo di un deposito rifiutato su un'installazione in costruzione |
+| Il server serve l'esca accompagnandola con uno stato di errore | vale `non_coperta`, perché il gettone si guarda prima dello stato | sì |
+| Un aggancio di un altro componente solleva un'eccezione durante lo spostamento dei byte | il dirottamento dei caricamenti si spegne comunque, perché la rimozione del filtro sta in un `finally` | sì |
 | Scavalcamento dichiarato su un server davvero scoperto | i file si depositano in una cartella aperta | **no**, ed è il senso di uno scavalcamento: la responsabilità passa a chi lo dichiara |
 | File cancellato dal disco | la consegna risponde "non trovato" | sì |
 | Metadato dell'impronta perso | la consegna funziona, l'impronta non è leggibile e il referto se ne accorge | sì |
@@ -778,7 +806,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Quarantanove righe, da C-115 a C-163.**
+convenzione di questo repository. **Cinquantadue righe, da C-115 a C-166.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -800,18 +828,21 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-123 | fatto | Tipo di file non ammesso dall'installazione: rifiutato |
 | C-124 | fatto | Impronta al deposito: `sha256:` più il valore vero del file, con dimensione e istante nel fuso del sito |
 | C-125 | fatto | File sostituito sul disco dopo il deposito: la consegna non se ne accorge. **Documentazione eseguibile di un limite**, non prova di conformità |
+| C-166 | fatto | Un'eccezione sollevata da un aggancio altrui durante lo spostamento dei byte non lascia acceso il dirottamento dei caricamenti |
 
 ### Verifica della protezione
 
 | Riga | Stato | Cosa verifica |
 |---|---|---|
 | C-146 | fatto | Lo stato conservato si rilegge con il suo istante, e leggerlo non fa nessuna richiesta |
-| C-154 | fatto | La richiesta all'esca riceve un rifiuto: esito `verificata`, con l'istante e lo stato osservato |
+| C-154 | fatto | La richiesta all'esca riceve un diniego, 403 oppure 404: esito `verificata`, con l'istante e lo stato osservato |
 | C-155 | fatto | La richiesta all'esca riceve 200 con dentro il gettone: esito `non_coperta` |
 | C-156 | fatto | La richiesta fallisce, oppure riceve 200 senza il gettone: esito `ignota` in tutti e due i casi, con motivi distinti |
 | C-157 | fatto | La verifica si fa su richiesta esplicita e quando le regole si riscrivono. **Un deposito che non riscrive niente non fa nessuna richiesta**, e la riga lo verifica contandole |
 | C-158 | fatto | Regole cancellate a mano: il deposito successivo le riscrive **e rifà la verifica**, e decide con l'esito nuovo e non con quello conservato |
 | C-163 | fatto | La richiesta all'esca riceve un reindirizzamento: esito `ignota` e non `verificata`, e il deposito si rifiuta |
+| C-164 | fatto | Uno stato di errore che non è un diniego (500, 503, 429, 401) vale `ignota` e non `verificata`, e il deposito si rifiuta |
+| C-165 | fatto | Il gettone vince sullo stato: l'esca servita con uno stato di errore vale `non_coperta` |
 
 ### Indirizzi
 
@@ -891,10 +922,12 @@ parametro `$adesso`.
 | C-148, C-149, C-151, C-152, C-161 | Da prove della suite a righe verificate dalla tabella dei guasti, con il costo dichiarato |
 | C-162 | Nuova. Non era prevista: serve a dimostrare che le prove sui rifiuti passano davvero dall'aggancio del punto pubblico, e non sono verdi perché la richiesta non arriva da nessuna parte |
 | C-163 | Nuova, e arrivata dopo: la rilettura del ramo ha trovato che un reindirizzamento all'esca veniva letto come un rifiuto. La riga è stata scritta prima della correzione e vista rossa sul comportamento, con `verificata` al posto di `ignota` |
+| C-164, C-165 | Nuove, dal primo giro di revisione indipendente. La correzione della C-163 aveva lasciato in piedi la stessa famiglia con un confine diverso: ogni stato dal 400 in su valeva diniego, e il gettone si guardava dopo lo stato. Tutte e due viste rosse sul comportamento prima della correzione |
+| C-166 | Nuova, dallo stesso giro. La rimozione del filtro sui caricamenti non stava in un `finally`, quindi un'eccezione sollevata da un aggancio altrui lo lasciava acceso per il resto della richiesta |
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **198 prove e 1074 asserzioni**, di cui 44 prove nuove. È un **controllo
+La verifica riporta **201 prove e 1099 asserzioni**, di cui 47 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -903,12 +936,12 @@ rosse quando il comportamento si rompe.
 
 ## 12. Stato dell'implementazione, e che cosa il lavoro ha trovato
 
-**Fatto per intero.** Il perimetro del punto 1 è costruito, le quarantanove righe di collaudo
+**Fatto per intero.** Il perimetro del punto 1 è costruito, le cinquantadue righe di collaudo
 sono verdi nella verifica continua, e la tabella dei guasti del punto 13 dice quali righe
 misurano davvero che cosa.
 
-Verifica locale sulla versione minima dichiarata, WordPress 6.5: **198 prove e 1074
-asserzioni verdi**, PHPCS senza errori e senza avvisi. Le prove nuove sono 44, le altre 154
+Verifica locale sulla versione minima dichiarata, WordPress 6.5: **201 prove e 1099
+asserzioni verdi**, PHPCS senza errori e senza avvisi. Le prove nuove sono 47, le altre 154
 sono quelle che c'erano.
 
 *La verifica continua esegue tutti e due i rami della matrice, WordPress 6.5 con PHP 8.1 e
@@ -974,11 +1007,30 @@ Undici guasti, introdotti **uno alla volta** in una copia del repository presa f
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
-*La tabella non è stata rifatta quando è stata corretta la lettura dei reindirizzamenti, e il
-motivo è che quella correzione non tocca la catena di controlli della consegna, che è ciò che
-questi undici guasti misurano: cambia un ramo dentro `verifica()`, e quel ramo ha la sua riga
-verde nella suite, la C-163, vista rossa prima della correzione. La tabella si rifà quando
-cambia la catena.*
+*La tabella non è stata rifatta per le correzioni arrivate dopo, e il motivo è che nessuna di
+quelle tocca la catena di controlli della consegna, che è ciò che questi undici guasti
+misurano: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. La tabella si rifà
+quando cambia la catena.*
+
+### Che cosa ha trovato il primo giro di revisione indipendente
+
+Il ramo è stato letto da un revisore indipendente su tre domande: la catena di controlli del
+punto pubblico, l'esenzione dell'amministrazione, e la lettura della risposta all'esca. Le
+prime due hanno retto: la catena usa `realpath()` con il separatore finale e non si aggira con
+un prefisso simile o un collegamento simbolico; il punto amministrativo pretende nonce e
+capability, e quello pubblico applica la scadenza qualunque cosa dica `is_admin()`.
+
+La terza ha prodotto due rilievi, tutti e due accolti, e sono le righe C-164, C-165 e C-166.
+Vale la pena dire che cosa hanno in comune con il difetto del reindirizzamento trovato
+rileggendo il ramo: **è sempre la stessa famiglia**, cioè una risposta che non dimostra niente
+letta come se dimostrasse che la cartella è protetta. Correggere un caso della famiglia non
+chiude la famiglia, ed è il motivo per cui il confine adesso è un elenco chiuso di due stati e
+non un intervallo: un elenco si allarga solo di proposito, un intervallo si allarga da sé ogni
+volta che il mondo inventa uno stato nuovo.
+
+Un suggerimento del revisore non è stato seguito: teneva il `401` fra i dinieghi. Il motivo
+per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichiarato lì.
 
 | Guasto | Che cosa ho rotto | Righe diventate rosse |
 |---|---|---|

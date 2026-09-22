@@ -2,7 +2,7 @@
 /**
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
- * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163.
+ * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -165,6 +165,23 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 				'message' => 'OK',
 			),
 			'body'     => Conformita_Core_Allegati::contenuto_esca(),
+		);
+	}
+
+	/**
+	 * La risposta di un server con lo stato indicato e il corpo indicato.
+	 *
+	 * @param int    $stato  Stato HTTP.
+	 * @param string $corpo  Corpo della risposta.
+	 * @return array<string, mixed>
+	 */
+	private function risposta_con_stato( $stato, $corpo = '' ) {
+		return array(
+			'response' => array(
+				'code'    => $stato,
+				'message' => '',
+			),
+			'body'     => $corpo,
 		);
 	}
 
@@ -662,6 +679,17 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$this->assertSame( 'verificata', $stato['copertura'] );
 		$this->assertSame( 403, $stato['stato_http'] );
 		$this->assertNotSame( '', $stato['istante'] );
+
+		/*
+		 * Gli stati che valgono diniego sono due e sono un elenco chiuso: il 403
+		 * di chi nega, e il 404 di chi nega senza confermare che il file esista.
+		 */
+		$this->risposta_finta = $this->risposta_con_stato( 404, 'Not Found' );
+
+		$questa = conformita_core_verifica_protezione_allegati();
+
+		$this->assertSame( 'verificata', $questa['copertura'] );
+		$this->assertSame( 404, $questa['stato_http'] );
 	}
 
 	/**
@@ -733,6 +761,109 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		$this->assertWPError( $esito );
 		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+	}
+
+	/**
+	 * C-164: uno stato di errore che non e' un diniego non vale `verificata`.
+	 *
+	 * E' la stessa famiglia della C-163, trovata dalla revisione indipendente.
+	 * Un 503 o un 429 li dice un proxy che in quel momento non sta servendo
+	 * niente, e non dicono niente sulle regole della cartella: quando il proxy
+	 * torna a servire, i file sarebbero li'. Un 401 lo dice un sito messo per
+	 * intero dietro un'autenticazione, tipicamente una installazione in
+	 * costruzione: nemmeno quello e' un giudizio sulla cartella, e il giorno che
+	 * l'autenticazione si toglie l'esito conservato direbbe `verificata` su una
+	 * cartella mai provata.
+	 */
+	public function test_c164_stati_che_non_dimostrano_niente_valgono_ignota() {
+		foreach ( array( 500, 503, 429, 401 ) as $codice ) {
+			$this->risposta_finta = $this->risposta_con_stato( $codice, 'errore' );
+
+			$stato = conformita_core_verifica_protezione_allegati();
+
+			$this->assertSame(
+				'ignota',
+				$stato['copertura'],
+				'Lo stato ' . $codice . ' non dimostra che la cartella sia protetta.'
+			);
+			$this->assertSame( $codice, $stato['stato_http'] );
+		}
+
+		$esito = conformita_core_deposita_allegato(
+			$this->atto_valido(),
+			$this->file_da_depositare(),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+	}
+
+	/**
+	 * C-165: il gettone vince sullo stato.
+	 *
+	 * Se il contenuto dell'esca torna indietro, la cartella e' aperta, e con
+	 * quale stato sia tornato non cambia niente: i byte sono arrivati. Guardare
+	 * lo stato per primo lasciava passare il caso di un server che serve il file
+	 * accompagnandolo con uno stato di errore, che e' cio' che fa una rete di
+	 * distribuzione mal configurata davanti all'origine.
+	 */
+	public function test_c165_il_gettone_vince_sullo_stato() {
+		$this->risposta_finta = $this->risposta_con_stato( 403, Conformita_Core_Allegati::contenuto_esca() );
+
+		$stato = conformita_core_verifica_protezione_allegati();
+
+		$this->assertSame( 'non_coperta', $stato['copertura'] );
+		$this->assertSame( 403, $stato['stato_http'] );
+	}
+
+	/**
+	 * C-166: se il deposito salta per aria, il dirottamento dei caricamenti non
+	 * resta acceso.
+	 *
+	 * Il filtro che manda i byte nella cartella protetta si spegne subito dopo
+	 * lo spostamento. Se lo spostamento esce per un'eccezione, sollevata da un
+	 * aggancio di un altro componente, la riga che lo spegne non verrebbe
+	 * eseguita e il filtro resterebbe acceso per tutto il resto della richiesta:
+	 * da li' in poi ogni caricamento finirebbe nella cartella protetta e ogni
+	 * percorso memorizzato sarebbe calcolato rispetto a una cartella diversa.
+	 * E' la stessa collisione silenziosa della riga C-115, per un'altra via.
+	 */
+	public function test_c166_il_dirottamento_si_spegne_anche_se_il_deposito_salta() {
+		$scoppia = static function () {
+			throw new RuntimeException( 'Un altro componente ha sollevato un\'eccezione.' );
+		};
+
+		add_filter( 'wp_handle_sideload_prefilter', $scoppia );
+
+		$sollevata = false;
+
+		try {
+			conformita_core_deposita_allegato(
+				$this->atto_valido(),
+				$this->file_da_depositare(),
+				array( 'origine' => 'percorso_locale' )
+			);
+		} catch ( RuntimeException $eccezione ) {
+			$sollevata = true;
+		}
+
+		remove_filter( 'wp_handle_sideload_prefilter', $scoppia );
+
+		$this->assertTrue( $sollevata, 'La prova non ha misurato niente: l\'eccezione non e\' uscita.' );
+
+		$this->assertFalse(
+			has_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) ),
+			'Il dirottamento dei caricamenti e\' rimasto acceso.'
+		);
+
+		$caricamenti = wp_get_upload_dir();
+
+		$this->assertStringNotContainsString(
+			Conformita_Core_Allegati::CARTELLA,
+			$caricamenti['basedir'],
+			'La cartella dei caricamenti punta ancora dentro quella protetta.'
+		);
 	}
 
 	/**
