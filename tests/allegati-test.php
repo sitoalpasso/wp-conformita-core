@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175.
+ * C-169, C-170, C-172..C-175, C-177, C-178.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -1438,5 +1438,147 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			$ripreso,
 			is_wp_error( $ripreso ) ? $ripreso->get_error_message() : ''
 		);
+	}
+
+	/**
+	 * C-177: sottocartella che finisce con un a capo.
+	 *
+	 * La convalida usava `$` come ancora finale, e in PCRE il dollaro accetta
+	 * anche la posizione prima di un a capo finale: un nome cosi' passava. Il
+	 * disco quel carattere lo conserva, mentre l'indirizzo chiesto al server lo
+	 * perde per strada, quindi si sarebbe tornati a provare un percorso e a
+	 * scriverne un altro. Adesso le ancore sono `\A` e `\z`.
+	 */
+	public function test_c177_sottocartella_con_un_a_capo_finale() {
+		$atto = $this->atto_valido();
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'primo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+
+		$chieste = $this->richieste;
+
+		add_filter( 'upload_dir', array( $this, 'sottocartella_con_un_a_capo' ), 5 );
+
+		$rifiutato = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'secondo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'upload_dir', array( $this, 'sottocartella_con_un_a_capo' ), 5 );
+
+		$this->assertWPError( $rifiutato );
+		$this->assertSame( 'conformita_core_destinazione_non_provabile', $rifiutato->get_error_code() );
+
+		$this->assertSame(
+			$chieste,
+			$this->richieste,
+			'Un percorso che non si sa chiedere non si chiede nemmeno.'
+		);
+
+		$this->assertCount(
+			1,
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			),
+			'Solo il primo file deve essere entrato.'
+		);
+	}
+
+	/**
+	 * Una sottocartella che finisce con un a capo.
+	 *
+	 * @param array<string, string> $caricamenti Cartella dei caricamenti.
+	 * @return array<string, string>
+	 */
+	public function sottocartella_con_un_a_capo( $caricamenti ) {
+		return $this->sottocartella_finta( $caricamenti, "/documenti\n" );
+	}
+
+	/**
+	 * C-178: il nome previsto non e' il nome imposto.
+	 *
+	 * Il percorso di destinazione si calcola in anticipo con la stessa funzione
+	 * che decidera' il nome del file, ed e' la previsione piu' fedele che si
+	 * possa fare da fuori. Resta una previsione: dentro `wp_handle_sideload()`
+	 * c'e' un aggancio con cui un altro componente puo' cambiare il nome, e
+	 * l'estensione con lui, **dopo** quel calcolo. Qui il server nega i `.pdf` e
+	 * serve i `.pdf-x`, e un componente rinomina il file da uno all'altro: senza
+	 * la guardia sul percorso definitivo, il deposito proverebbe un ambito negato
+	 * e scriverebbe in uno aperto.
+	 */
+	public function test_c178_il_nome_cambiato_durante_lo_spostamento() {
+		$atto = $this->atto_valido();
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( '.pdf-x' === substr( $indirizzo, -6 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		add_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+		add_filter( 'wp_handle_sideload_prefilter', array( $this, 'rinomina_in_pdf_x' ) );
+
+		$rifiutato = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'wp_handle_sideload_prefilter', array( $this, 'rinomina_in_pdf_x' ) );
+		remove_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+
+		$this->assertWPError( $rifiutato );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $rifiutato->get_error_code() );
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			),
+			'Nessun file deve essere entrato.'
+		);
+
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		$this->assertFileDoesNotExist(
+			Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf-x',
+			'Nessun byte deve essere finito nell\'ambito aperto.'
+		);
+
+		$this->assertSame(
+			'non_coperta',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf-x' )['copertura'],
+			'L\'ambito vero e\' stato provato, e risulta scoperto.'
+		);
+	}
+
+	/**
+	 * Rinomina il file durante lo spostamento, cambiandogli l\'estensione.
+	 *
+	 * @param array<string, mixed> $file Voce del file.
+	 * @return array<string, mixed>
+	 */
+	public function rinomina_in_pdf_x( $file ) {
+		$file['name'] = 'atto.pdf-x';
+
+		return $file;
 	}
 }

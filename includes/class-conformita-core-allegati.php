@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175.
+ * C-172..C-175, C-177, C-178.
  *
  * @package Conformita_Core
  */
@@ -153,6 +153,18 @@ final class Conformita_Core_Allegati {
 	private static $in_verifica = false;
 
 	/**
+	 * Perché la guardia sulla destinazione ha fermato lo spostamento.
+	 *
+	 * Vuoto quando non lo ha fermato. Serve perché chi ferma e chi risponde a
+	 * chiama non sono lo stesso punto del codice: la guardia vive dentro un
+	 * aggancio di WordPress, che sa solo dire sì o no, e il motivo andrebbe
+	 * perso.
+	 *
+	 * @var array<string, string>
+	 */
+	private static $fermata = array();
+
+	/**
 	 * Percorso della cartella protetta.
 	 *
 	 * @return string
@@ -242,14 +254,20 @@ final class Conformita_Core_Allegati {
 	 * scritti in un altro modo, e i due punti, che risalgono la cartella. Le
 	 * maiuscole restano maiuscole: un server può distinguerle.
 	 *
-	 * Righe C-172 e C-174.
+	 * **Le ancore sono `\A` e `\z`, non `^` e `$`.** In PCRE il dollaro accetta
+	 * anche la posizione prima di un a capo finale, quindi una sottocartella che
+	 * finisce con un a capo passerebbe la convalida: il disco quel carattere lo
+	 * conserva, mentre l'indirizzo chiesto al server lo perde per strada, e si
+	 * tornerebbe a provare un percorso e a scriverne un altro. Riga C-177.
+	 *
+	 * Righe C-172, C-174 e C-177.
 	 *
 	 * @param string $sotto      Sottocartella.
 	 * @param string $estensione Estensione.
 	 * @return bool
 	 */
 	private static function provabile( $sotto, $estensione ) {
-		if ( ! preg_match( '/^[A-Za-z0-9_-]{1,32}$/', self::estensione( $estensione ) ) ) {
+		if ( ! preg_match( '/\A[A-Za-z0-9_-]{1,32}\z/', self::estensione( $estensione ) ) ) {
 			return false;
 		}
 
@@ -260,7 +278,7 @@ final class Conformita_Core_Allegati {
 		}
 
 		foreach ( explode( '/', ltrim( $sotto, '/' ) ) as $pezzo ) {
-			if ( '.' === $pezzo || '..' === $pezzo || ! preg_match( '/^[A-Za-z0-9._-]{1,64}$/', $pezzo ) ) {
+			if ( '.' === $pezzo || '..' === $pezzo || ! preg_match( '/\A[A-Za-z0-9._-]{1,64}\z/', $pezzo ) ) {
 				return false;
 			}
 		}
@@ -868,6 +886,133 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
+	 * Ferma lo spostamento quando la destinazione vera non è quella provata.
+	 *
+	 * **Perché non basta prevedere il nome.** `deposita()` calcola in anticipo
+	 * dove il file andrà a finire, e lo calcola con la stessa funzione che
+	 * deciderà il nome: è la previsione più fedele che si possa fare da fuori.
+	 * Resta una previsione. Dentro `wp_handle_sideload()` c'è un aggancio,
+	 * `wp_handle_sideload_prefilter`, con cui un altro componente può cambiare il
+	 * nome del file **dopo** quel calcolo, estensione compresa; da lì il nome
+	 * definitivo si rifà da capo. Un componente che rinomina `atto.pdf` in
+	 * `atto.pdf-x` farebbe provare un ambito e scriverne un altro, che è il
+	 * difetto della riga C-172 all'ultimo momento utile.
+	 *
+	 * Quindi l'ultima parola non ce l'ha la previsione: ce l'ha questa guardia,
+	 * che gira sul percorso definitivo, dopo tutti gli agganci e prima che un
+	 * solo byte si muova.
+	 *
+	 * **Come si ferma.** Non restituendo `false`: quel filtro non ha un modo di
+	 * dire «rifiuta», e un valore diverso da `null` fa saltare la copia ma non
+	 * ferma la sequenza, che poi prova a dare i permessi a un file che non
+	 * esiste. Si esce con un'eccezione dedicata, che `deposita()` raccoglie e
+	 * converte nell'errore con il motivo vero. Riga C-178.
+	 *
+	 * @internal Aggiunta e tolta attorno allo spostamento dei byte, come il
+	 *           dirottamento.
+	 *
+	 * @param null|bool $scavalco    Esito già deciso da qualcun altro.
+	 * @param mixed     $file        Voce del file, non usata.
+	 * @param string    $nuovo_file  Percorso definitivo della destinazione.
+	 * @return null|bool
+	 * @throws Conformita_Core_Deposito_Fermato Quando la destinazione non è provata.
+	 */
+	public static function guardia_destinazione( $scavalco, $file = null, $nuovo_file = '' ) {
+		unset( $file );
+
+		if ( null !== $scavalco ) {
+			return $scavalco;
+		}
+
+		/*
+		 * Il dirottamento si spegne per il tempo del controllo: `cartella()` e
+		 * `indirizzo_cartella()` leggono la cartella dei caricamenti, e con il
+		 * dirottamento acceso vedrebbero la cartella protetta dentro se stessa.
+		 */
+		remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
+
+		try {
+			$ammessa = self::destinazione_ammessa( (string) $nuovo_file );
+		} finally {
+			add_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
+		}
+
+		if ( ! $ammessa ) {
+			throw new Conformita_Core_Deposito_Fermato( 'conformita_core_destinazione_non_ammessa' );
+		}
+
+		return null;
+	}
+
+	/**
+	 * Il percorso definitivo sta in un ambito provato.
+	 *
+	 * @param string $percorso Percorso assoluto della destinazione.
+	 * @return bool
+	 */
+	private static function destinazione_ammessa( $percorso ) {
+		$percorso = wp_normalize_path( $percorso );
+		$radice   = wp_normalize_path( self::cartella() );
+
+		if ( 0 !== strpos( $percorso, $radice . '/' ) ) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_destinazione_fuori_cartella',
+				'messaggio' => __( 'Deposito fermato: la destinazione definitiva del file è fuori dalla cartella protetta.', 'conformita-core' ),
+			);
+
+			return false;
+		}
+
+		$relativo   = substr( $percorso, strlen( $radice ) );
+		$sotto      = dirname( $relativo );
+		$sotto      = '/' === $sotto || '.' === $sotto ? '' : $sotto;
+		$estensione = (string) pathinfo( $relativo, PATHINFO_EXTENSION );
+
+		if ( ! self::provabile( $sotto, $estensione ) ) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_destinazione_non_provabile',
+				'messaggio' => sprintf(
+					/* translators: 1: sottocartella di destinazione, 2: estensione del file. */
+					__( 'Deposito fermato: la destinazione definitiva («%1$s», estensione «%2$s») non è provabile, perché non si può chiedere al server esattamente com\'è.', 'conformita-core' ),
+					'' === $sotto ? '/' : $sotto,
+					$estensione
+				),
+			);
+
+			return false;
+		}
+
+		if ( self::scavalcata() ) {
+			return true;
+		}
+
+		$ambito = self::stato_ambito( $sotto, $estensione );
+
+		if ( 'verificata' !== $ambito['copertura'] ) {
+			self::verifica( $sotto, $estensione );
+			$ambito = self::stato_ambito( $sotto, $estensione );
+		}
+
+		if ( 'verificata' === $ambito['copertura'] ) {
+			return true;
+		}
+
+		self::$fermata = array(
+			'codice'    => 'conformita_core_protezione_non_verificata',
+			'messaggio' => sprintf(
+				/* translators: 1: estensione del file, 2: sottocartella di destinazione, 3: esito della verifica, 4: motivo. */
+				__( 'Deposito fermato: per i file «%1$s» in «%2$s» la protezione risulta «%3$s». %4$s Finché non è verificata non si scrive nessun file.', 'conformita-core' ),
+				$estensione,
+				'' === $sotto ? '/' : $sotto,
+				$ambito['copertura'],
+				$ambito['motivo']
+			),
+		);
+
+		return false;
+	}
+
+	/**
 	 * Dirotta la cartella di destinazione dei caricamenti.
 	 *
 	 * @internal Aggiunto e tolto attorno allo spostamento dei byte, mai lasciato
@@ -1075,7 +1220,10 @@ final class Conformita_Core_Allegati {
 
 		require_once ABSPATH . 'wp-admin/includes/file.php';
 
+		self::$fermata = array();
+
 		add_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
+		add_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), 10, 3 );
 
 		/*
 		 * **Il `finally` non e' prudenza generica.** `wp_handle_sideload()` emette
@@ -1095,7 +1243,25 @@ final class Conformita_Core_Allegati {
 				),
 				$tempo
 			);
+		} catch ( Conformita_Core_Deposito_Fermato $fermato ) {
+			/*
+			 * L'ha sollevata la guardia qui sotto, e solo lei: e' un tipo
+			 * dedicato apposta, cosi' un'eccezione di un aggancio altrui
+			 * continua a propagarsi invece di diventare un rifiuto silenzioso.
+			 * Il motivo vero e' quello che la guardia ha messo da parte, perche'
+			 * l'aggancio da cui esce sa dire solo si' o no. Riga C-178.
+			 */
+			unset( $fermato );
+
+			$fermata       = self::$fermata;
+			self::$fermata = array();
+
+			return new WP_Error(
+				$fermata['codice'],
+				$fermata['messaggio']
+			);
 		} finally {
+			remove_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), 10 );
 			remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
 		}
 
@@ -1205,6 +1371,7 @@ final class Conformita_Core_Allegati {
 	public static function azzera() {
 		self::$scavalcamento = null;
 		self::$in_verifica   = false;
+		self::$fermata       = array();
 
 		delete_option( self::OPZIONE );
 	}

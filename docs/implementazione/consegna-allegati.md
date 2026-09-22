@@ -216,6 +216,12 @@ L'estensione, per la stessa ragione, non si ricostruisce a mano ma si chiede all
 funzione di WordPress che deciderà il nome del file, perché è lei che abbassa le maiuscole e
 che per le immagini può cambiare formato. Righe C-172 e C-174.
 
+**E resta una previsione, quindi non è l'ultima parola.** Dentro `wp_handle_sideload()` c'è
+un aggancio con cui un altro componente può cambiare il nome del file, estensione compresa,
+dopo quel calcolo. Perciò una guardia gira sul percorso **definitivo**, sull'ultimo aggancio
+prima che i byte si muovano: legge sottocartella ed estensione dal percorso vero, pretende
+che quell'ambito risulti provato, e se non lo è ferma lo spostamento. Righe C-177 e C-178.
+
 Due conseguenze, e tutte e due sono scelte:
 
 - **Una verifica generale azzera gli ambiti già provati.** Se si rifà quella, o le regole sono
@@ -762,10 +768,11 @@ riga C-132 la verifica qui.
 
 | File | Cosa |
 |---|---|
-| `includes/class-conformita-core-allegati.php` | nuovo: la cartella protetta, i file di regole, lo stato della copertura, il deposito, l'impronta |
+| `includes/class-conformita-core-allegati.php` | nuovo: la cartella protetta, i file di regole, lo stato della copertura, il deposito, l'impronta, la guardia sulla destinazione |
+| `includes/class-conformita-core-deposito-fermato.php` | nuovo: l'eccezione con cui la guardia esce dall'aggancio di WordPress, che non ha un modo di dire «rifiuta» |
 | `includes/class-conformita-core-consegna.php` | nuovo: i due punti di consegna, la catena di controlli, le intestazioni |
 | `includes/funzioni-api.php` | modificato: le sette funzioni del punto 3 |
-| `conformita-core.php` | modificato: versione dell'interfaccia a 1.3.0, caricamento dei due file nuovi, accensione della consegna, aggancio di attivazione |
+| `conformita-core.php` | modificato: versione dell'interfaccia a 1.3.0, caricamento dei tre file nuovi, accensione della consegna, aggancio di attivazione |
 | `tests/allegati-test.php` | nuovo: cartella, verifica, deposito, impronta, contratto |
 | `tests/consegna-test.php` | nuovo: indirizzi, catena di controlli, intestazioni, punto amministrativo |
 | `tests/consegna-non-vacuita-test.php` | nuovo: le due prove di non vacuità che si fanno da fuori |
@@ -835,6 +842,8 @@ Nessun file del repository dell'albo.
 | L'installazione ammette un'estensione che il server tratta in modo diverso da come la si scriverebbe ridotta | l'ambito si prova con l'estensione che il file avrà davvero, quindi un server che serve quella e nega la forma ridotta fa rifiutare il deposito | sì |
 | La riscrittura delle regole riesce su un file e fallisce sul successivo | gli esiti si dimenticano al primo file scritto davvero, quindi il ripristino a mano del file rimasto indietro non fa riusare giudizi vecchi | sì |
 | Un tipo gestito viene dichiarato non consultabile dal pubblico, anche da un altro componente | i suoi allegati non escono dal punto pubblico, come non escono le sue pagine | sì |
+| Un altro componente cambia il nome del file, estensione compresa, dentro lo spostamento | la guardia sul percorso definitivo prova l'ambito vero e ferma lo spostamento se risulta scoperto: nessun byte entra | sì |
+| Un aggancio di un altro componente porta la destinazione fuori dalla cartella protetta | la guardia ferma lo spostamento: un file fuori da lì non sarebbe protetto da niente | sì |
 | Le regole vengono riscritte durante la verifica di un ambito | si dimentica tutto quello che si sapeva, generale compreso, e il generale si rimisura subito | sì |
 | Una regola del server dipende dal nome del singolo file e non dall'estensione | non viene vista: l'esca prova l'estensione e la cartella, non il nome. **Limite dichiarato** | **no** |
 | Allegato cestinato con il padre ancora pubblicato | il punto pubblico non trova niente; l'amministrazione lo vede ancora, perche' resti ripristinabile | sì |
@@ -881,7 +890,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Sessantadue righe, da C-115 a C-176.**
+convenzione di questo repository. **Sessantaquattro righe, da C-115 a C-178.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -922,6 +931,8 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-172 | fatto | La sottocartella di destinazione si prova com'è scritta, punto compreso; una che non si sa chiedere al server, come un nome con uno spazio, fa rifiutare il deposito con un codice suo, senza nessuna richiesta e senza muovere nessun file |
 | C-174 | fatto | L'estensione provata è quella che il file avrà sul disco: `.PDF` si prova minuscolo perché WordPress lo scriverà minuscolo, e un'estensione con un trattino si prova com'è, quindi un server che nega la forma ridotta e serve quella vera fa rifiutare il deposito |
 | C-175 | fatto | Riscrittura delle regole riuscita sul primo file e fallita sul secondo: gli esiti conservati si dimenticano lo stesso, e il ripristino a mano del file rimasto indietro non fa tornare validi i giudizi vecchi |
+| C-177 | fatto | Una sottocartella che finisce con un a capo non passa la convalida: le ancore dell'espressione regolare sono `\A` e `\z`, e non `^` e `$`, che accetterebbero quella posizione |
+| C-178 | fatto | Un componente cambia il nome del file, estensione compresa, dentro lo spostamento: la guardia sul percorso definitivo prova l'ambito vero e, se risulta scoperto, ferma lo spostamento. Nessun byte entra nell'ambito aperto |
 | C-173 | fatto | Regole riscritte durante la verifica di un ambito: gli esiti conservati si dimenticano tutti, il generale si rimisura, e il deposito successivo riprova il proprio ambito |
 | C-170 | fatto | L'esito di un ambito si conserva con la sua chiave: il secondo deposito della stessa estensione nella stessa sottocartella non fa nessuna richiesta, e un'estensione nuova ne fa una |
 
@@ -1016,11 +1027,12 @@ parametro `$adesso`.
 | C-158 | Il conteggio delle richieste passa da due a tre, per la stessa ragione |
 | C-174, C-175, C-176 | Nuove, dal quinto giro di revisione indipendente. Tre crepe nelle correzioni del quarto: l'estensione poteva essere ridotta come lo era la sottocartella, la dimenticanza degli esiti non copriva la riscrittura fallita a metà, e la consegna pubblica guardava lo stato del contenuto ma non la consultabilità del suo tipo. Tutte e tre viste rosse spegnendo il controllo e rieseguendo la suite |
 | C-172 | Riscritta nello stesso giro. Verificava che un nome da ridurre facesse rifiutare il deposito, ma calcolava l'indirizzo atteso con la stessa funzione che stava provando, quindi la riduzione le sfuggiva. Adesso scrive gli indirizzi per esteso e verifica tutte e due le direzioni: il nome che si sa chiedere si prova com'è, quello che non si sa chiedere fa rifiutare |
+| C-177, C-178 | Nuove, dal sesto giro di revisione indipendente. Due modi diversi di scrivere in un ambito diverso da quello provato: un carattere che l'ancora dell'espressione regolare lasciava passare, e il fatto che il nome calcolato in anticipo era una previsione e non un vincolo. Tutte e due viste rosse spegnendo il controllo e rieseguendo la suite, e la C-178 con il deposito che riusciva |
 | C-166 | Nuova, dallo stesso giro. La rimozione del filtro sui caricamenti non stava in un `finally`, quindi un'eccezione sollevata da un aggancio altrui lo lasciava acceso per il resto della richiesta |
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **211 prove e 1185 asserzioni**, di cui 57 prove nuove. È un **controllo
+La verifica riporta **213 prove e 1201 asserzioni**, di cui 59 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1096,20 +1108,20 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Ventun guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Ventitre guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G21 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G23 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; dal G14 al G21 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+lì; dal G14 al G23 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
 quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
-con il deposito che riusciva. Dal G18 al G21 ognuno ha fatto diventare rossa una riga sola, e
-solo la sua. **Gli altri undici non
+con il deposito che riusciva. Dal G18 al G23 ognuno ha fatto diventare rossa una riga sola, e
+solo la sua; il G23 con il deposito che riusciva e il file che finiva nell'ambito aperto. **Gli altri undici non
 sono stati rieseguiti**, e il costo è dichiarato: le correzioni aggiungono anelli e non ne
 cambiano nessuno, ma che gli undici continuino a misurare quello che misuravano è
 un'inferenza, non una cosa vista.*
@@ -1156,6 +1168,8 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G19 | La dimenticanza degli esiti rimessa in chi chiama, cioè dopo l'uscita per errore | C-175 |
 | G20 | Tolto il controllo sulla consultabilità pubblica del tipo | C-176 |
 | G21 | Rimessa la riduzione distruttiva del nome della sottocartella, con la convalida spenta | C-172 |
+| G22 | Rimesse le ancore `^` e `$` al posto di `\A` e `\z` nella convalida | C-177 |
+| G23 | Tolta la guardia sul percorso definitivo dello spostamento | C-178 |
 
 ### Che cosa ha trovato il secondo giro di revisione indipendente
 
@@ -1266,6 +1280,35 @@ con la riduzione rimessa al suo posto, l'indirizzo atteso si riduceva insieme a 
 la prova restava verde. Era una prova che non misurava niente, e se ne è accorto il guasto G21,
 non la lettura. Adesso gli indirizzi attesi si scrivono per esteso. Vale come regola: **una
 prova non chiede al codice sotto esame di dirle che cosa aspettarsi.**
+
+### Che cosa ha trovato il sesto giro di revisione indipendente
+
+Due rilievi, accolti tutti e due. Tutti e due nella terza domanda, e tutti e due lo stesso
+difetto per due vie diverse: **scrivere in un ambito diverso da quello provato.**
+
+**L'ancora dell'espressione regolare accettava un a capo finale.** In PCRE il dollaro non
+vuol dire "fine della stringa" ma "fine della stringa, oppure appena prima di un a capo
+finale". Una sottocartella che finisse con un a capo passava quindi la convalida: il disco
+quel carattere lo conserva, l'indirizzo chiesto al server lo perde per strada, e si torna a
+provare un percorso e a scriverne un altro. Adesso le ancore sono `\A` e `\z`. Riga C-177.
+
+**Il nome calcolato in anticipo era una previsione, non un vincolo.** La correzione del
+quinto giro chiedeva il nome definitivo alla stessa funzione che lo decide, il che è la
+previsione più fedele che si possa fare da fuori, ma resta una previsione: dentro
+`wp_handle_sideload()` c'è un aggancio con cui un altro componente può cambiare il nome, e
+l'estensione con lui, **dopo** quel calcolo. Un componente che rinomina `atto.pdf` in
+`atto.pdf-x`, su un server che nega i primi e serve i secondi, faceva provare un ambito
+negato e scrivere in uno aperto. Adesso l'ultima parola ce l'ha una guardia che gira sul
+percorso definitivo, sull'ultimo aggancio prima che i byte si muovano, e che ferma lo
+spostamento quando l'ambito vero non risulta provato. Riga C-178.
+
+**Una nota su come si ferma.** L'aggancio da cui la guardia decide non ha un modo di dire
+«rifiuta»: restituire un valore diverso da `null` fa saltare la copia ma non ferma la
+sequenza, che poi prova a dare i permessi a un file che non esiste. Si esce con
+un'eccezione di un tipo dedicato, che `deposita()` raccoglie e converte nell'errore con il
+motivo vero. Il tipo dedicato non è pedanteria: serve a distinguere «l'ho fermata io» da
+un'eccezione sollevata dall'aggancio di qualcun altro, che è il caso della riga C-166 e va
+lasciata passare.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 
