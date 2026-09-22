@@ -510,12 +510,11 @@ final class Conformita_Core_Consegna {
 			 * Sul punto amministrativo non si applica, ed e' deliberato: li' si
 			 * entra con il nonce e la capability del tipo, cioe' con
 			 * un'autorizzazione piu' forte di una password di lettura.
-			 */
-			/*
-			 * La password si guarda su tutti e due. Quella del padre copre
-			 * l'atto e cio' che gli appartiene; ma anche un allegato puo'
-			 * averne una propria, e `post_password_required()` non risale al
-			 * padre, quindi nessuna delle due domande risponde per l'altra.
+			 *
+			 * **La password si guarda su tutti e due.** Quella del padre copre
+			 * l'atto e cio' che gli appartiene, ma anche un allegato puo'
+			 * averne una propria, e `post_password_required()` non risale dal
+			 * file al padre: nessuna delle due domande risponde per l'altra.
 			 * Riga C-171.
 			 */
 			if ( post_password_required( $atto ) || post_password_required( $allegato ) ) {
