@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.2.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.3.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -44,6 +44,9 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-sezioni.
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-tipi.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-scadenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-filtro-scadenza.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-deposito-fermato.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-allegati.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-consegna.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-dipendenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/funzioni-api.php';
 
@@ -57,3 +60,22 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/funzioni-api.php';
  * usa, e infatti nessuna funzione pubblica lo espone.
  */
 Conformita_Core_Filtro_Scadenza::avvia();
+
+/*
+ * La consegna degli allegati si accende qui per la stessa ragione del motore di
+ * scadenza, ma sbaglia nella direzione opposta: il motore spento lascerebbe
+ * pubblici i contenuti scaduti, la consegna spenta rende i file irraggiungibili
+ * da ogni parte. Un meccanismo che si guasta chiudendo non ha bisogno di una
+ * guardia che chiuda al posto suo, ed e' il motivo per cui la registrazione di
+ * una sezione non verifica che questa sia avviata: la guardia sta sul deposito,
+ * dove c'e' qualcosa da perdere.
+ */
+Conformita_Core_Consegna::avvia();
+
+/*
+ * All'attivazione la cartella protetta si crea, i file di regole si scrivono e
+ * la protezione si verifica: cosi' l'esito e' gia' disponibile prima del primo
+ * deposito invece che al primo deposito. E' l'unico momento in cui questo
+ * meccanismo lavora fuori da una richiesta di consegna o di deposito.
+ */
+register_activation_hook( __FILE__, array( 'Conformita_Core_Allegati', 'verifica' ) );
