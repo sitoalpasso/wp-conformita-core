@@ -843,7 +843,9 @@ Nessun file del repository dell'albo.
 | La riscrittura delle regole riesce su un file e fallisce sul successivo | gli esiti si dimenticano al primo file scritto davvero, quindi il ripristino a mano del file rimasto indietro non fa riusare giudizi vecchi | sì |
 | Un tipo gestito viene dichiarato non consultabile dal pubblico, anche da un altro componente | i suoi allegati non escono dal punto pubblico, come non escono le sue pagine | sì |
 | Un altro componente cambia il nome del file, estensione compresa, dentro lo spostamento | la guardia sul percorso definitivo prova l'ambito vero e ferma lo spostamento se risulta scoperto: nessun byte entra | sì |
-| Un aggancio di un altro componente porta la destinazione fuori dalla cartella protetta | la guardia ferma lo spostamento: un file fuori da lì non sarebbe protetto da niente | sì |
+| Un aggancio di un altro componente porta la destinazione fuori dalla cartella protetta, anche attraverso un collegamento simbolico | la guardia confronta il percorso vero e ferma lo spostamento: un file fuori da lì non sarebbe protetto da niente | sì |
+| Un altro componente sposta i file per conto proprio e lo dice a WordPress prima che la guardia parli | la guardia decide lo stesso, e il file che trova già al suo posto in un ambito non provato lo toglie | sì |
+| Un documento arriva con il nome dell'esca | si rifiuta con un codice suo: se prendesse il posto dell'esca, la verifica successiva lo sovrascriverebbe con la propria riga di prova | sì |
 | Le regole vengono riscritte durante la verifica di un ambito | si dimentica tutto quello che si sapeva, generale compreso, e il generale si rimisura subito | sì |
 | Una regola del server dipende dal nome del singolo file e non dall'estensione | non viene vista: l'esca prova l'estensione e la cartella, non il nome. **Limite dichiarato** | **no** |
 | Allegato cestinato con il padre ancora pubblicato | il punto pubblico non trova niente; l'amministrazione lo vede ancora, perche' resti ripristinabile | sì |
@@ -890,7 +892,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Sessantaquattro righe, da C-115 a C-178.**
+convenzione di questo repository. **Sessantasette righe, da C-115 a C-181.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -933,6 +935,9 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-175 | fatto | Riscrittura delle regole riuscita sul primo file e fallita sul secondo: gli esiti conservati si dimenticano lo stesso, e il ripristino a mano del file rimasto indietro non fa tornare validi i giudizi vecchi |
 | C-177 | fatto | Una sottocartella che finisce con un a capo non passa la convalida: le ancore dell'espressione regolare sono `\A` e `\z`, e non `^` e `$`, che accetterebbero quella posizione |
 | C-178 | fatto | Un componente cambia il nome del file, estensione compresa, dentro lo spostamento: la guardia sul percorso definitivo prova l'ambito vero e, se risulta scoperto, ferma lo spostamento. Nessun byte entra nell'ambito aperto |
+| C-179 | fatto | Un componente risponde per primo all'aggancio dello spostamento e copia il file da sé: la guardia decide lo stesso, in tutti e due gli ordini di aggancio, e il file che trova già al suo posto in un ambito non provato lo toglie |
+| C-180 | fatto | La sottocartella di destinazione è un collegamento simbolico verso fuori: la guardia confronta il percorso vero con `realpath()` e ferma lo spostamento. Nessun byte esce dalla cartella protetta |
+| C-181 | fatto | Un documento con il nome dell'esca, con l'ambito già provato e l'esca tolta: il deposito si rifiuta con un codice suo, prima di chiedere niente al server, e nessun file prende il posto dell'esca |
 | C-173 | fatto | Regole riscritte durante la verifica di un ambito: gli esiti conservati si dimenticano tutti, il generale si rimisura, e il deposito successivo riprova il proprio ambito |
 | C-170 | fatto | L'esito di un ambito si conserva con la sua chiave: il secondo deposito della stessa estensione nella stessa sottocartella non fa nessuna richiesta, e un'estensione nuova ne fa una |
 
@@ -1028,11 +1033,12 @@ parametro `$adesso`.
 | C-174, C-175, C-176 | Nuove, dal quinto giro di revisione indipendente. Tre crepe nelle correzioni del quarto: l'estensione poteva essere ridotta come lo era la sottocartella, la dimenticanza degli esiti non copriva la riscrittura fallita a metà, e la consegna pubblica guardava lo stato del contenuto ma non la consultabilità del suo tipo. Tutte e tre viste rosse spegnendo il controllo e rieseguendo la suite |
 | C-172 | Riscritta nello stesso giro. Verificava che un nome da ridurre facesse rifiutare il deposito, ma calcolava l'indirizzo atteso con la stessa funzione che stava provando, quindi la riduzione le sfuggiva. Adesso scrive gli indirizzi per esteso e verifica tutte e due le direzioni: il nome che si sa chiedere si prova com'è, quello che non si sa chiedere fa rifiutare |
 | C-177, C-178 | Nuove, dal sesto giro di revisione indipendente. Due modi diversi di scrivere in un ambito diverso da quello provato: un carattere che l'ancora dell'espressione regolare lasciava passare, e il fatto che il nome calcolato in anticipo era una previsione e non un vincolo. Tutte e due viste rosse spegnendo il controllo e rieseguendo la suite, e la C-178 con il deposito che riusciva |
+| C-179, C-180, C-181 | Nuove, dalla rilettura fatta in proprio prima del settimo giro, cercando la forma dei rilievi precedenti nel codice scritto per ultimo. La guardia taceva se un altro componente aveva già risposto all'aggancio; confrontava la destinazione come stringa e non come percorso vero; e il nome dell'esca poteva essere quello di un documento, che la verifica successiva avrebbe sovrascritto. Tutte e tre viste rosse spegnendo il controllo, le prime due con il deposito che riusciva |
 | C-166 | Nuova, dallo stesso giro. La rimozione del filtro sui caricamenti non stava in un `finally`, quindi un'eccezione sollevata da un aggancio altrui lo lasciava acceso per il resto della richiesta |
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **213 prove e 1201 asserzioni**, di cui 59 prove nuove. È un **controllo
+La verifica riporta **216 prove e 1232 asserzioni**, di cui 62 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1108,20 +1114,21 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Ventitre guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Ventisei guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G23 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G26 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; dal G14 al G23 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+lì; dal G14 al G26 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
 quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
-con il deposito che riusciva. Dal G18 al G23 ognuno ha fatto diventare rossa una riga sola, e
-solo la sua; il G23 con il deposito che riusciva e il file che finiva nell'ambito aperto. **Gli altri undici non
+con il deposito che riusciva. Dal G18 al G26 ognuno ha fatto diventare rossa una riga sola, e
+solo la sua; il G23, il G24, il G25 e il G26 con il deposito che riusciva, e nel G25 con il
+file che usciva dalla cartella protetta attraverso il collegamento. **Gli altri undici non
 sono stati rieseguiti**, e il costo è dichiarato: le correzioni aggiungono anelli e non ne
 cambiano nessuno, ma che gli undici continuino a misurare quello che misuravano è
 un'inferenza, non una cosa vista.*
@@ -1170,6 +1177,9 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G21 | Rimessa la riduzione distruttiva del nome della sottocartella, con la convalida spenta | C-172 |
 | G22 | Rimesse le ancore `^` e `$` al posto di `\A` e `\z` nella convalida | C-177 |
 | G23 | Tolta la guardia sul percorso definitivo dello spostamento | C-178 |
+| G24 | La guardia rimessa a priorità normale, e zitta quando trova una risposta pronta | C-179 |
+| G25 | Il confronto della destinazione rimesso sulle stringhe, senza `realpath()` | C-180 |
+| G26 | Tolto il controllo sul nome riservato, nel deposito e nella guardia | C-181 |
 
 ### Che cosa ha trovato il secondo giro di revisione indipendente
 
@@ -1309,6 +1319,39 @@ un'eccezione di un tipo dedicato, che `deposita()` raccoglie e converte nell'err
 motivo vero. Il tipo dedicato non è pedanteria: serve a distinguere «l'ho fermata io» da
 un'eccezione sollevata dall'aggancio di qualcun altro, che è il caso della riga C-166 e va
 lasciata passare.
+
+### Che cosa ha trovato la rilettura in proprio prima del settimo giro
+
+Dopo sei giri in cui otto rilievi su tredici erano caduti nel codice scritto per ultimo, la
+domanda ovvia era se convenisse rileggere quel codice da soli, con la stessa forma di
+domanda del revisore, prima di pagare un settimo giro. Tre cose, tutte nella guardia sulla
+destinazione, cioè nel pezzo scritto per ultimo.
+
+**La guardia taceva se qualcun altro aveva già risposto.** L'aggancio su cui sta serve anche
+ai componenti che spostano i file per conto proprio, per esempio verso un deposito esterno:
+rispondono con un valore e WordPress non copia più niente. La guardia, trovando una risposta
+pronta, la lasciava passare senza guardare la destinazione. Adesso si aggancia per prima,
+alla priorità più bassa che esiste, e decide comunque; e se trova il file già al suo posto,
+messo lì da chi ha risposto prima di lei, lo toglie. Riga C-179.
+
+**La destinazione si confrontava come stringa.** Il percorso cominciava per quello della
+cartella protetta, e questo bastava. Non basta: una sottocartella può essere un collegamento
+simbolico verso un'altra parte del disco, e il nome resta lo stesso. La consegna fa il
+confronto con `realpath()` prima di leggere; la guardia adesso lo fa prima di scrivere, sulla
+cartella di destinazione, che esiste già mentre il file no. Riga C-180.
+
+**Il nome dell'esca poteva essere quello di un documento.** Con l'ambito già provato nessuno
+riscrive l'esca prima di muovere i byte; se nel frattempo l'esca era stata tolta, un documento
+con il suo nome prendeva il suo posto, e la verifica successiva, trovando un contenuto
+diverso da quello atteso, lo avrebbe sovrascritto con la propria riga di prova. Non è un
+file che esce: è un atto che sparisce senza errore. Il nome è riservato, e si rifiuta nel
+deposito e nella guardia. Riga C-181. La sovrascrittura non è stata vista, è dedotta da
+`scrivi_esca()`: la prova verifica il rifiuto, non il danno.
+
+Le prime due hanno la forma di sempre: una proprietà vicina a quella che serve (una
+risposta pronta al posto di una destinazione provata; un nome che comincia bene al posto di
+un percorso che sta davvero dentro). La terza è di un'altra famiglia, un nome condiviso fra
+due cose che non devono condividerlo.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 
