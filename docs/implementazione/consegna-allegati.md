@@ -221,6 +221,12 @@ un aggancio con cui un altro componente può cambiare il nome del file, estensio
 dopo quel calcolo. Perciò una guardia gira sul percorso **definitivo**, sull'ultimo aggancio
 prima che i byte si muovano: legge sottocartella ed estensione dal percorso vero, pretende
 che quell'ambito risulti provato, e se non lo è ferma lo spostamento. Righe C-177 e C-178.
+La guardia pretende anche tre cose che la previsione non può vedere: che il file abbia
+un'estensione, perché un file senza non appartiene all'ambito dei `.txt`; che la cartella
+vera sia esattamente quella scritta, senza collegamenti simbolici in mezzo, perché lo stesso
+file raggiungibile da due indirizzi è provato su uno solo; e, per un caricamento, che il file
+che sta per essere copiato venga ancora da un caricamento HTTP, perché fra l'ingresso e lo
+spostamento un aggancio può sostituirlo. Righe C-182, C-183 e C-184.
 
 Due conseguenze, e tutte e due sono scelte:
 
@@ -845,6 +851,9 @@ Nessun file del repository dell'albo.
 | Un altro componente cambia il nome del file, estensione compresa, dentro lo spostamento | la guardia sul percorso definitivo prova l'ambito vero e ferma lo spostamento se risulta scoperto: nessun byte entra | sì |
 | Un aggancio di un altro componente porta la destinazione fuori dalla cartella protetta, anche attraverso un collegamento simbolico | la guardia confronta il percorso vero e ferma lo spostamento: un file fuori da lì non sarebbe protetto da niente | sì |
 | Un altro componente sposta i file per conto proprio e lo dice a WordPress prima che la guardia parli | la guardia decide lo stesso, e il file che trova già al suo posto in un ambito non provato lo toglie | sì |
+| Un aggancio di un altro componente toglie l'estensione al nome del file | il deposito si rifiuta: un file senza estensione non si sa provare, e trattarlo come un `.txt` proverebbe un'altra regola del server | sì |
+| Una sottocartella della cartella protetta è un collegamento simbolico verso un'altra sottocartella interna, o al posto del file c'è già un collegamento | la guardia pretende che la cartella vera sia quella scritta, e che il file non sia un collegamento: lo stesso file raggiungibile da due indirizzi è provato su uno solo | sì |
+| Un aggancio di un altro componente sostituisce il file caricato con un file locale dopo il controllo all'ingresso | la guardia rifà il controllo sul file che sta per essere copiato e ferma lo spostamento, senza toccare la sorgente | sì |
 | Un documento arriva con il nome dell'esca | si rifiuta con un codice suo: se prendesse il posto dell'esca, la verifica successiva lo sovrascriverebbe con la propria riga di prova | sì |
 | Le regole vengono riscritte durante la verifica di un ambito | si dimentica tutto quello che si sapeva, generale compreso, e il generale si rimisura subito | sì |
 | Una regola del server dipende dal nome del singolo file e non dall'estensione | non viene vista: l'esca prova l'estensione e la cartella, non il nome. **Limite dichiarato** | **no** |
@@ -892,7 +901,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Sessantasette righe, da C-115 a C-181.**
+convenzione di questo repository. **Settanta righe, da C-115 a C-184.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -915,6 +924,7 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-124 | fatto | Impronta al deposito: `sha256:` più il valore vero del file, con dimensione e istante nel fuso del sito |
 | C-125 | fatto | File sostituito sul disco dopo il deposito: la consegna non se ne accorge. **Documentazione eseguibile di un limite**, non prova di conformità |
 | C-166 | fatto | Un'eccezione sollevata da un aggancio altrui durante lo spostamento dei byte non lascia acceso il dirottamento dei caricamenti |
+| C-184 | fatto | Origine dichiarata `caricamento`: la guardia rifà la domanda `is_uploaded_file()` sul file che sta per essere copiato, e un file locale messo al suo posto dopo l'ingresso si ferma senza toccare né sorgente né destinazione. Dentro un deposito vero la guardia conosce l'origine dichiarata, e finito il deposito l'origine non resta in giro |
 
 ### Verifica della protezione
 
@@ -938,6 +948,8 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-179 | fatto | Un componente risponde per primo all'aggancio dello spostamento e copia il file da sé: la guardia decide lo stesso, in tutti e due gli ordini di aggancio, e il file che trova già al suo posto in un ambito non provato lo toglie |
 | C-180 | fatto | La sottocartella di destinazione è un collegamento simbolico verso fuori: la guardia confronta il percorso vero con `realpath()` e ferma lo spostamento. Nessun byte esce dalla cartella protetta |
 | C-181 | fatto | Un documento con il nome dell'esca, con l'ambito già provato e l'esca tolta: il deposito si rifiuta con un codice suo, prima di chiedere niente al server, e nessun file prende il posto dell'esca |
+| C-182 | fatto | Un aggancio toglie l'estensione al nome del file, prima nel nome previsto e poi solo durante lo spostamento: in tutti e due i casi il deposito si rifiuta, senza provare l'esca `.txt` al posto di un ambito che non ha estensione, e nessun byte entra |
+| C-183 | fatto | La sottocartella del mese è un collegamento verso un'altra sottocartella interna, che il server serve: la guardia pretende che la cartella vera sia quella scritta e ferma lo spostamento. Lo stesso per un collegamento che non punta a niente messo al posto del file: nessun byte passa attraverso |
 | C-173 | fatto | Regole riscritte durante la verifica di un ambito: gli esiti conservati si dimenticano tutti, il generale si rimisura, e il deposito successivo riprova il proprio ambito |
 | C-170 | fatto | L'esito di un ambito si conserva con la sua chiave: il secondo deposito della stessa estensione nella stessa sottocartella non fa nessuna richiesta, e un'estensione nuova ne fa una |
 
@@ -1034,11 +1046,12 @@ parametro `$adesso`.
 | C-172 | Riscritta nello stesso giro. Verificava che un nome da ridurre facesse rifiutare il deposito, ma calcolava l'indirizzo atteso con la stessa funzione che stava provando, quindi la riduzione le sfuggiva. Adesso scrive gli indirizzi per esteso e verifica tutte e due le direzioni: il nome che si sa chiedere si prova com'è, quello che non si sa chiedere fa rifiutare |
 | C-177, C-178 | Nuove, dal sesto giro di revisione indipendente. Due modi diversi di scrivere in un ambito diverso da quello provato: un carattere che l'ancora dell'espressione regolare lasciava passare, e il fatto che il nome calcolato in anticipo era una previsione e non un vincolo. Tutte e due viste rosse spegnendo il controllo e rieseguendo la suite, e la C-178 con il deposito che riusciva |
 | C-179, C-180, C-181 | Nuove, dalla rilettura fatta in proprio prima del settimo giro, cercando la forma dei rilievi precedenti nel codice scritto per ultimo. La guardia taceva se un altro componente aveva già risposto all'aggancio; confrontava la destinazione come stringa e non come percorso vero; e il nome dell'esca poteva essere quello di un documento, che la verifica successiva avrebbe sovrascritto. Tutte e tre viste rosse spegnendo il controllo, le prime due con il deposito che riusciva |
+| C-182, C-183, C-184 | Nuove, dal settimo giro di revisione indipendente. L'estensione vuota diventava `txt` quando si cercava l'ambito; un collegamento interno alla cartella rendeva lo stesso file raggiungibile da un indirizzo mai provato; e l'origine «caricamento» si controllava all'ingresso ma non sul file che si spostava davvero. Tutte e tre viste rosse spegnendo il controllo, le prime due con il deposito che riusciva |
 | C-166 | Nuova, dallo stesso giro. La rimozione del filtro sui caricamenti non stava in un `finally`, quindi un'eccezione sollevata da un aggancio altrui lo lasciava acceso per il resto della richiesta |
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **216 prove e 1232 asserzioni**, di cui 62 prove nuove. È un **controllo
+La verifica riporta **219 prove e 1272 asserzioni**, di cui 65 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1114,21 +1127,24 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Ventisei guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Trentuno guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G26 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G31 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; dal G14 al G26 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+lì; dal G14 al G31 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
 quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
 con il deposito che riusciva. Dal G18 al G26 ognuno ha fatto diventare rossa una riga sola, e
 solo la sua; il G23, il G24, il G25 e il G26 con il deposito che riusciva, e nel G25 con il
-file che usciva dalla cartella protetta attraverso il collegamento. **Gli altri undici non
+file che usciva dalla cartella protetta attraverso il collegamento. Dal G27 al G31 ognuno è
+stato eseguito sulla sua riga: tutti e cinque l'hanno fatta diventare rossa, il G27, il G28 e
+il G29 con il deposito che riusciva. La suite intera, con quei cinque, non è stata rieseguita
+guasto per guasto. **Gli altri undici non
 sono stati rieseguiti**, e il costo è dichiarato: le correzioni aggiungono anelli e non ne
 cambiano nessuno, ma che gli undici continuino a misurare quello che misuravano è
 un'inferenza, non una cosa vista.*
@@ -1180,6 +1196,11 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G24 | La guardia rimessa a priorità normale, e zitta quando trova una risposta pronta | C-179 |
 | G25 | Il confronto della destinazione rimesso sulle stringhe, senza `realpath()` | C-180 |
 | G26 | Tolto il controllo sul nome riservato, nel deposito e nella guardia | C-181 |
+| G27 | L'estensione vuota rimessa a `txt` quando si cerca l'ambito | C-182 |
+| G28 | Tolto il confronto fra la cartella vera e quella scritta | C-183 |
+| G29 | Tolto il controllo sul collegamento al posto del file | C-183 |
+| G30 | Tolta la domanda `is_uploaded_file()` nella guardia | C-184 |
+| G31 | Il deposito non dice alla guardia quale origine ha dichiarato | C-184 |
 
 ### Che cosa ha trovato il secondo giro di revisione indipendente
 
@@ -1352,6 +1373,53 @@ Le prime due hanno la forma di sempre: una proprietà vicina a quella che serve 
 risposta pronta al posto di una destinazione provata; un nome che comincia bene al posto di
 un percorso che sta davvero dentro). La terza è di un'altra famiglia, un nome condiviso fra
 due cose che non devono condividerlo.
+
+### Che cosa ha trovato il settimo giro di revisione indipendente
+
+Tre rilievi, accolti tutti e tre. Tutti e tre nel deposito, e due dentro le correzioni del
+giro prima o della rilettura in proprio. Nessun aggiramento nuovo della catena pubblica, del
+nonce o della capability amministrativa.
+
+**L'estensione vuota diventava `txt`.** Una funzione di servizio trasformava l'estensione
+vuota in `txt`, comoda per indicare l'esca generale. Ma un aggancio sul nome deciso da
+WordPress può togliere l'estensione dopo che il tipo del file è stato controllato, e allora
+il file `atto` veniva giudicato con l'esca `.txt`: su un server che nega i `.txt` e serve i
+file senza estensione, il deposito riusciva e il documento era pubblico. Adesso l'estensione
+vuota resta vuota, non si sa provare, e il deposito si rifiuta, nel nome previsto e nella
+guardia. `txt` resta solo come valore predefinito esplicito della verifica. Riga C-182.
+
+**Un collegamento interno apriva un secondo indirizzo.** La riga C-180 controllava che la
+cartella vera stesse dentro quella protetta, ma ricavava l'ambito dal percorso scritto. Se la
+sottocartella del mese è un collegamento a un'altra sottocartella interna, il controllo passa,
+l'esca chiesta dal percorso scritto torna negata, e lo stesso file si scarica dall'altro
+percorso, che nessuno ha provato. Adesso la cartella vera deve essere esattamente la radice
+vera più la sottocartella scritta. **Trovato rileggendo lo stesso punto**, e chiuso nella
+stessa riga: un collegamento che non punta a niente, messo al posto del file, fa sembrare
+libero il nome, e la copia scriverebbe dove punta. Anche quello si ferma. Riga C-183.
+
+**L'origine si controllava all'ingresso, non sul file che si spostava.** Fra il controllo
+`is_uploaded_file()` e lo spostamento c'è un aggancio con cui un altro componente può
+sostituire il file caricato con un file locale qualunque, e la guardia guardava solo la
+destinazione. Adesso il deposito dice alla guardia quale origine ha dichiarato, e per un
+caricamento la guardia rifà la domanda sul file che WordPress sta per copiare, prima di
+guardare la destinazione. Riga C-184.
+
+*Due cose dette apertamente su questa riga.* La prima: da riga di comando un caricamento vero
+non si può creare, quindi un deposito con origine `caricamento` si ferma sempre all'ingresso e
+non arriva mai alla guardia. La prova fa due cose separate, e lo dice: dentro un deposito vero
+controlla che la guardia conosca l'origine dichiarata, e poi chiama la guardia direttamente,
+con l'origine `caricamento` e un file locale, che è esattamente quello che vedrebbe dopo la
+sostituzione. La seconda: il revisore suggeriva anche di passare ai caricamenti HTTP la
+funzione di WordPress pensata per loro, che sposta invece di copiare. Non è stato fatto: quella
+strada, per la stessa ragione, nessuna prova la potrebbe mai percorrere, e un ramo di codice
+che nessuna prova percorre è quello in cui il giro successivo troverebbe il difetto. La
+guardia chiude il rilievo da sola, perché vede il file che verrà copiato e nessun aggancio
+viene dopo di lei a cambiarlo.
+
+La forma è ancora quella di sempre: una proprietà vicina a quella che serve. «Nessuna
+estensione» letto come «l'estensione predefinita»; una cartella che sta dentro al posto di
+una cartella che è quella scritta; il file controllato all'ingresso al posto di quello che si
+sposta. Quattordici rilievi su diciannove, contando la rilettura in proprio.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 

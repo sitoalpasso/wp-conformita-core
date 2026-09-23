@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-181.
+ * C-172..C-175, C-177..C-184.
  *
  * @package Conformita_Core
  */
@@ -165,6 +165,17 @@ final class Conformita_Core_Allegati {
 	private static $fermata = array();
 
 	/**
+	 * L'origine dichiarata dal deposito in corso, vuota fuori da un deposito.
+	 *
+	 * La guardia sulla destinazione la rilegge sul file che sta per essere
+	 * copiato, perche' fra il controllo all'ingresso e lo spostamento c'e' un
+	 * aggancio che puo' sostituire la sorgente. Riga C-184.
+	 *
+	 * @var string
+	 */
+	private static $origine_in_corso = '';
+
+	/**
 	 * Percorso della cartella protetta.
 	 *
 	 * @return string
@@ -211,15 +222,22 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
-	 * L'estensione ridotta a quello che può stare in un nome di file.
+	 * L'estensione come stringa, **e niente altro**.
+	 *
+	 * Un'estensione vuota resta vuota. Trasformarla in `txt` faceva di un file
+	 * senza estensione un file dell'ambito dei `.txt`: si provava l'esca
+	 * `.txt`, il server la negava, e si scriveva un file che il server poteva
+	 * servire, perche' una regola sui `.txt` non parla dei file senza
+	 * estensione. Il valore `txt` sta solo come predefinito esplicito di
+	 * `verifica()` e `indirizzo_esca()`, dove indica l'esca generale; qui
+	 * dentro l'estensione vuota non si sa provare, e `provabile()` la
+	 * rifiuta. Riga C-182.
 	 *
 	 * @param string $estensione Estensione dichiarata.
 	 * @return string
 	 */
 	private static function estensione( $estensione ) {
-		$estensione = (string) $estensione;
-
-		return '' === $estensione ? 'txt' : $estensione;
+		return (string) $estensione;
 	}
 
 	/**
@@ -260,7 +278,10 @@ final class Conformita_Core_Allegati {
 	 * conserva, mentre l'indirizzo chiesto al server lo perde per strada, e si
 	 * tornerebbe a provare un percorso e a scriverne un altro. Riga C-177.
 	 *
-	 * Righe C-172, C-174 e C-177.
+	 * **Un'estensione vuota non passa**: un file senza estensione non e' un
+	 * `.txt`, e l'esca che lo rappresenterebbe non si sa scrivere. Riga C-182.
+	 *
+	 * Righe C-172, C-174, C-177 e C-182.
 	 *
 	 * @param string $sotto      Sottocartella.
 	 * @param string $estensione Estensione.
@@ -946,15 +967,36 @@ final class Conformita_Core_Allegati {
 	 *           dirottamento.
 	 *
 	 * @param null|bool $scavalco    Esito già deciso da qualcun altro.
-	 * @param mixed     $file        Voce del file, non usata.
+	 * @param mixed     $file        Voce del file che sta per essere copiato.
 	 * @param string    $nuovo_file  Percorso definitivo della destinazione.
 	 * @return null|bool
 	 * @throws Conformita_Core_Deposito_Fermato Quando la destinazione non è provata.
 	 */
 	public static function guardia_destinazione( $scavalco, $file = null, $nuovo_file = '' ) {
-		unset( $file );
-
 		$nuovo_file = (string) $nuovo_file;
+
+		/*
+		 * **L'origine si ricontrolla sul file che si sposta davvero.**
+		 * `deposita()` chiede `is_uploaded_file()` all'ingresso, ma fra
+		 * l'ingresso e questo punto c'e' `wp_handle_sideload_prefilter`, e un
+		 * aggancio li' puo' sostituire il file caricato con un file locale
+		 * qualunque: un caricamento dichiarato diventerebbe la copia di un file
+		 * del server, cioe' la lettura di file arbitrari che quel controllo
+		 * doveva impedire. Qui il file e' quello che WordPress sta per copiare,
+		 * e nessun aggancio viene dopo a cambiarlo. Si rifiuta prima di
+		 * guardare la destinazione, e non si tocca ne' la sorgente ne' la
+		 * destinazione. Riga C-184.
+		 */
+		if ( 'caricamento' === self::$origine_in_corso
+			&& ( ! is_array( $file ) || empty( $file['tmp_name'] ) || ! is_string( $file['tmp_name'] ) || ! is_uploaded_file( $file['tmp_name'] ) )
+		) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_origine_incoerente',
+				'messaggio' => __( 'Deposito fermato: dichiarata origine «caricamento», ma il file che stava per essere copiato non proviene da un caricamento HTTP. Un aggancio lo ha sostituito dopo il controllo all\'ingresso.', 'conformita-core' ),
+			);
+
+			throw new Conformita_Core_Deposito_Fermato( 'conformita_core_origine_incoerente' );
+		}
 
 		/*
 		 * Il dirottamento si spegne per il tempo del controllo: `cartella()` e
@@ -1021,6 +1063,32 @@ final class Conformita_Core_Allegati {
 		$sotto      = dirname( $relativo );
 		$sotto      = '/' === $sotto || '.' === $sotto ? '' : $sotto;
 		$estensione = (string) pathinfo( $relativo, PATHINFO_EXTENSION );
+
+		/*
+		 * **Il percorso vero deve essere quello scritto, non solo stare
+		 * dentro.** Il controllo qui sopra ferma i collegamenti che portano
+		 * fuori; questo ferma quelli che restano dentro. Se la sottocartella
+		 * scritta e' un collegamento a un'altra sottocartella, lo stesso file
+		 * si raggiunge da due indirizzi, e l'esito si ricava da quello
+		 * scritto: il server puo' negare l'uno e servire l'altro, e provarne
+		 * uno non dice niente dell'altro. Quindi la cartella vera deve essere
+		 * esattamente la radice vera piu' la sottocartella scritta.
+		 *
+		 * Per la stessa ragione il file di destinazione non puo' essere gia'
+		 * un collegamento: uno che non punta a niente fa sembrare libero il
+		 * nome, e la copia scriverebbe dove punta. Riga C-183.
+		 */
+		$attesa = wp_normalize_path( $radice_reale ) . $sotto;
+		$vera   = wp_normalize_path( $cartella_reale );
+
+		if ( $vera !== $attesa || is_link( $percorso ) ) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_destinazione_non_canonica',
+				'messaggio' => __( 'Deposito fermato: la destinazione passa per un collegamento simbolico, quindi il file sarebbe raggiungibile anche da un percorso che non è stato provato.', 'conformita-core' ),
+			);
+
+			return false;
+		}
 
 		if ( self::nome_riservato( $relativo ) ) {
 			self::$fermata = array(
@@ -1296,7 +1364,8 @@ final class Conformita_Core_Allegati {
 
 		require_once ABSPATH . 'wp-admin/includes/file.php';
 
-		self::$fermata = array();
+		self::$fermata          = array();
+		self::$origine_in_corso = $origine;
 
 		add_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
 		add_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), PHP_INT_MIN, 3 );
@@ -1337,6 +1406,8 @@ final class Conformita_Core_Allegati {
 				$fermata['messaggio']
 			);
 		} finally {
+			self::$origine_in_corso = '';
+
 			remove_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), PHP_INT_MIN );
 			remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
 		}
@@ -1445,9 +1516,10 @@ final class Conformita_Core_Allegati {
 	 * @internal Solo per le prove.
 	 */
 	public static function azzera() {
-		self::$scavalcamento = null;
-		self::$in_verifica   = false;
-		self::$fermata       = array();
+		self::$scavalcamento    = null;
+		self::$in_verifica      = false;
+		self::$fermata          = array();
+		self::$origine_in_corso = '';
 
 		delete_option( self::OPZIONE );
 	}

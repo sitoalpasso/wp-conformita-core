@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-181.
+ * C-169, C-170, C-172..C-175, C-177..C-184.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -54,6 +54,20 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * @var string
 	 */
 	private $fuso_originale = '';
+
+	/**
+	 * Da quale decisione del nome in poi l'estensione sparisce.
+	 *
+	 * @var int
+	 */
+	private $togli_estensione_dalla = 1;
+
+	/**
+	 * Quante volte il nome e' stato deciso.
+	 *
+	 * @var int
+	 */
+	private $nomi_decisi = 0;
 
 	/**
 	 * Una sezione con un tipo gestito, e il server finto agganciato.
@@ -1788,5 +1802,279 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			),
 			'Solo il primo file deve essere entrato.'
 		);
+	}
+
+	/**
+	 * C-182: un file senza estensione non e' un file `.txt`.
+	 *
+	 * Un aggancio su `wp_unique_filename` puo' togliere l'estensione dopo che
+	 * il tipo del file e' stato controllato. Se l'estensione vuota diventasse
+	 * `txt` quando si cerca l'ambito, il deposito proverebbe l'esca `.txt` e
+	 * scriverebbe un file senza estensione: su un server che nega i `.txt` e
+	 * serve tutto il resto, il documento sarebbe pubblico dal percorso diretto.
+	 *
+	 * Due meta'. Nella prima l'estensione sparisce gia' nel nome previsto, e il
+	 * rifiuto arriva prima di chiedere niente al server. Nella seconda sparisce
+	 * solo durante lo spostamento, e il rifiuto arriva dalla guardia.
+	 */
+	public function test_c182_lestensione_vuota_non_e_quella_dei_txt() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( '.txt' === substr( $indirizzo, -4 ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			return $this->esca_servita();
+		};
+
+		$this->togli_estensione_dalla = 1;
+		$this->nomi_decisi            = 0;
+
+		$this->assertTrue( Conformita_Core_Allegati::prepara(), 'La cartella nasce, e con lei la verifica generale.' );
+
+		add_filter( 'wp_unique_filename', array( $this, 'togli_estensione' ) );
+
+		$chieste = $this->richieste;
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $primo );
+		$this->assertSame( 'conformita_core_destinazione_non_provabile', $primo->get_error_code() );
+		$this->assertSame( $chieste, $this->richieste, 'Un ambito senza estensione non si prova, quindi non parte nessuna richiesta.' );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto' );
+
+		$this->togli_estensione_dalla = 2;
+		$this->nomi_decisi            = 0;
+
+		$secondo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'wp_unique_filename', array( $this, 'togli_estensione' ) );
+
+		$this->assertSame( 2, $this->nomi_decisi, 'Il nome e\' stato deciso due volte, quindi lo spostamento e\' partito.' );
+		$this->assertWPError( $secondo );
+		$this->assertSame( 'conformita_core_destinazione_non_provabile', $secondo->get_error_code() );
+		$this->assertFileDoesNotExist(
+			Conformita_Core_Allegati::cartella() . $sotto . '/atto',
+			'Nessun byte deve essere finito in un ambito senza estensione.'
+		);
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			)
+		);
+	}
+
+	/**
+	 * Toglie l'estensione al nome deciso da WordPress, dalla volta indicata in poi.
+	 *
+	 * @param string $nome Nome deciso.
+	 * @return string
+	 */
+	public function togli_estensione( $nome ) {
+		++$this->nomi_decisi;
+
+		if ( $this->nomi_decisi < $this->togli_estensione_dalla ) {
+			return $nome;
+		}
+
+		return (string) pathinfo( $nome, PATHINFO_FILENAME );
+	}
+
+	/**
+	 * C-183: un collegamento dentro la cartella non apre un ambito non provato.
+	 *
+	 * La riga C-180 guarda i collegamenti che portano fuori. Questa guarda
+	 * quelli che restano dentro: se la sottocartella del mese e' un
+	 * collegamento verso un'altra sottocartella, il file raggiungibile dal
+	 * percorso scritto lo e' anche dall'altro, e il server puo' trattare i due
+	 * indirizzi in modo diverso. Provare l'uno non dice niente dell'altro.
+	 *
+	 * Due meta'. Nella prima la sottocartella e' un collegamento a `aperta`,
+	 * che il server serve. Nella seconda la cartella e' vera ma al posto del
+	 * file c'e' gia' un collegamento che non punta a niente: il nome sembra
+	 * libero, e la copia scriverebbe attraverso il collegamento.
+	 */
+	public function test_c183_un_collegamento_interno_non_apre_un_altro_ambito() {
+		$atto   = $this->atto_valido();
+		$sotto  = Conformita_Core_Allegati::sottocartella_corrente();
+		$radice = Conformita_Core_Allegati::cartella();
+		$dentro = $radice . $sotto;
+		$aperta = $radice . '/aperta';
+		$fuori  = get_temp_dir() . 'cc-fuori-' . wp_generate_password( 8, false );
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( false !== strpos( $indirizzo, '/aperta/' ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions -- prova: si tocca il disco direttamente perche' e' il disco cio' che si sta verificando.
+		$this->assertTrue( wp_mkdir_p( dirname( $dentro ) ) );
+		$this->assertTrue( wp_mkdir_p( $aperta ) );
+
+		if ( is_dir( $dentro ) && ! is_link( $dentro ) ) {
+			$this->assertTrue( rmdir( $dentro ), 'La sottocartella del mese deve essere vuota per poterla sostituire.' );
+		}
+
+		$this->assertTrue( symlink( $aperta, $dentro ) );
+
+		try {
+			$primo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'atto.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $primo );
+			$this->assertSame( 'conformita_core_destinazione_non_canonica', $primo->get_error_code() );
+			$this->assertFileDoesNotExist( $aperta . '/atto.pdf', 'Nessun byte deve essere finito nell\'ambito servito.' );
+		} finally {
+			unlink( $dentro );
+			wp_mkdir_p( $dentro );
+
+			foreach ( glob( $aperta . '/*' ) as $residuo ) {
+				unlink( $residuo );
+			}
+
+			rmdir( $aperta );
+		}
+
+		$this->assertTrue( mkdir( $fuori ) );
+		$this->assertTrue( symlink( $fuori . '/atto.pdf', $dentro . '/atto.pdf' ) );
+
+		try {
+			$secondo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'atto.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $secondo );
+			$this->assertSame( 'conformita_core_destinazione_non_canonica', $secondo->get_error_code() );
+			$this->assertFileDoesNotExist( $fuori . '/atto.pdf', 'Nessun byte deve essere passato attraverso il collegamento.' );
+		} finally {
+			if ( is_link( $dentro . '/atto.pdf' ) ) {
+				unlink( $dentro . '/atto.pdf' );
+			}
+
+			foreach ( glob( $fuori . '/*' ) as $residuo ) {
+				unlink( $residuo );
+			}
+
+			rmdir( $fuori );
+		}
+		// phpcs:enable WordPress.WP.AlternativeFunctions
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			)
+		);
+	}
+
+	/**
+	 * C-184: l'origine si ricontrolla sul file che si sposta davvero.
+	 *
+	 * L'origine «caricamento» si controlla all'ingresso con `is_uploaded_file()`,
+	 * ma fra l'ingresso e lo spostamento c'e' `wp_handle_sideload_prefilter`,
+	 * e un aggancio li' puo' sostituire il file caricato con un file locale
+	 * qualunque. La guardia, che vede il file che sta per essere copiato, deve
+	 * rifare la stessa domanda su quello.
+	 *
+	 * **Perche' la prova chiama la guardia direttamente.** Un caricamento vero
+	 * nasce solo da una richiesta HTTP: da riga di comando `is_uploaded_file()`
+	 * risponde sempre di no, quindi un deposito con origine «caricamento» si
+	 * ferma all'ingresso e non arriva mai alla guardia. La prova fa allora due
+	 * cose separate: dentro un deposito vero controlla che la guardia sappia
+	 * quale origine e' stata dichiarata, e poi chiama la guardia con
+	 * l'origine «caricamento» e un file locale, che e' esattamente quello che
+	 * vedrebbe dopo la sostituzione.
+	 */
+	public function test_c184_lorigine_si_ricontrolla_sul_file_che_si_sposta() {
+		$atto     = $this->atto_valido();
+		$sotto    = Conformita_Core_Allegati::sottocartella_corrente();
+		$in_corso = new ReflectionProperty( 'Conformita_Core_Allegati', 'origine_in_corso' );
+		$fermata  = new ReflectionProperty( 'Conformita_Core_Allegati', 'fermata' );
+		$vista    = array();
+		$spia     = static function ( $esito ) use ( $in_corso, &$vista ) {
+			$vista[] = $in_corso->getValue();
+
+			return $esito;
+		};
+
+		$in_corso->setAccessible( true );
+		$fermata->setAccessible( true );
+
+		add_filter( 'pre_move_uploaded_file', $spia, 10 );
+
+		$depositato = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'pre_move_uploaded_file', $spia, 10 );
+
+		$this->assertIsInt( $depositato, is_wp_error( $depositato ) ? $depositato->get_error_message() : '' );
+		$this->assertSame( array( 'percorso_locale' ), $vista, 'Durante lo spostamento la guardia conosce l\'origine dichiarata.' );
+		$this->assertSame( '', $in_corso->getValue(), 'Finito il deposito, l\'origine non resta in giro.' );
+
+		$locale       = $this->file_da_depositare( 'sostituto.pdf' );
+		$destinazione = Conformita_Core_Allegati::cartella() . $sotto . '/sostituto.pdf';
+
+		$in_corso->setValue( null, 'caricamento' );
+		$fermato = null;
+
+		try {
+			Conformita_Core_Allegati::guardia_destinazione( null, $locale, $destinazione );
+		} catch ( Conformita_Core_Deposito_Fermato $eccezione ) {
+			$fermato = $eccezione;
+		} finally {
+			$in_corso->setValue( null, '' );
+			remove_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) );
+		}
+
+		$this->assertInstanceOf( 'Conformita_Core_Deposito_Fermato', $fermato, 'Un file locale al posto di un caricamento non si sposta.' );
+		$this->assertSame( 'conformita_core_origine_incoerente', $fermata->getValue()['codice'] );
+		$this->assertFileExists( $locale['tmp_name'], 'Il file sorgente non si tocca.' );
+		$this->assertFileDoesNotExist( $destinazione );
+
+		$fermata->setValue( null, array() );
+		$in_corso->setValue( null, 'percorso_locale' );
+
+		try {
+			$this->assertNull(
+				Conformita_Core_Allegati::guardia_destinazione( null, $locale, $destinazione ),
+				'Con l\'origine «percorso_locale» lo stesso file passa: il rifiuto viene dall\'origine e da nient\'altro.'
+			);
+		} finally {
+			$in_corso->setValue( null, '' );
+			remove_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) );
+		}
 	}
 }
