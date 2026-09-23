@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-192.
+ * C-169, C-170, C-172..C-175, C-177..C-193.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -190,6 +190,26 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		}
 
 		return $this->risposta_finta;
+	}
+
+	/**
+	 * L'indirizzo e' quello di un'esca, nella cartella indicata e con l'estensione indicata.
+	 *
+	 * Le esche hanno un nome nuovo a ogni verifica (riga C-193), quindi le
+	 * prove non possono scrivere l'indirizzo per intero. Scrivono per intero
+	 * tutto il resto, cartella ed estensione comprese, e del nome la forma:
+	 * il prefisso riservato, un trattino e dodici lettere o cifre minuscole.
+	 *
+	 * @param string $indirizzo Indirizzo chiesto.
+	 * @param string $cartella  Indirizzo della cartella, senza barra finale.
+	 * @param string $estensione Estensione, senza punto.
+	 * @return bool
+	 */
+	private function esca_chiesta( $indirizzo, $cartella, $estensione ) {
+		return 1 === preg_match(
+			'#\A' . preg_quote( $cartella . '/prova-accesso-diretto-', '#' ) . '[a-z0-9]{12}\.' . preg_quote( $estensione, '#' ) . '\z#',
+			$indirizzo
+		);
 	}
 
 	/**
@@ -1114,15 +1134,9 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		 * allo stesso modo, e la prova non vedrebbe piu' niente.
 		 */
 		$radice = Conformita_Core_Allegati::indirizzo_cartella();
-		$esca   = Conformita_Core_Allegati::ESCA_PREFISSO;
 
-		$this->risposta_finta = function ( $indirizzo ) use ( $radice, $esca ) {
-			$negati = array(
-				$radice . '/' . $esca . '.txt',
-				$radice . '/documenti.v1/' . $esca . '.pdf',
-			);
-
-			if ( in_array( $indirizzo, $negati, true ) ) {
+		$this->risposta_finta = function ( $indirizzo ) use ( $radice ) {
+			if ( $this->esca_chiesta( $indirizzo, $radice, 'txt' ) || $this->esca_chiesta( $indirizzo, $radice . '/documenti.v1', 'pdf' ) ) {
 				return $this->rifiuto_del_server();
 			}
 
@@ -1290,15 +1304,9 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		// Per esteso, per lo stesso motivo della riga C-172.
 		$radice = Conformita_Core_Allegati::indirizzo_cartella();
-		$esca   = Conformita_Core_Allegati::ESCA_PREFISSO;
 
-		$this->risposta_finta = function ( $indirizzo ) use ( $radice, $esca, $sotto ) {
-			$negati = array(
-				$radice . '/' . $esca . '.txt',
-				$radice . $sotto . '/' . $esca . '.pdf',
-			);
-
-			if ( in_array( $indirizzo, $negati, true ) ) {
+		$this->risposta_finta = function ( $indirizzo ) use ( $radice, $sotto ) {
+			if ( $this->esca_chiesta( $indirizzo, $radice, 'txt' ) || $this->esca_chiesta( $indirizzo, $radice . $sotto, 'pdf' ) ) {
 				return $this->rifiuto_del_server();
 			}
 
@@ -1839,23 +1847,26 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		$esca = Conformita_Core_Allegati::cartella() . $sotto . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf';
 
-		$this->assertFileExists( $esca, 'L\'ambito dei PDF e\' stato provato, quindi la sua esca c\'e\'.' );
-
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: e' la premessa del guasto, l'esca che manca.
-		unlink( $esca );
-
 		$chieste = $this->richieste;
 
-		$rifiutato = conformita_core_deposita_allegato(
-			$atto,
-			$this->file_da_depositare( Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf' ),
-			array( 'origine' => 'percorso_locale' )
-		);
+		/*
+		 * Il nome fisso, e i nomi che le esche hanno durante una verifica:
+		 * tutto lo spazio dei nomi delle esche e' riservato, maiuscole
+		 * comprese. Riga C-193.
+		 */
+		foreach ( array( 'prova-accesso-diretto.pdf', 'prova-accesso-diretto-abcdef123456.pdf', 'Prova-Accesso-Diretto.pdf' ) as $riservato ) {
+			$rifiutato = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( $riservato ),
+				array( 'origine' => 'percorso_locale' )
+			);
 
-		$this->assertWPError( $rifiutato );
-		$this->assertSame( 'conformita_core_nome_riservato', $rifiutato->get_error_code() );
+			$this->assertWPError( $rifiutato, $riservato );
+			$this->assertSame( 'conformita_core_nome_riservato', $rifiutato->get_error_code(), $riservato );
+		}
+
 		$this->assertSame( $chieste, $this->richieste, 'Si rifiuta prima di chiedere niente al server.' );
-		$this->assertFileDoesNotExist( $esca, 'Nessun documento deve aver preso il posto dell\'esca.' );
+		$this->assertSame( array(), glob( Conformita_Core_Allegati::cartella() . $sotto . '/*rova-*ccesso-*iretto*' ), 'Nessun documento con un nome da esca.' );
 
 		$ordinario         = $this->file_da_depositare( 'ordinario.pdf' );
 		$this->nomi_decisi = 0;
@@ -2700,20 +2711,29 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * Per i `.pdf` non ha nessuna regola, quindi un documento raggiungibile
 	 * esce.
 	 *
+	 * @param array<string, int> $visti Riferimento: per ogni indirizzo chiesto che corrisponde a un file, i permessi del file in quel momento.
 	 * @return Closure
 	 */
-	private function server_senza_regole_per_i_pdf() {
+	private function server_senza_regole_per_i_pdf( &$visti = array() ) {
 		$indirizzo_radice = Conformita_Core_Allegati::indirizzo_cartella();
 		$radice           = Conformita_Core_Allegati::cartella();
 
-		return function ( $indirizzo ) use ( $indirizzo_radice, $radice ) {
-			if ( '.txt' === substr( $indirizzo, -4 ) || 0 !== strpos( $indirizzo, $indirizzo_radice . '/' ) ) {
+		return function ( $indirizzo ) use ( $indirizzo_radice, $radice, &$visti ) {
+			if ( 0 !== strpos( $indirizzo, $indirizzo_radice . '/' ) ) {
 				return $this->rifiuto_del_server();
 			}
 
 			$percorso = $radice . substr( $indirizzo, strlen( $indirizzo_radice ) );
 
 			clearstatcache();
+
+			if ( is_file( $percorso ) ) {
+				$visti[ $indirizzo ] = fileperms( $percorso ) & 0777;
+			}
+
+			if ( '.txt' === substr( $indirizzo, -4 ) ) {
+				return $this->rifiuto_del_server();
+			}
 
 			if ( ! is_file( $percorso ) || 0 === ( fileperms( $percorso ) & 0004 ) ) {
 				return $this->rifiuto_del_server();
@@ -2752,8 +2772,8 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * La prova usa quella maschera e un server senza regole per i `.pdf`: il
 	 * deposito si deve rifiutare, e le esche devono avere i permessi che
 	 * avrebbe il documento. La seconda meta' parte da un'esca gia' esistente,
-	 * con il contenuto giusto e i permessi sbagliati: anche quella va
-	 * allineata prima di chiedere.
+	 * con il contenuto giusto e i permessi sbagliati: la verifica non la
+	 * usa, e chiede un'esca nuova con i permessi giusti.
 	 */
 	public function test_c189_lesca_ha_i_permessi_del_documento() {
 		$atto     = $this->atto_valido();
@@ -2761,13 +2781,15 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$radice   = Conformita_Core_Allegati::cartella();
 		$cartella = $radice . $sotto;
 		$esca     = $cartella . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf';
+		$base     = Conformita_Core_Allegati::indirizzo_cartella();
+		$visti    = array();
 
 		$this->assertTrue( wp_mkdir_p( $cartella ) );
 
 		$modo_radice   = fileperms( $radice ) & 07777;
 		$modo_cartella = fileperms( $cartella ) & 07777;
 
-		$this->risposta_finta = $this->server_senza_regole_per_i_pdf();
+		$this->risposta_finta = $this->server_senza_regole_per_i_pdf( $visti );
 
 		// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- prova: i permessi sul disco sono cio' che si sta verificando.
 		chmod( $radice, 0755 );
@@ -2786,18 +2808,23 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
 			$this->assertFileDoesNotExist( $cartella . '/atto.pdf' );
 
-			clearstatcache();
+			$this->assertCount( 2, $visti, 'Il server ha visto due esche, la generale e quella dei PDF.' );
 
-			$this->assertSame( 0644, fileperms( $esca ) & 0777, 'L\'esca dei PDF ha i permessi che WordPress darebbe al documento.' );
-			$this->assertSame( 0644, fileperms( $radice . '/' . Conformita_Core_Allegati::ESCA ) & 0777, 'E anche quella generale.' );
+			foreach ( $visti as $indirizzo => $permessi ) {
+				$this->assertTrue( $this->esca_chiesta( $indirizzo, $base, 'txt' ) || $this->esca_chiesta( $indirizzo, $base . $sotto, 'pdf' ), $indirizzo );
+				$this->assertSame( 0644, $permessi, 'L\'esca chiesta ha i permessi che WordPress darebbe al documento: ' . $indirizzo );
+			}
 
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- prova: un'esca vecchia con il contenuto giusto e i permessi sbagliati.
+			file_put_contents( $esca, Conformita_Core_Allegati::contenuto_esca() );
 			chmod( $esca, 0600 );
+
+			$visti = array();
 
 			Conformita_Core_Allegati::verifica( $sotto, 'pdf' );
 
-			clearstatcache();
-
-			$this->assertSame( 0644, fileperms( $esca ) & 0777, 'Un\'esca gia\' esistente, con il contenuto giusto, si riallinea lo stesso.' );
+			$this->assertCount( 1, $visti );
+			$this->assertSame( array( 0644 ), array_values( $visti ), 'La verifica chiede un\'esca nuova, con i permessi giusti, non quella vecchia.' );
 			$this->assertSame( 'non_coperta', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'] );
 		} finally {
 			umask( $maschera );
@@ -2994,14 +3021,9 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			remove_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
 		}
 
-		$this->assertSame(
-			array(
-				'https://altrove.example/caricamenti/conformita-core-protetto/prova-accesso-diretto.txt',
-				'https://altrove.example/caricamenti/conformita-core-protetto' . $sotto . '/prova-accesso-diretto.pdf',
-			),
-			$chiesti,
-			'Tutte e due le richieste vanno ad A, dove la verifica e\' cominciata.'
-		);
+		$this->assertCount( 2, $chiesti );
+		$this->assertTrue( $this->esca_chiesta( $chiesti[0], 'https://altrove.example/caricamenti/conformita-core-protetto', 'txt' ), 'La verifica generale va ad A: ' . $chiesti[0] );
+		$this->assertTrue( $this->esca_chiesta( $chiesti[1], 'https://altrove.example/caricamenti/conformita-core-protetto' . $sotto, 'pdf' ), 'E anche quella dell\'ambito, dove la verifica e\' cominciata: ' . $chiesti[1] );
 		$this->assertSame( 'ignota', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'], 'Su B l\'ambito provato su A non vale.' );
 	}
 
@@ -3088,7 +3110,7 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-192: un'esca che c'era gia' si ricrea, non si riusa.
+	 * C-192: un'esca che c'era gia' non si riusa.
 	 *
 	 * Un file ha piu' di contenuto e permessi: proprietario, gruppo, liste di
 	 * controllo d'accesso, etichette di sicurezza. Un'esca rimasta da prima,
@@ -3116,15 +3138,23 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		clearstatcache();
 		$vecchia = fileinode( $esca );
+		$base    = Conformita_Core_Allegati::indirizzo_cartella();
+		$radice  = Conformita_Core_Allegati::cartella();
 
-		$this->risposta_finta = function ( $indirizzo ) use ( $esca, $vecchia ) {
-			if ( '.pdf' !== substr( $indirizzo, -4 ) ) {
+		$this->risposta_finta = function ( $indirizzo ) use ( $base, $radice, $vecchia ) {
+			if ( '.pdf' !== substr( $indirizzo, -4 ) || 0 !== strpos( $indirizzo, $base . '/' ) ) {
 				return $this->rifiuto_del_server();
 			}
 
+			$percorso = $radice . substr( $indirizzo, strlen( $base ) );
+
 			clearstatcache();
 
-			return is_file( $esca ) && fileinode( $esca ) === $vecchia ? $this->rifiuto_del_server() : $this->esca_servita();
+			if ( ! is_file( $percorso ) || fileinode( $percorso ) === $vecchia ) {
+				return $this->rifiuto_del_server();
+			}
+
+			return $this->esca_servita();
 		};
 
 		$esito = conformita_core_deposita_allegato(
@@ -3137,10 +3167,76 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
 		$this->assertFileDoesNotExist( $cartella . '/atto.pdf' );
 
-		clearstatcache();
+		$this->assertSame( array(), glob( $cartella . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '-*' ), 'Finita la verifica, l\'esca nuova non resta sul disco.' );
+	}
 
-		$this->assertNotSame( $vecchia, fileinode( $esca ), 'L\'esca e\' un file nuovo.' );
-		$this->assertSame( Conformita_Core_Allegati::contenuto_esca(), file_get_contents( $esca ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- prova: file locale.
-		$this->assertSame( array(), glob( $cartella . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf.*' ), 'Nessun file temporaneo lasciato in giro.' );
+	/**
+	 * C-193: il server che ricorda un vecchio 404 per l'indirizzo dell'esca non fa dire `verificata`.
+	 *
+	 * Un server puo' ricordare le risposte per indirizzo: nginx con la memoria
+	 * dei file aperti che conserva anche gli errori, una rete di distribuzione
+	 * davanti all'origine. Se l'indirizzo dell'esca e' stato chiesto quando
+	 * il file non c'era, il 404 ricordato continua a tornare anche dopo che
+	 * l'esca e' stata creata, e la verifica lo leggerebbe come un diniego;
+	 * il documento, con un nome mai chiesto prima, verrebbe servito. La prova
+	 * usa un server senza regole per i `.pdf` che ricorda un 404 per
+	 * l'indirizzo fisso di un tempo e per ogni indirizzo gia' chiesto a file
+	 * mancante, e serve ogni file nuovo: il deposito si deve rifiutare.
+	 */
+	public function test_c193_un_404_ricordato_dal_server_non_vale_come_diniego() {
+		$atto      = $this->atto_valido();
+		$sotto     = Conformita_Core_Allegati::sottocartella_corrente();
+		$radice    = Conformita_Core_Allegati::cartella();
+		$base      = Conformita_Core_Allegati::indirizzo_cartella();
+		$ricordati = array( $base . $sotto . '/prova-accesso-diretto.pdf' => 404 );
+		$chiesti   = array();
+
+		$this->risposta_finta = function ( $indirizzo ) use ( $radice, $base, &$ricordati, &$chiesti ) {
+			$chiesti[] = $indirizzo;
+
+			if ( '.txt' === substr( $indirizzo, -4 ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			if ( isset( $ricordati[ $indirizzo ] ) ) {
+				return $this->risposta_con_stato( 404 );
+			}
+
+			if ( 0 === strpos( $indirizzo, $base . '/' ) && is_file( $radice . substr( $indirizzo, strlen( $base ) ) ) ) {
+				return $this->esca_servita();
+			}
+
+			$ricordati[ $indirizzo ] = 404;
+
+			return $this->risposta_con_stato( 404 );
+		};
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito, 'Il documento nuovo il server lo servirebbe: il deposito si rifiuta.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+		$this->assertFileDoesNotExist( $radice . $sotto . '/atto.pdf' );
+		$this->assertSame( 'non_coperta', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'] );
+
+		$pdf = array_values(
+			array_filter(
+				$chiesti,
+				static function ( $chiesto ) {
+					return '.pdf' === substr( $chiesto, -4 );
+				}
+			)
+		);
+
+		$this->assertCount( 1, $pdf, 'Una richiesta per l\'ambito dei PDF.' );
+		$this->assertMatchesRegularExpression(
+			'#\A' . preg_quote( $base . $sotto . '/prova-accesso-diretto-', '#' ) . '[a-z0-9]{12}\.pdf\z#',
+			$pdf[0],
+			'L\'esca chiesta ha un nome nuovo, nella sottocartella di destinazione.'
+		);
+		$this->assertSame( array(), glob( $radice . $sotto . '/prova-accesso-diretto*' ), 'Finita la richiesta, l\'esca non resta sul disco.' );
 	}
 }

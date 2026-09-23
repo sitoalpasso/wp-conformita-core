@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-192.
+ * C-172..C-175, C-177..C-193.
  *
  * @package Conformita_Core
  */
@@ -60,7 +60,11 @@ final class Conformita_Core_Allegati {
 	const CARTELLA = 'conformita-core-protetto';
 
 	/**
-	 * Il file esca, bersaglio della verifica.
+	 * Il file esca fisso della radice.
+	 *
+	 * Nasce con i file di regole e, come loro, se manca si riscrive e fa
+	 * dimenticare gli esiti. **Non è il file che la verifica chiede**: quello
+	 * ha un nome nuovo a ogni verifica, vedi `crea_esca()`. Riga C-193.
 	 */
 	const ESCA = 'prova-accesso-diretto.txt';
 
@@ -74,6 +78,9 @@ final class Conformita_Core_Allegati {
 	 * di prefisso per la cartella; su Apache un `FilesMatch` fa lo stesso.
 	 * L'esca `.txt` nella radice prova il diniego di quel percorso e di quella
 	 * estensione, non di tutta la cartella.
+	 *
+	 * Ogni nome che comincia così è riservato alle esche: quelle che la
+	 * verifica chiede si chiamano così più un suffisso nuovo a ogni verifica.
 	 */
 	const ESCA_PREFISSO = 'prova-accesso-diretto';
 
@@ -213,24 +220,23 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
-	 * Indirizzo dell'esca di un ambito.
+	 * Un nome nuovo per l'esca di una verifica, con l'estensione da provare.
 	 *
-	 * @param string $sotto      Sottocartella, vuota per la radice.
-	 * @param string $estensione Estensione dell'esca, senza punto.
-	 * @return string
-	 */
-	public static function indirizzo_esca( $sotto = '', $estensione = 'txt' ) {
-		return self::indirizzo_cartella() . self::sotto( $sotto ) . '/' . self::nome_esca( $estensione );
-	}
-
-	/**
-	 * Il nome dell'esca per un'estensione.
+	 * **Nuovo a ogni verifica, e mai chiesto prima.** Un server può ricordare
+	 * le risposte per indirizzo: nginx conserva nella memoria dei file aperti
+	 * anche gli errori, una rete di distribuzione davanti all'origine conserva
+	 * i 404. Un indirizzo fisso, chiesto una volta quando il file non c'era,
+	 * continuerebbe a rispondere 404 anche dopo la creazione dell'esca, e la
+	 * verifica leggerebbe un diniego che non parla dell'esca; il documento,
+	 * con un nome mai chiesto, verrebbe servito. Un parametro nell'indirizzo
+	 * non basterebbe, perché quella memoria è per percorso sul disco. Riga
+	 * C-193.
 	 *
 	 * @param string $estensione Estensione, senza punto.
 	 * @return string
 	 */
 	private static function nome_esca( $estensione ) {
-		return self::ESCA_PREFISSO . '.' . self::estensione( $estensione );
+		return self::ESCA_PREFISSO . '-' . strtolower( wp_generate_password( 12, false ) ) . '.' . self::estensione( $estensione );
 	}
 
 	/**
@@ -241,7 +247,7 @@ final class Conformita_Core_Allegati {
 	 * `.txt`, il server la negava, e si scriveva un file che il server poteva
 	 * servire, perche' una regola sui `.txt` non parla dei file senza
 	 * estensione. Il valore `txt` sta solo come predefinito esplicito di
-	 * `verifica()` e `indirizzo_esca()`, dove indica l'esca generale; qui
+	 * `verifica()`, dove indica l'esca generale; qui
 	 * dentro l'estensione vuota non si sa provare, e `provabile()` la
 	 * rifiuta. Riga C-182.
 	 *
@@ -320,13 +326,17 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
-	 * Il nome, senza estensione, e' quello dell'esca.
+	 * Il nome, senza estensione, comincia come quello delle esche.
+	 *
+	 * Tutto lo spazio dei nomi delle esche è riservato, non solo il nome
+	 * fisso, e senza distinguere maiuscole e minuscole, che su alcuni dischi
+	 * sono lo stesso file. Righe C-181 e C-193.
 	 *
 	 * @param string $percorso Percorso o nome di file.
 	 * @return bool
 	 */
 	private static function nome_riservato( $percorso ) {
-		return self::ESCA_PREFISSO === pathinfo( $percorso, PATHINFO_FILENAME );
+		return 0 === stripos( (string) pathinfo( $percorso, PATHINFO_FILENAME ), self::ESCA_PREFISSO );
 	}
 
 	/**
@@ -337,7 +347,7 @@ final class Conformita_Core_Allegati {
 	private static function messaggio_nome_riservato() {
 		return sprintf(
 			/* translators: %s: nome riservato all'esca. */
-			__( 'Deposito rifiutato: il nome «%s» è riservato al file esca della verifica, e un documento con quel nome verrebbe sovrascritto dalla verifica successiva.', 'conformita-core' ),
+			__( 'Deposito rifiutato: i nomi che cominciano con «%s» sono riservati ai file esca della verifica.', 'conformita-core' ),
 			self::ESCA_PREFISSO
 		);
 	}
@@ -505,14 +515,13 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
-	 * Scrive l'esca di un ambito, creando la sottocartella se manca.
+	 * Crea la sottocartella di un ambito, se manca.
 	 *
-	 * @param string $sotto      Sottocartella.
-	 * @param string $estensione Estensione.
-	 * @param string $radice     Cartella protetta fotografata dalla verifica.
+	 * @param string $sotto  Sottocartella.
+	 * @param string $radice Cartella protetta fotografata dalla verifica.
 	 * @return true|WP_Error
 	 */
-	private static function scrivi_esca( $sotto, $estensione, $radice ) {
+	private static function prepara_sottocartella( $sotto, $radice ) {
 		$cartella = $radice . self::sotto( $sotto );
 
 		if ( ! wp_mkdir_p( $cartella ) ) {
@@ -522,26 +531,6 @@ final class Conformita_Core_Allegati {
 					/* translators: %s: percorso della sottocartella. */
 					__( 'Sottocartella dei depositi non creabile: %s.', 'conformita-core' ),
 					$cartella
-				)
-			);
-		}
-
-		$percorso  = $cartella . '/' . self::nome_esca( $estensione );
-		$contenuto = self::contenuto_esca();
-
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- si confronta il contenuto di un file locale appena scritto, non si scarica un indirizzo remoto.
-		if ( is_readable( $percorso ) && file_get_contents( $percorso ) === $contenuto ) {
-			return true;
-		}
-
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- la protezione della cartella non può dipendere da credenziali FTP.
-		if ( false === file_put_contents( $percorso, $contenuto, LOCK_EX ) ) {
-			return new WP_Error(
-				'conformita_core_cartella_non_protetta',
-				sprintf(
-					/* translators: %s: nome del file esca. */
-					__( 'Esca %s non scrivibile: senza, il diniego del server non dimostrerebbe niente.', 'conformita-core' ),
-					self::nome_esca( $estensione )
 				)
 			);
 		}
@@ -637,73 +626,69 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
-	 * Ricrea l'esca come file nuovo, con i permessi che avrà il documento, e
-	 * controlla che li abbia.
+	 * Crea l'esca di una verifica: un file nuovo, con un nome nuovo, con i
+	 * permessi che avrà il documento, e controlla che li abbia.
 	 *
-	 * **Si prova un file che il server legge come leggerà il documento, o non
-	 * si prova niente.** Il documento è un file nuovo, creato da questo
-	 * processo in questa cartella, con i permessi che gli dà WordPress. L'esca
-	 * deve nascere allo stesso modo, a ogni verifica.
+	 * **Si prova un file che il server tratta come tratterà il documento, o
+	 * non si prova niente.** Il documento è un file nuovo, creato da questo
+	 * processo in questa cartella, con i permessi che gli dà WordPress e con
+	 * un nome che nessuno ha mai chiesto. L'esca nasce allo stesso modo, a
+	 * ogni verifica.
 	 *
-	 * I permessi non bastano: con una maschera stretta l'esca nascerebbe
-	 * leggibile solo dal proprietario, un server statico con un altro utente
-	 * la negherebbe perché non la sa leggere, e la verifica scambierebbe
-	 * l'illeggibilità per una regola. Riga C-189.
+	 * - I permessi: con una maschera stretta l'esca nascerebbe leggibile solo
+	 *   dal proprietario, e un server con un altro utente la negherebbe perché
+	 *   non la sa leggere. Riga C-189.
+	 * - Il file: un'esca rimasta da prima può avere un gruppo, liste di
+	 *   controllo d'accesso o etichette diverse da quelle di un file nuovo.
+	 *   Riga C-192.
+	 * - Il nome: un indirizzo già chiesto può avere una risposta ricordata dal
+	 *   server. Riga C-193.
 	 *
-	 * E riusare un'esca che c'era già non basta nemmeno con i permessi giusti:
-	 * un file porta anche proprietario, gruppo, liste di controllo d'accesso
-	 * ed etichette di sicurezza, e un file rimasto da prima, per esempio con
-	 * il gruppo privato di prima di una migrazione, può restare illeggibile
-	 * per il server mentre il documento nuovo nasce leggibile. Quindi l'esca
-	 * si scrive in un file temporaneo nella stessa cartella, gli si danno i
-	 * permessi, e lo si mette al posto di quella vecchia con un cambio di nome,
-	 * che non lascia mai un momento senza esca: un'esca mancante darebbe un
-	 * 404, cioè un diniego. Se un passo non riesce, l'esito è `ignota`. Riga
-	 * C-192.
+	 * Il file si apre in modo esclusivo, quindi non ne sovrascrive mai un
+	 * altro. Chi chiama lo toglie finita la richiesta. Se un passo non riesce,
+	 * l'esito è `ignota`.
 	 *
-	 * @param string    $percorso Percorso dell'esca.
-	 * @param int|false $permessi Permessi attesi per il documento.
-	 * @return true|WP_Error
+	 * @param string    $cartella   Cartella in cui il documento finirà.
+	 * @param string    $estensione Estensione da provare.
+	 * @param int|false $permessi   Permessi attesi per il documento.
+	 * @return string|WP_Error Il percorso dell'esca.
 	 */
-	private static function ricrea_esca( $percorso, $permessi ) {
-		$errore = new WP_Error(
+	private static function crea_esca( $cartella, $estensione, $permessi ) {
+		$percorso = $cartella . '/' . self::nome_esca( $estensione );
+		$errore   = new WP_Error(
 			'conformita_core_cartella_non_protetta',
-			sprintf(
-				/* translators: %s: nome del file esca. */
-				__( 'Esca %s non ricreata come un documento nuovo, con i suoi permessi: un diniego del server potrebbe voler dire solo che non la sa leggere.', 'conformita-core' ),
-				wp_basename( $percorso )
-			)
+			__( 'Esca non creata come un documento nuovo, con i suoi permessi: un diniego del server potrebbe voler dire solo che non la sa leggere.', 'conformita-core' )
 		);
 
 		if ( false === $permessi ) {
 			return $errore;
 		}
 
-		$temporaneo = $percorso . '.' . wp_generate_password( 12, false ) . '.nuova';
+		// phpcs:disable WordPress.WP.AlternativeFunctions -- la protezione della cartella non può dipendere da credenziali FTP, e l'apertura esclusiva non ha un equivalente in WP_Filesystem.
+		$file = fopen( $percorso, 'xb' );
 
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- la protezione della cartella non può dipendere da credenziali FTP.
-		if ( false === file_put_contents( $temporaneo, self::contenuto_esca(), LOCK_EX ) ) {
+		if ( false === $file ) {
 			return $errore;
 		}
 
-		clearstatcache( true, $temporaneo );
-
-		if ( ( fileperms( $temporaneo ) & 0777 ) !== $permessi ) {
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- come sopra.
-			chmod( $temporaneo, $permessi );
-			clearstatcache( true, $temporaneo );
-		}
-
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- come sopra: il cambio di nome è quello che non lascia la cartella senza esca.
-		if ( ( fileperms( $temporaneo ) & 0777 ) !== $permessi || ! rename( $temporaneo, $percorso ) ) {
-			wp_delete_file( $temporaneo );
-
-			return $errore;
-		}
+		$scritto = fwrite( $file, self::contenuto_esca() );
+		fclose( $file );
 
 		clearstatcache( true, $percorso );
 
-		return ( fileperms( $percorso ) & 0777 ) === $permessi ? true : $errore;
+		if ( false !== $scritto && ( fileperms( $percorso ) & 0777 ) !== $permessi ) {
+			chmod( $percorso, $permessi );
+			clearstatcache( true, $percorso );
+		}
+		// phpcs:enable WordPress.WP.AlternativeFunctions
+
+		if ( false === $scritto || ( fileperms( $percorso ) & 0777 ) !== $permessi ) {
+			wp_delete_file( $percorso );
+
+			return $errore;
+		}
+
+		return $percorso;
 	}
 
 	/**
@@ -842,7 +827,7 @@ final class Conformita_Core_Allegati {
 		}
 
 		if ( ! is_wp_error( $scrittura ) && ! self::generale( $sotto, $estensione ) ) {
-			$scrittura = self::scrivi_esca( $sotto, $estensione, $cartella );
+			$scrittura = self::prepara_sottocartella( $sotto, $cartella );
 		}
 
 		/*
@@ -853,10 +838,7 @@ final class Conformita_Core_Allegati {
 		$prova = self::fotografia( $cartella, $indirizzo, $sotto );
 
 		if ( ! is_wp_error( $scrittura ) ) {
-			$scrittura = self::ricrea_esca(
-				$cartella . self::sotto( $sotto ) . '/' . self::nome_esca( $estensione ),
-				$prova['permessi']
-			);
+			$scrittura = self::crea_esca( $cartella . self::sotto( $sotto ), $estensione, $prova['permessi'] );
 		}
 
 		if ( is_wp_error( $scrittura ) ) {
@@ -873,13 +855,19 @@ final class Conformita_Core_Allegati {
 			);
 		}
 
-		$risposta = wp_remote_get(
-			$indirizzo . self::sotto( $sotto ) . '/' . self::nome_esca( $estensione ),
-			array(
-				'timeout'     => 10,
-				'redirection' => 0,
-			)
-		);
+		$esca = $scrittura;
+
+		try {
+			$risposta = wp_remote_get(
+				$indirizzo . self::sotto( $sotto ) . '/' . wp_basename( $esca ),
+				array(
+					'timeout'     => 10,
+					'redirection' => 0,
+				)
+			);
+		} finally {
+			wp_delete_file( $esca );
+		}
 
 		if ( is_wp_error( $risposta ) ) {
 			return self::conserva_esito(
