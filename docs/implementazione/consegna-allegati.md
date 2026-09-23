@@ -639,6 +639,11 @@ un'impronta di proprietari e permessi delle cartelle, dalla cartella dell'esca f
 dei caricamenti, presa nel momento della prova. Un esito si legge solo se tutte e due sono
 quelle di adesso; altrimenti vale come mai misurato. Righe C-187, C-189, C-190 e C-191.
 
+Accanto ai file di regole resta un'esca fissa, `prova-accesso-diretto.txt`, che nasce con loro
+e, come loro, se manca si riscrive e fa dimenticare gli esiti. Non è il file che la verifica
+chiede al server: quello nasce a ogni verifica con un nome nuovo e si toglie finita la
+richiesta. Riga C-193.
+
 ---
 
 ## 3. Il contratto delle funzioni pubbliche
@@ -868,7 +873,9 @@ Nessun file del repository dell'albo.
 | La cartella dei caricamenti si sposta, o cambia indirizzo, con regole ed esche copiate | gli esiti misurati prima si leggono `ignota`, e il deposito successivo rifà la verifica sull'indirizzo nuovo; tornando all'indirizzo di prima, gli ambiti misurati sull'altro non valgono | sì |
 | Il processo PHP ha una maschera dei permessi stretta, e il server statico gira con un altro utente | l'esca riceve i permessi che WordPress darà al documento prima di ogni richiesta, anche se c'era già: il server la serve o la nega come servirebbe o negherebbe il documento | sì |
 | L'esca non si riesce a ricreare come file nuovo con i permessi del documento | la verifica dà `ignota` e il deposito si rifiuta | sì |
-| Un'esca rimasta da prima ha un gruppo, liste di controllo d'accesso o etichette diversi da quelli che avrebbe un file nuovo | l'esca si ricrea a ogni verifica con un cambio di nome, quindi nasce come nascerà il documento, e la cartella non resta mai senza esca | sì, al costo di una scrittura per verifica |
+| Un'esca rimasta da prima ha un gruppo, liste di controllo d'accesso o etichette diversi da quelli che avrebbe un file nuovo | l'esca che si chiede è un file nuovo a ogni verifica, quindi nasce come nascerà il documento; quelle rimaste da prima non si chiedono più | sì, al costo di una scrittura per verifica |
+| Il server, o qualcosa davanti a lui, ricorda la risposta data a un indirizzo: per esempio un 404 conservato dalla memoria dei file aperti di nginx per un'esca chiesta quando mancava | ogni verifica chiede un indirizzo mai chiesto prima, con un nome imprevedibile nella stessa sottocartella e con la stessa estensione del documento: nessuna risposta ricordata può valere per l'esca, come non vale per il documento nuovo | sì, al costo di un file creato e tolto per verifica |
+| La richiesta all'esca finisce con un errore, o con un'eccezione di un aggancio | l'esca si toglie lo stesso, in un `finally`: nella cartella non resta un file di prova per ogni verifica | sì |
 | Il processo PHP cambia utente o gruppo dopo la verifica | dove l'estensione POSIX c'è, l'identità del processo è nell'impronta e l'esito vecchio non vale; dove manca, non viene notato | sì, dove l'estensione c'è |
 | I permessi o i proprietari di una cartella fra quella dell'esca e quella dei caricamenti cambiano dopo la verifica, anche solo nei bit di attraversamento | gli esiti misurati prima si leggono come mai misurati, e il deposito successivo rifà la verifica | sì, al costo di una richiesta |
 | Cambiano i permessi di una cartella sopra quella dei caricamenti, o le liste di controllo d'accesso di una cartella | non viene notato. **Limite dichiarato**: sopra la cartella dei caricamenti un server che non attraversa non serve nessun caricamento del sito; le liste di controllo d'accesso non si leggono con `stat()` | **no** |
@@ -880,7 +887,7 @@ Nessun file del repository dell'albo.
 | Una sottocartella della cartella protetta è un collegamento simbolico verso un'altra sottocartella interna, o al posto del file c'è già un collegamento | la guardia pretende che la cartella vera sia quella scritta, e che il file non sia un collegamento: lo stesso file raggiungibile da due indirizzi è provato su uno solo | sì |
 | La cartella protetta stessa è un collegamento simbolico verso un'altra cartella dei caricamenti | la guardia confronta la cartella vera con quella attesa ricavata dalla cartella dei caricamenti, e ferma lo spostamento. La cartella dei caricamenti può invece stare dietro un collegamento | sì |
 | Un aggancio di un altro componente sostituisce il file caricato con un file locale dopo il controllo all'ingresso | la guardia rifà il controllo sul file che sta per essere copiato e ferma lo spostamento, senza toccare la sorgente | sì |
-| Un documento arriva con il nome dell'esca | si rifiuta con un codice suo: se prendesse il posto dell'esca, la verifica successiva lo sovrascriverebbe con la propria riga di prova | sì |
+| Un documento arriva con un nome che comincia come quello delle esche, in maiuscole o minuscole | si rifiuta con un codice suo, all'ingresso e nella guardia: tutti quei nomi sono riservati alle esche, così un documento non può mai essere scambiato per un'esca né prenderne il posto | sì |
 | Le regole vengono riscritte durante la verifica di un ambito | si dimentica tutto quello che si sapeva, generale compreso, e il generale si rimisura subito | sì |
 | Una regola del server dipende dal nome del singolo file e non dall'estensione | non viene vista: l'esca prova l'estensione e la cartella, non il nome. **Limite dichiarato** | **no** |
 | Allegato cestinato con il padre ancora pubblicato | il punto pubblico non trova niente; l'amministrazione lo vede ancora, perche' resti ripristinabile | sì |
@@ -927,7 +934,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Settantotto righe, da C-115 a C-192.**
+convenzione di questo repository. **Settantanove righe, da C-115 a C-193.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -976,12 +983,13 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-186 | fatto | Un componente agganciato allo spostamento alla priorità della guardia, ma prima di lei: il deposito si rifiuta con un codice suo, senza richieste e senza che quel componente venga chiamato; tolto l'aggancio, il deposito torna a funzionare. Lo stesso quando l'aggancio arriva a metà deposito, durante la richiesta che prova un ambito nuovo |
 | C-187 | fatto | La cartella dei caricamenti cambia indirizzo con regole ed esche intatte: lo stato si legge `ignota` senza richieste, un ambito provato sull'indirizzo nuovo non fa tornare valido il generale vecchio, e il deposito successivo rifà la verifica e si rifiuta dove l'indirizzo nuovo è servito. Un ambito misurato sull'indirizzo nuovo non vale tornando a quello di prima, e il deposito lo riprova |
 | C-188 | fatto | Un componente chiama il deposito dall'interno dello spostamento di un altro: quello interno si rifiuta con un codice suo, quello esterno conserva la guardia, che ferma un ambito servito, e niente finisce nella cartella pubblica dei caricamenti; finito il deposito esterno, se ne può fare un altro |
-| C-189 | fatto | Con una maschera dei permessi stretta e un server senza regole per i `.pdf` che serve solo i file leggibili da tutti, il deposito si rifiuta: l'esca, nuova o già esistente con il contenuto giusto, ha i permessi che WordPress darebbe al documento. Cambiati i permessi della sottocartella o della cartella protetta, l'esito misurato prima non vale, senza richieste, e la verifica si rifà |
+| C-189 | fatto | Con una maschera dei permessi stretta e un server senza regole per i `.pdf` che serve solo i file leggibili da tutti, il deposito si rifiuta: l'esca ha i permessi che WordPress darebbe al documento, e un'esca vecchia rimasta con permessi stretti non conta, perché non è lei che si chiede. Cambiati i permessi della sottocartella o della cartella protetta, l'esito misurato prima non vale, senza richieste, e la verifica si rifà |
 | C-190 | fatto | L'indirizzo dei caricamenti torna da A a B mentre la risposta di A è in viaggio: il diniego di A non si conserva come esito di B, e il deposito su B riprova l'ambito e si rifiuta. Se l'indirizzo cambia durante la verifica generale annidata, la verifica dell'ambito continua a chiedere all'indirizzo da cui è partita |
 | C-191 | fatto | Con un server senza regole per i `.pdf` che serve solo i file che raggiunge, la sottocartella del mese a 0744 fa risultare negato l'ambito e il primo deposito riesce; portata a 0755, con i permessi del documento immutati, l'esito non vale più senza richieste, e il deposito successivo riprova l'ambito e si rifiuta. Lo stesso per la cartella intermedia dell'anno |
-| C-192 | fatto | Un'esca rimasta da prima, con contenuto e permessi giusti, che il server non sa leggere mentre servirebbe un file nuovo: il deposito si rifiuta, perché l'esca si ricrea come file nuovo prima di ogni richiesta, e non resta nessun file temporaneo |
+| C-192 | fatto | Un'esca rimasta da prima, con contenuto e permessi giusti, che il server non sa leggere mentre servirebbe un file nuovo: il deposito si rifiuta, perché l'esca che si chiede è un file nuovo a ogni verifica, e finita la richiesta non resta nessuna esca nella sottocartella |
+| C-193 | fatto | Il server ricorda un 404 per il vecchio indirizzo fisso dell'esca, e per ogni indirizzo chiesto quando il file mancava, ma serve ogni file nuovo: la verifica chiede un'esca con un nome mai usato, che il server serve, quindi l'esito è `non_coperta` e il deposito si rifiuta. Si chiede un solo indirizzo, della forma `prova-accesso-diretto-` più dodici lettere o cifre minuscole più l'estensione, e finita la richiesta l'esca non c'è più |
 | C-180 | fatto | La sottocartella di destinazione è un collegamento simbolico verso fuori: la guardia confronta il percorso vero con `realpath()` e ferma lo spostamento. Nessun byte esce dalla cartella protetta |
-| C-181 | fatto | Un documento con il nome dell'esca, con l'ambito già provato e l'esca tolta: il deposito si rifiuta con un codice suo, prima di chiedere niente al server, e nessun file prende il posto dell'esca. Lo stesso quando il nome dell'esca è imposto solo durante lo spostamento: il rifiuto viene dalla guardia |
+| C-181 | fatto | Un documento con un nome riservato alle esche, con l'ambito già provato: il deposito si rifiuta con un codice suo, prima di chiedere niente al server, e nessun file prende quel nome. Si provano tre nomi: quello fisso di un tempo, uno con il suffisso che hanno le esche di adesso, e uno con le maiuscole. Lo stesso quando il nome dell'esca è imposto solo durante lo spostamento: il rifiuto viene dalla guardia |
 | C-182 | fatto | Un aggancio toglie l'estensione al nome del file, prima nel nome previsto e poi solo durante lo spostamento: in tutti e due i casi il deposito si rifiuta, senza provare l'esca `.txt` al posto di un ambito che non ha estensione, e nessun byte entra |
 | C-183 | fatto | La sottocartella del mese è un collegamento verso un'altra sottocartella interna, che il server serve: la guardia pretende che la cartella vera sia quella scritta e ferma lo spostamento. Lo stesso per un collegamento che non punta a niente messo al posto del file, e per la cartella protetta che è essa stessa un collegamento verso un'altra cartella dei caricamenti: nessun byte passa attraverso |
 | C-173 | fatto | Regole riscritte durante la verifica di un ambito: gli esiti conservati si dimenticano tutti, il generale si rimisura, e il deposito successivo riprova il proprio ambito |
@@ -1080,6 +1088,8 @@ parametro `$adesso`.
 | C-172 | Riscritta nello stesso giro. Verificava che un nome da ridurre facesse rifiutare il deposito, ma calcolava l'indirizzo atteso con la stessa funzione che stava provando, quindi la riduzione le sfuggiva. Adesso scrive gli indirizzi per esteso e verifica tutte e due le direzioni: il nome che si sa chiedere si prova com'è, quello che non si sa chiedere fa rifiutare |
 | C-177, C-178 | Nuove, dal sesto giro di revisione indipendente. Due modi diversi di scrivere in un ambito diverso da quello provato: un carattere che l'ancora dell'espressione regolare lasciava passare, e il fatto che il nome calcolato in anticipo era una previsione e non un vincolo. Tutte e due viste rosse spegnendo il controllo e rieseguendo la suite, e la C-178 con il deposito che riusciva |
 | C-179, C-180, C-181 | Nuove, dalla rilettura fatta in proprio prima del settimo giro, cercando la forma dei rilievi precedenti nel codice scritto per ultimo. La guardia taceva se un altro componente aveva già risposto all'aggancio; confrontava la destinazione come stringa e non come percorso vero; e il nome dell'esca poteva essere quello di un documento, che la verifica successiva avrebbe sovrascritto. Tutte e tre viste rosse spegnendo il controllo, le prime due con il deposito che riusciva |
+| C-193 | Nuova, dal tredicesimo giro di revisione indipendente. L'esca si ricreava come file nuovo, ma sempre con lo stesso nome, quindi allo stesso indirizzo: un server che ricorda il 404 dato a quell'indirizzo quando l'esca mancava lo ripeteva, e la verifica lo leggeva come un diniego mentre il documento nuovo sarebbe stato servito. Vista rossa prima della correzione, con il deposito che riusciva |
+| C-172, C-174, C-181, C-189, C-190, C-192 | Adeguate nello stesso giro, perché scrivevano per esteso l'indirizzo fisso dell'esca, che non si chiede più: adesso riconoscono l'esca dalla forma del suo nome, scritta per esteso nella prova. La C-181 prova in più un nome con il suffisso delle esche e uno con le maiuscole, la C-192 che non resti nessuna esca |
 | C-192 | Nuova, dal dodicesimo giro di revisione indipendente. L'esca già esistente si riusava allineandone i permessi, ma un file porta anche proprietario, gruppo, liste di controllo d'accesso ed etichette: un'esca rimasta con il gruppo di prima poteva restare illeggibile al server mentre il documento nuovo nasceva leggibile. Vista rossa prima della correzione, con il deposito che riusciva |
 | C-191 | Nuova, dall'undicesimo giro di revisione indipendente. La correzione della C-189 confrontava i permessi che WordPress dà al documento, ma non quelli che permettono al server di attraversare le cartelle: aprire all'attraversamento una cartella del percorso rendeva raggiungibile il documento senza invalidare l'esito. Vista rossa prima della correzione, per la sottocartella del mese e per quella dell'anno |
 | C-189, C-190 | Nuove, dal decimo giro di revisione indipendente. L'esca nasceva con i permessi della maschera del processo, il documento con quelli della cartella: un server con un altro utente negava l'esca perché non la sapeva leggere, e la verifica lo scambiava per una regola. E l'esito di una verifica si conservava con l'identità della cartella riletta dopo la richiesta, che poteva non essere quella a cui si era chiesto. Tutte e due viste rosse prima della correzione, con il deposito che riusciva |
@@ -1092,7 +1102,7 @@ parametro `$adesso`.
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **232 prove e 1433 asserzioni**, di cui 78 prove nuove. È un **controllo
+La verifica riporta **233 prove e 1450 asserzioni**, di cui 79 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1168,17 +1178,17 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Cinquantanove guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Sessantasei guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G59 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G66 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; dal G14 al G59 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+lì; dal G14 al G66 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
 quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
 con il deposito che riusciva. Dal G18 al G26 ognuno ha fatto diventare rossa una riga sola, e
 solo la sua; il G23, il G24, il G25 e il G26 con il deposito che riusciva, e nel G25 con il
@@ -1214,7 +1224,24 @@ rosse la prima prova della C-189 e la C-192, il G48 la prima della C-189, il G58
 allineare i permessi dell'esca vecchia invece di ricrearla, la sola C-192. Il G54 resta non
 visto, per la ragione detta sopra, e lo stesso vale per il G59, che toglie dall'impronta
 l'identità del processo: una prova non può cambiare l'utente con cui gira. Il G49 non ha più un
-equivalente distinto: sul codice nuovo coincide con il G58. **Un guasto vicino al
+equivalente distinto: sul codice nuovo coincide con il G58. Dopo le correzioni del
+tredicesimo giro, con la suite intera, dal G60 al G66, più il G47 e il G54 rifatti sul codice
+nuovo, dove l'esca non si ricrea più al posto di quella vecchia ma nasce con un nome suo: il
+G60, che torna al nome fisso, fa diventare rosse diciassette prove, fra cui la C-193 con il
+deposito che riusciva, e le altre perché riconoscono l'esca dalla forma del nome; il G66, lo
+stesso nome fisso con un parametro casuale nell'indirizzo, cioè la correzione che la revisione
+aveva detto insufficiente, ventiquattro, anche lì con la C-193 e il deposito che riusciva; il
+G61, che lascia l'esca dopo la richiesta, la C-193, la C-192, la C-181, la C-180 e la C-183; il
+G62 e il G63, che riservano solo il nome esatto o solo le minuscole, la sola C-181; il G65, che
+toglie l'esca prima della richiesta invece che dopo, sei prove della C-189, della C-191, della
+C-192 e della C-193, perché un'esca che non c'è dà 404; il G47 la prima prova della C-189. Il
+G54 resta non visto, per la ragione detta sopra. **Il G64 non lo vede nessuna riga**: apre
+l'esca in scrittura normale invece che esclusiva, e con un nome di dodici caratteri casuali in
+uno spazio di nomi che nessun documento può usare un file con lo stesso nome non c'è mai.
+L'apertura esclusiva è una seconda cintura sopra la riserva dei nomi, di una riga, e si legge a
+occhio. Il G48 e il G58 non hanno più un equivalente distinto: l'esca si crea per ogni
+verifica, generale e di ambito, e non ce n'è più una vecchia da riusare; il loro posto lo
+prende il G60. **Un guasto vicino al
 G31 non lo vede nessuna riga**, ed è detto qui: se il
 deposito dichiarasse alla guardia sempre `percorso_locale`, qualunque origine avesse ricevuto,
 la C-184 resterebbe verde, perché da riga di comando un deposito con origine `caricamento` non
@@ -1286,19 +1313,26 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G44 | Tolto il rifiuto del deposito annidato | C-188 |
 | G45 | Gli ambiti letti senza guardare la loro identità, solo quella del generale | C-187 |
 | G46 | Il segno del deposito in corso non tolto alla fine | C-188, e 48 altre |
-| G47 | L'esca non ricreata, né allineata, prima della richiesta | C-189, C-192 |
-| G48 | Esca ricreata solo per gli ambiti, non per quella generale | C-189 |
+| G47 | L'esca non portata ai permessi del documento prima della richiesta | C-189 |
+| G48 | Esca ricreata solo per gli ambiti, non per quella generale (codice del dodicesimo giro; oggi non ha un equivalente) | C-189 |
 | G49 | Permessi allineati solo per un'esca appena scritta, non per una che c'era già (codice del decimo giro; oggi coincide con il G58) | C-189, due prove |
 | G50 | Gli ambiti letti senza guardare l'impronta di accesso della loro cartella | C-189, C-191 |
 | G51 | L'esito generale letto senza guardare l'impronta di accesso della cartella protetta | C-189 |
 | G52 | L'ambito conservato con l'identità riletta dopo la richiesta, invece che con quella fotografata | C-190 |
 | G53 | L'indirizzo dell'esca ricalcolato al momento della richiesta, invece che preso dalla fotografia | C-190 |
-| G54 | I permessi dell'esca non riletti dopo averli cambiati, né prima né dopo il cambio di nome | nessuna, detto sopra |
+| G54 | I permessi dell'esca non riletti dopo averli cambiati | nessuna, detto sopra |
 | G55 | L'impronta di accesso presa sulla sola cartella dell'esca, senza le cartelle sopra | C-191 |
 | G56 | L'impronta di accesso senza i bit di attraversamento | C-191, due prove |
 | G57 | L'impronta di accesso senza proprietario e gruppo | nessuna, detto sopra |
-| G58 | L'esca che c'era già allineata sul posto invece che ricreata | C-192 |
+| G58 | L'esca che c'era già allineata sul posto invece che ricreata (codice del dodicesimo giro; oggi il suo posto lo prende il G60) | C-192 |
 | G59 | L'impronta di accesso senza l'identità del processo | nessuna, detto sopra |
+| G60 | L'esca chiesta sempre con lo stesso nome fisso | C-193, e sedici altre |
+| G61 | L'esca lasciata nella sottocartella dopo la richiesta | C-193, C-192, C-181, C-180, C-183 |
+| G62 | Riservato solo il nome esatto dell'esca, non tutti quelli che cominciano così | C-181 |
+| G63 | Nomi riservati confrontati distinguendo maiuscole e minuscole | C-181 |
+| G64 | L'esca aperta in scrittura normale invece che esclusiva | nessuna, detto sopra |
+| G65 | L'esca tolta prima della richiesta invece che dopo | C-189, C-191, C-192, C-193 |
+| G66 | L'esca con il nome fisso e un parametro casuale nell'indirizzo | C-193, e ventitré altre |
 | G37 | Tolto il controllo sulla destinazione che esiste già | C-179 |
 | G38 | Gli esiti letti senza guardare la cartella in cui sono stati misurati | C-187 |
 | G39 | `prepara()` che non rifà la verifica quando la cartella è cambiata | C-187, C-183 |
@@ -1688,6 +1722,33 @@ cambio di nome, che non lascia mai la cartella senza esca. Nasce quindi come nas
 documento, qualunque sia l'attributo che conta. In più, dove l'estensione POSIX c'è, l'utente e
 il gruppo del processo entrano nell'impronta di accesso, così un processo che cambia identità
 non riusa esiti misurati con l'altra. Riga C-192.
+
+### Che cosa ha trovato il tredicesimo giro di revisione indipendente
+
+Un rilievo, accolto, ancora dentro la correzione del giro prima, e ancora giudicato
+realistico: basta nginx con la memoria dei file aperti che conserva anche gli errori, una
+configurazione diffusa, e una richiesta all'esca in un momento in cui mancava. Nessun
+aggiramento nuovo della catena pubblica, del nonce, della capability o della scadenza, per il
+settimo giro di seguito.
+
+**Un file nuovo con un nome vecchio ha la storia del nome vecchio.** La correzione del
+dodicesimo giro ricreava l'esca come file nuovo, ma con lo stesso nome, quindi allo stesso
+indirizzo. Un server che ricorda la risposta data a un percorso, come nginx quando conserva
+gli errori dei file aperti, poteva ripetere il 404 dato quando l'esca mancava, e la verifica
+lo leggeva come un diniego; il documento nuovo, con un nome mai chiesto, non aveva nessun
+errore ricordato e veniva servito. È il quarto rilievo di fila con la stessa causa: l'esca
+non era un sostituto fedele del documento. Dopo i permessi, l'attraversamento e il file
+stesso, qui era il nome.
+
+La correzione toglie anche questa differenza alla radice, e con lei tutta la sottofamiglia
+della storia di un percorso: a ogni verifica l'esca nasce con un nome nuovo e imprevedibile,
+`prova-accesso-diretto-` più dodici caratteri casuali, nella sottocartella e con l'estensione
+del documento, aperta in modo esclusivo e portata ai suoi permessi; si chiede quel nome, e
+finita la richiesta il file si toglie, anche quando la richiesta fallisce. Un parametro
+casuale nell'indirizzo non sarebbe bastato, e la revisione lo diceva: la memoria dei file
+aperti ricorda il percorso sul disco, non l'indirizzo chiesto. Tutti i nomi che cominciano
+come quelli delle esche, in maiuscole o minuscole, sono riservati, all'ingresso del deposito e
+nella guardia. Riga C-193.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 
