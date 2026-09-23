@@ -875,6 +875,7 @@ Nessun file del repository dell'albo.
 | L'esca non si riesce a ricreare come file nuovo con i permessi del documento | la verifica dà `ignota` e il deposito si rifiuta | sì |
 | Un'esca rimasta da prima ha un gruppo, liste di controllo d'accesso o etichette diversi da quelli che avrebbe un file nuovo | l'esca che si chiede è un file nuovo a ogni verifica, quindi nasce come nascerà il documento; quelle rimaste da prima non si chiedono più | sì, al costo di una scrittura per verifica |
 | Il server, o qualcosa davanti a lui, ricorda la risposta data a un indirizzo: per esempio un 404 conservato dalla memoria dei file aperti di nginx per un'esca chiesta quando mancava | ogni verifica chiede un indirizzo mai chiesto prima, con un nome imprevedibile nella stessa sottocartella e con la stessa estensione del documento: nessuna risposta ricordata può valere per l'esca, come non vale per il documento nuovo | sì, al costo di un file creato e tolto per verifica |
+| Un altro componente filtra le password generate da WordPress, per esempio imponendo caratteri speciali | il nome dell'esca e il gettone non passano da quel filtro: vengono da una sorgente casuale che nessuno può agganciare, e sono cifre esadecimali, che stanno uguali sul disco e in un indirizzo. Se la sorgente manca, la verifica dà `ignota` | sì |
 | La richiesta all'esca finisce con un errore, o con un'eccezione di un aggancio | l'esca si toglie lo stesso, in un `finally`: nella cartella non resta un file di prova per ogni verifica | sì |
 | Il processo PHP cambia utente o gruppo dopo la verifica | dove l'estensione POSIX c'è, l'identità del processo è nell'impronta e l'esito vecchio non vale; dove manca, non viene notato | sì, dove l'estensione c'è |
 | I permessi o i proprietari di una cartella fra quella dell'esca e quella dei caricamenti cambiano dopo la verifica, anche solo nei bit di attraversamento | gli esiti misurati prima si leggono come mai misurati, e il deposito successivo rifà la verifica | sì, al costo di una richiesta |
@@ -934,7 +935,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Settantanove righe, da C-115 a C-193.**
+convenzione di questo repository. **Ottanta righe, da C-115 a C-194.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -987,7 +988,8 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-190 | fatto | L'indirizzo dei caricamenti torna da A a B mentre la risposta di A è in viaggio: il diniego di A non si conserva come esito di B, e il deposito su B riprova l'ambito e si rifiuta. Se l'indirizzo cambia durante la verifica generale annidata, la verifica dell'ambito continua a chiedere all'indirizzo da cui è partita |
 | C-191 | fatto | Con un server senza regole per i `.pdf` che serve solo i file che raggiunge, la sottocartella del mese a 0744 fa risultare negato l'ambito e il primo deposito riesce; portata a 0755, con i permessi del documento immutati, l'esito non vale più senza richieste, e il deposito successivo riprova l'ambito e si rifiuta. Lo stesso per la cartella intermedia dell'anno |
 | C-192 | fatto | Un'esca rimasta da prima, con contenuto e permessi giusti, che il server non sa leggere mentre servirebbe un file nuovo: il deposito si rifiuta, perché l'esca che si chiede è un file nuovo a ogni verifica, e finita la richiesta non resta nessuna esca nella sottocartella |
-| C-193 | fatto | Il server ricorda un 404 per il vecchio indirizzo fisso dell'esca, e per ogni indirizzo chiesto quando il file mancava, ma serve ogni file nuovo: la verifica chiede un'esca con un nome mai usato, che il server serve, quindi l'esito è `non_coperta` e il deposito si rifiuta. Si chiede un solo indirizzo, della forma `prova-accesso-diretto-` più dodici lettere o cifre minuscole più l'estensione, e finita la richiesta l'esca non c'è più |
+| C-193 | fatto | Il server ricorda un 404 per il vecchio indirizzo fisso dell'esca, e per ogni indirizzo chiesto quando il file mancava, ma serve ogni file nuovo: la verifica chiede un'esca con un nome mai usato, che il server serve, quindi l'esito è `non_coperta` e il deposito si rifiuta. Si chiede un solo indirizzo, della forma `prova-accesso-diretto-` più trentadue cifre esadecimali più l'estensione, e finita la richiesta l'esca non c'è più |
+| C-194 | fatto | Un filtro aggiunge `#` a ogni password generata da WordPress, e il server serve ogni file che c'è, dopo aver tolto dall'indirizzo il frammento come fa un cliente HTTP: il deposito si rifiuta, ogni esca chiesta è un file che esiste davvero, nessun indirizzo chiesto porta il `#`, e il gettone, rigenerato con il filtro acceso, è fatto di sole cifre esadecimali |
 | C-180 | fatto | La sottocartella di destinazione è un collegamento simbolico verso fuori: la guardia confronta il percorso vero con `realpath()` e ferma lo spostamento. Nessun byte esce dalla cartella protetta |
 | C-181 | fatto | Un documento con un nome riservato alle esche, con l'ambito già provato: il deposito si rifiuta con un codice suo, prima di chiedere niente al server, e nessun file prende quel nome. Si provano tre nomi: quello fisso di un tempo, uno con il suffisso che hanno le esche di adesso, e uno con le maiuscole. Lo stesso quando il nome dell'esca è imposto solo durante lo spostamento: il rifiuto viene dalla guardia |
 | C-182 | fatto | Un aggancio toglie l'estensione al nome del file, prima nel nome previsto e poi solo durante lo spostamento: in tutti e due i casi il deposito si rifiuta, senza provare l'esca `.txt` al posto di un ambito che non ha estensione, e nessun byte entra |
@@ -1088,6 +1090,7 @@ parametro `$adesso`.
 | C-172 | Riscritta nello stesso giro. Verificava che un nome da ridurre facesse rifiutare il deposito, ma calcolava l'indirizzo atteso con la stessa funzione che stava provando, quindi la riduzione le sfuggiva. Adesso scrive gli indirizzi per esteso e verifica tutte e due le direzioni: il nome che si sa chiedere si prova com'è, quello che non si sa chiedere fa rifiutare |
 | C-177, C-178 | Nuove, dal sesto giro di revisione indipendente. Due modi diversi di scrivere in un ambito diverso da quello provato: un carattere che l'ancora dell'espressione regolare lasciava passare, e il fatto che il nome calcolato in anticipo era una previsione e non un vincolo. Tutte e due viste rosse spegnendo il controllo e rieseguendo la suite, e la C-178 con il deposito che riusciva |
 | C-179, C-180, C-181 | Nuove, dalla rilettura fatta in proprio prima del settimo giro, cercando la forma dei rilievi precedenti nel codice scritto per ultimo. La guardia taceva se un altro componente aveva già risposto all'aggancio; confrontava la destinazione come stringa e non come percorso vero; e il nome dell'esca poteva essere quello di un documento, che la verifica successiva avrebbe sovrascritto. Tutte e tre viste rosse spegnendo il controllo, le prime due con il deposito che riusciva |
+| C-194 | Nuova, dal quattordicesimo giro di revisione indipendente. Il suffisso casuale del nome dell'esca veniva da `wp_generate_password()`, che passa da un filtro: un componente che impone un `#` alle password faceva scrivere sul disco un nome e chiedere al server un altro percorso, che non esiste, e il 404 valeva come diniego. Vista rossa prima della correzione, con il deposito che riusciva. Il gettone, che veniva dalla stessa funzione, è stato portato sulla stessa sorgente senza che il rilievo lo chiedesse |
 | C-193 | Nuova, dal tredicesimo giro di revisione indipendente. L'esca si ricreava come file nuovo, ma sempre con lo stesso nome, quindi allo stesso indirizzo: un server che ricorda il 404 dato a quell'indirizzo quando l'esca mancava lo ripeteva, e la verifica lo leggeva come un diniego mentre il documento nuovo sarebbe stato servito. Vista rossa prima della correzione, con il deposito che riusciva |
 | C-172, C-174, C-181, C-189, C-190, C-192 | Adeguate nello stesso giro, perché scrivevano per esteso l'indirizzo fisso dell'esca, che non si chiede più: adesso riconoscono l'esca dalla forma del suo nome, scritta per esteso nella prova. La C-181 prova in più un nome con il suffisso delle esche e uno con le maiuscole, la C-192 che non resti nessuna esca |
 | C-192 | Nuova, dal dodicesimo giro di revisione indipendente. L'esca già esistente si riusava allineandone i permessi, ma un file porta anche proprietario, gruppo, liste di controllo d'accesso ed etichette: un'esca rimasta con il gruppo di prima poteva restare illeggibile al server mentre il documento nuovo nasceva leggibile. Vista rossa prima della correzione, con il deposito che riusciva |
@@ -1102,7 +1105,7 @@ parametro `$adesso`.
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **233 prove e 1450 asserzioni**, di cui 79 prove nuove. È un **controllo
+La verifica riporta **234 prove e 1461 asserzioni**, di cui 80 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1178,17 +1181,17 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Sessantasei guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Sessantanove guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G66 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G69 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; dal G14 al G66 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+lì; dal G14 al G69 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
 quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
 con il deposito che riusciva. Dal G18 al G26 ognuno ha fatto diventare rossa una riga sola, e
 solo la sua; il G23, il G24, il G25 e il G26 con il deposito che riusciva, e nel G25 con il
@@ -1236,12 +1239,19 @@ G62 e il G63, che riservano solo il nome esatto o solo le minuscole, la sola C-1
 toglie l'esca prima della richiesta invece che dopo, sei prove della C-189, della C-191, della
 C-192 e della C-193, perché un'esca che non c'è dà 404; il G47 la prima prova della C-189. Il
 G54 resta non visto, per la ragione detta sopra. **Il G64 non lo vede nessuna riga**: apre
-l'esca in scrittura normale invece che esclusiva, e con un nome di dodici caratteri casuali in
+l'esca in scrittura normale invece che esclusiva, e con un nome di trentadue cifre casuali in
 uno spazio di nomi che nessun documento può usare un file con lo stesso nome non c'è mai.
 L'apertura esclusiva è una seconda cintura sopra la riserva dei nomi, di una riga, e si legge a
 occhio. Il G48 e il G58 non hanno più un equivalente distinto: l'esca si crea per ogni
 verifica, generale e di ambito, e non ce n'è più una vecchia da riusare; il loro posto lo
-prende il G60. **Un guasto vicino al
+prende il G60. Dopo le correzioni del quattordicesimo giro, con la suite intera, il G67, il
+G68 e il G69, più il G60 rifatto sul codice nuovo: il G67, che torna a prendere il suffisso da
+`wp_generate_password()`, fa diventare rossa la C-194 con il deposito che riusciva, e altre
+cinque prove perché riconoscono l'esca dalla forma del nome; il G68, che torna a prendere il
+gettone da lì, la sola C-194; il G60 le stesse diciassette prove di prima. **Il G69 non lo vede
+nessuna riga**: toglie il rifiuto quando la sorgente casuale manca, e in una prova la sorgente
+casuale di PHP non si può far mancare. È una condizione di una riga, e si legge a occhio.
+**Un guasto vicino al
 G31 non lo vede nessuna riga**, ed è detto qui: se il
 deposito dichiarasse alla guardia sempre `percorso_locale`, qualunque origine avesse ricevuto,
 la C-184 resterebbe verde, perché da riga di comando un deposito con origine `caricamento` non
@@ -1333,6 +1343,9 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G64 | L'esca aperta in scrittura normale invece che esclusiva | nessuna, detto sopra |
 | G65 | L'esca tolta prima della richiesta invece che dopo | C-189, C-191, C-192, C-193 |
 | G66 | L'esca con il nome fisso e un parametro casuale nell'indirizzo | C-193, e ventitré altre |
+| G67 | Il suffisso del nome dell'esca preso da `wp_generate_password()`, che passa da un filtro | C-194, e cinque altre |
+| G68 | Il gettone preso da `wp_generate_password()` | C-194 |
+| G69 | L'esca creata anche quando la sorgente casuale manca | nessuna, detto sopra |
 | G37 | Tolto il controllo sulla destinazione che esiste già | C-179 |
 | G38 | Gli esiti letti senza guardare la cartella in cui sono stati misurati | C-187 |
 | G39 | `prepara()` che non rifà la verifica quando la cartella è cambiata | C-187, C-183 |
@@ -1749,6 +1762,29 @@ casuale nell'indirizzo non sarebbe bastato, e la revisione lo diceva: la memoria
 aperti ricorda il percorso sul disco, non l'indirizzo chiesto. Tutti i nomi che cominciano
 come quelli delle esche, in maiuscole o minuscole, sono riservati, all'ingresso del deposito e
 nella guardia. Riga C-193.
+
+### Che cosa ha trovato il quattordicesimo giro di revisione indipendente
+
+Un rilievo, accolto, di nuovo dentro la correzione del giro prima. Questa volta la revisione
+lo giudica un caso da componente insolito ma non ostile: un filtro globale che impone
+caratteri speciali alle password, ignorando la richiesta di non usarli. Nessun aggiramento
+nuovo della catena pubblica, del nonce, della capability o della scadenza, per l'ottavo giro di
+seguito.
+
+**Il nome scritto sul disco e quello chiesto al server devono essere lo stesso.** Il suffisso
+casuale del nome dell'esca veniva da `wp_generate_password()`, che passa dal filtro
+`random_password`. Con un `#` in fondo al suffisso, il file si creava con quel nome, ma
+nell'indirizzo tutto quello che segue il `#` è un frammento e non arriva al server: il server
+riceveva un percorso che non esiste, rispondeva 404, e la verifica lo leggeva come un diniego.
+La correzione prende il suffisso da `random_bytes()`, che nessun componente può agganciare, e
+lo scrive in cifre esadecimali, che sono uguali sul disco e in un indirizzo. Se la sorgente
+casuale manca, l'esca non si crea e l'esito è `ignota`. Riga C-194.
+
+Rileggendo la correzione con la stessa domanda, il gettone dell'esca veniva dalla stessa
+funzione. Lì il filtro sbaglierebbe chiudendo, non aprendo: un gettone vuoto o banale farebbe
+leggere come servita una pagina qualsiasi. È stato portato sulla stessa sorgente lo stesso,
+perché un valore di sicurezza che un altro componente può riscrivere non ha ragione di
+esserlo.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 
