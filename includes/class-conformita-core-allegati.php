@@ -908,6 +908,17 @@ final class Conformita_Core_Allegati {
 	 * esiste. Si esce con un'eccezione dedicata, che `deposita()` raccoglie e
 	 * converte nell'errore con il motivo vero. Riga C-178.
 	 *
+	 * **Decide sempre, anche se qualcun altro ha già risposto.** Lo stesso
+	 * aggancio serve ai componenti che spostano i file per conto proprio, per
+	 * esempio verso un deposito esterno: rispondono con un valore e la copia
+	 * non si fa. Se la guardia tacesse ogni volta che trova una risposta
+	 * pronta, basterebbe uno di quei componenti perché il controllo sulla
+	 * destinazione non girasse mai. Quindi la guardia si aggancia per prima,
+	 * alla priorità più bassa che esiste, e controlla comunque; e se il file
+	 * risulta già al suo posto perché qualcuno lo ha messo prima di lei, lo
+	 * toglie, perché un file in un ambito non provato non deve restare.
+	 * Riga C-179.
+	 *
 	 * @internal Aggiunta e tolta attorno allo spostamento dei byte, come il
 	 *           dirottamento.
 	 *
@@ -920,9 +931,7 @@ final class Conformita_Core_Allegati {
 	public static function guardia_destinazione( $scavalco, $file = null, $nuovo_file = '' ) {
 		unset( $file );
 
-		if ( null !== $scavalco ) {
-			return $scavalco;
-		}
+		$nuovo_file = (string) $nuovo_file;
 
 		/*
 		 * Il dirottamento si spegne per il tempo del controllo: `cartella()` e
@@ -932,16 +941,20 @@ final class Conformita_Core_Allegati {
 		remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
 
 		try {
-			$ammessa = self::destinazione_ammessa( (string) $nuovo_file );
+			$ammessa = self::destinazione_ammessa( $nuovo_file );
 		} finally {
 			add_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
 		}
 
 		if ( ! $ammessa ) {
+			if ( '' !== $nuovo_file && is_file( $nuovo_file ) ) {
+				wp_delete_file( $nuovo_file );
+			}
+
 			throw new Conformita_Core_Deposito_Fermato( 'conformita_core_destinazione_non_ammessa' );
 		}
 
-		return null;
+		return $scavalco;
 	}
 
 	/**
@@ -1223,7 +1236,7 @@ final class Conformita_Core_Allegati {
 		self::$fermata = array();
 
 		add_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
-		add_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), 10, 3 );
+		add_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), PHP_INT_MIN, 3 );
 
 		/*
 		 * **Il `finally` non e' prudenza generica.** `wp_handle_sideload()` emette
@@ -1261,7 +1274,7 @@ final class Conformita_Core_Allegati {
 				$fermata['messaggio']
 			);
 		} finally {
-			remove_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), 10 );
+			remove_filter( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), PHP_INT_MIN );
 			remove_filter( 'upload_dir', array( __CLASS__, 'dirotta' ) );
 		}
 

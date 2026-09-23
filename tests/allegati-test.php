@@ -1581,4 +1581,95 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		return $file;
 	}
+
+	/**
+	 * C-179: la guardia decide anche se qualcun altro ha gia' risposto.
+	 *
+	 * Lo stesso aggancio su cui sta la guardia serve ai componenti che spostano
+	 * i file per conto proprio: rispondono con un valore, e WordPress non copia
+	 * piu' niente. Se la guardia tacesse davanti a una risposta pronta, uno di
+	 * quei componenti basterebbe a spegnere il controllo sulla destinazione.
+	 *
+	 * Due meta'. Nella prima il componente estraneo si aggancia con una
+	 * priorita' normale: la guardia, che sta alla piu' bassa che esiste, passa
+	 * prima di lui e ferma tutto. Nella seconda si aggancia alla stessa
+	 * priorita' della guardia ma prima di lei, quindi copia il file prima che
+	 * lei parli: la guardia lo trova al suo posto, lo toglie e ferma lo stesso.
+	 */
+	public function test_c179_la_guardia_decide_anche_se_qualcun_altro_ha_risposto() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( '.pdf-x' === substr( $indirizzo, -6 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		add_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+		add_filter( 'wp_handle_sideload_prefilter', array( $this, 'rinomina_in_pdf_x' ) );
+
+		add_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), 5, 3 );
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), 5 );
+
+		$this->assertWPError( $primo, 'La guardia passa prima del componente estraneo.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $primo->get_error_code() );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf-x' );
+
+		add_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN, 3 );
+
+		$secondo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		remove_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN );
+		remove_filter( 'wp_handle_sideload_prefilter', array( $this, 'rinomina_in_pdf_x' ) );
+		remove_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+
+		$this->assertWPError( $secondo, 'Il componente estraneo ha copiato prima, e la guardia ferma lo stesso.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $secondo->get_error_code() );
+		$this->assertFileDoesNotExist(
+			Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf-x',
+			'Il file messo li\' da qualcun altro non deve restare in un ambito non provato.'
+		);
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			)
+		);
+	}
+
+	/**
+	 * Un componente che sposta il file per conto proprio e lo dice a WordPress.
+	 *
+	 * @param mixed  $esito      Esito gia' deciso.
+	 * @param array  $file       Voce del file.
+	 * @param string $nuovo_file Destinazione.
+	 * @return bool
+	 */
+	public function sposta_per_conto_proprio( $esito, $file, $nuovo_file ) {
+		unset( $esito );
+
+		copy( $file['tmp_name'], $nuovo_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_copy -- prova: fa quello che farebbe un componente che sposta i file da se'.
+
+		return true;
+	}
 }
