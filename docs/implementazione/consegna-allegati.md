@@ -867,7 +867,9 @@ Nessun file del repository dell'albo.
 | Un aggancio mette una barra inversa nel nome del file | dove il separatore è la barra, la guardia ferma lo spostamento: il percorso controllato non sarebbe quello copiato | sì |
 | La cartella dei caricamenti si sposta, o cambia indirizzo, con regole ed esche copiate | gli esiti misurati prima si leggono `ignota`, e il deposito successivo rifà la verifica sull'indirizzo nuovo; tornando all'indirizzo di prima, gli ambiti misurati sull'altro non valgono | sì |
 | Il processo PHP ha una maschera dei permessi stretta, e il server statico gira con un altro utente | l'esca riceve i permessi che WordPress darà al documento prima di ogni richiesta, anche se c'era già: il server la serve o la nega come servirebbe o negherebbe il documento | sì |
-| I permessi dell'esca non si riescono ad allineare | la verifica dà `ignota` e il deposito si rifiuta | sì |
+| L'esca non si riesce a ricreare come file nuovo con i permessi del documento | la verifica dà `ignota` e il deposito si rifiuta | sì |
+| Un'esca rimasta da prima ha un gruppo, liste di controllo d'accesso o etichette diversi da quelli che avrebbe un file nuovo | l'esca si ricrea a ogni verifica con un cambio di nome, quindi nasce come nascerà il documento, e la cartella non resta mai senza esca | sì, al costo di una scrittura per verifica |
+| Il processo PHP cambia utente o gruppo dopo la verifica | dove l'estensione POSIX c'è, l'identità del processo è nell'impronta e l'esito vecchio non vale; dove manca, non viene notato | sì, dove l'estensione c'è |
 | I permessi o i proprietari di una cartella fra quella dell'esca e quella dei caricamenti cambiano dopo la verifica, anche solo nei bit di attraversamento | gli esiti misurati prima si leggono come mai misurati, e il deposito successivo rifà la verifica | sì, al costo di una richiesta |
 | Cambiano i permessi di una cartella sopra quella dei caricamenti, o le liste di controllo d'accesso di una cartella | non viene notato. **Limite dichiarato**: sopra la cartella dei caricamenti un server che non attraversa non serve nessun caricamento del sito; le liste di controllo d'accesso non si leggono con `stat()` | **no** |
 | Un altro componente cambia l'indirizzo dei caricamenti durante una verifica | l'esito si conserva per la cartella e l'indirizzo da cui la verifica è partita, e non vale per quelli di dopo: il deposito in corso non lo trova e si rifiuta, quello successivo riprova | sì |
@@ -925,7 +927,7 @@ di chiusura dell'ente.
 ## 11. Le righe di collaudo di questa unità
 
 Numerazione continuata da C-114, che è l'ultima di S4. Prefisso `C-`, come prescrive la
-convenzione di questo repository. **Settantasette righe, da C-115 a C-191.**
+convenzione di questo repository. **Settantotto righe, da C-115 a C-192.**
 
 Stato **fatto** dove la riga è una prova verde nella verifica continua. Cinque righe hanno
 stato **fatto (tabella dei guasti)**: sono le prove di non vacuità della catena di controlli,
@@ -977,6 +979,7 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-189 | fatto | Con una maschera dei permessi stretta e un server senza regole per i `.pdf` che serve solo i file leggibili da tutti, il deposito si rifiuta: l'esca, nuova o già esistente con il contenuto giusto, ha i permessi che WordPress darebbe al documento. Cambiati i permessi della sottocartella o della cartella protetta, l'esito misurato prima non vale, senza richieste, e la verifica si rifà |
 | C-190 | fatto | L'indirizzo dei caricamenti torna da A a B mentre la risposta di A è in viaggio: il diniego di A non si conserva come esito di B, e il deposito su B riprova l'ambito e si rifiuta. Se l'indirizzo cambia durante la verifica generale annidata, la verifica dell'ambito continua a chiedere all'indirizzo da cui è partita |
 | C-191 | fatto | Con un server senza regole per i `.pdf` che serve solo i file che raggiunge, la sottocartella del mese a 0744 fa risultare negato l'ambito e il primo deposito riesce; portata a 0755, con i permessi del documento immutati, l'esito non vale più senza richieste, e il deposito successivo riprova l'ambito e si rifiuta. Lo stesso per la cartella intermedia dell'anno |
+| C-192 | fatto | Un'esca rimasta da prima, con contenuto e permessi giusti, che il server non sa leggere mentre servirebbe un file nuovo: il deposito si rifiuta, perché l'esca si ricrea come file nuovo prima di ogni richiesta, e non resta nessun file temporaneo |
 | C-180 | fatto | La sottocartella di destinazione è un collegamento simbolico verso fuori: la guardia confronta il percorso vero con `realpath()` e ferma lo spostamento. Nessun byte esce dalla cartella protetta |
 | C-181 | fatto | Un documento con il nome dell'esca, con l'ambito già provato e l'esca tolta: il deposito si rifiuta con un codice suo, prima di chiedere niente al server, e nessun file prende il posto dell'esca. Lo stesso quando il nome dell'esca è imposto solo durante lo spostamento: il rifiuto viene dalla guardia |
 | C-182 | fatto | Un aggancio toglie l'estensione al nome del file, prima nel nome previsto e poi solo durante lo spostamento: in tutti e due i casi il deposito si rifiuta, senza provare l'esca `.txt` al posto di un ambito che non ha estensione, e nessun byte entra |
@@ -1077,6 +1080,7 @@ parametro `$adesso`.
 | C-172 | Riscritta nello stesso giro. Verificava che un nome da ridurre facesse rifiutare il deposito, ma calcolava l'indirizzo atteso con la stessa funzione che stava provando, quindi la riduzione le sfuggiva. Adesso scrive gli indirizzi per esteso e verifica tutte e due le direzioni: il nome che si sa chiedere si prova com'è, quello che non si sa chiedere fa rifiutare |
 | C-177, C-178 | Nuove, dal sesto giro di revisione indipendente. Due modi diversi di scrivere in un ambito diverso da quello provato: un carattere che l'ancora dell'espressione regolare lasciava passare, e il fatto che il nome calcolato in anticipo era una previsione e non un vincolo. Tutte e due viste rosse spegnendo il controllo e rieseguendo la suite, e la C-178 con il deposito che riusciva |
 | C-179, C-180, C-181 | Nuove, dalla rilettura fatta in proprio prima del settimo giro, cercando la forma dei rilievi precedenti nel codice scritto per ultimo. La guardia taceva se un altro componente aveva già risposto all'aggancio; confrontava la destinazione come stringa e non come percorso vero; e il nome dell'esca poteva essere quello di un documento, che la verifica successiva avrebbe sovrascritto. Tutte e tre viste rosse spegnendo il controllo, le prime due con il deposito che riusciva |
+| C-192 | Nuova, dal dodicesimo giro di revisione indipendente. L'esca già esistente si riusava allineandone i permessi, ma un file porta anche proprietario, gruppo, liste di controllo d'accesso ed etichette: un'esca rimasta con il gruppo di prima poteva restare illeggibile al server mentre il documento nuovo nasceva leggibile. Vista rossa prima della correzione, con il deposito che riusciva |
 | C-191 | Nuova, dall'undicesimo giro di revisione indipendente. La correzione della C-189 confrontava i permessi che WordPress dà al documento, ma non quelli che permettono al server di attraversare le cartelle: aprire all'attraversamento una cartella del percorso rendeva raggiungibile il documento senza invalidare l'esito. Vista rossa prima della correzione, per la sottocartella del mese e per quella dell'anno |
 | C-189, C-190 | Nuove, dal decimo giro di revisione indipendente. L'esca nasceva con i permessi della maschera del processo, il documento con quelli della cartella: un server con un altro utente negava l'esca perché non la sapeva leggere, e la verifica lo scambiava per una regola. E l'esito di una verifica si conservava con l'identità della cartella riletta dopo la richiesta, che poteva non essere quella a cui si era chiesto. Tutte e due viste rosse prima della correzione, con il deposito che riusciva |
 | C-188 | Nuova, dal nono giro di revisione indipendente. Un deposito chiamato dall'interno di un altro sganciava guardia e dirottamento a quello esterno, il cui file finiva nella cartella pubblica dei caricamenti. Vista rossa prima della correzione, con il file uscito |
@@ -1088,7 +1092,7 @@ parametro `$adesso`.
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **231 prove e 1422 asserzioni**, di cui 77 prove nuove. È un **controllo
+La verifica riporta **232 prove e 1433 asserzioni**, di cui 78 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1164,17 +1168,17 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Cinquantasette guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Cinquantanove guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G57 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G59 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; dal G14 al G57 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+lì; dal G14 al G59 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
 quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
 con il deposito che riusciva. Dal G18 al G26 ognuno ha fatto diventare rossa una riga sola, e
 solo la sua; il G23, il G24, il G25 e il G26 con il deposito che riusciva, e nel G25 con il
@@ -1203,7 +1207,14 @@ G50 fa diventare rosse la seconda prova della C-189 e le due della C-191, il G51
 C-189 sulla cartella protetta, il G55 la sola prova della C-191 sulla cartella dell'anno, il
 G56 le due della C-191. **Il G57 non lo vede nessuna riga**: toglie proprietario e gruppo
 dall'impronta, e cambiarli in una prova richiede privilegi di amministratore di sistema che la
-verifica continua non garantisce. È una riga sola dell'impronta, e si legge a occhio. **Un guasto vicino al
+verifica continua non garantisce. È una riga sola dell'impronta, e si legge a occhio. Dopo le
+correzioni del dodicesimo giro, con la suite intera, il G47, il G48 e il G54 rifatti sul codice
+nuovo, dove l'allineamento è diventato una ricreazione, più il G58 e il G59: il G47 fa diventare
+rosse la prima prova della C-189 e la C-192, il G48 la prima della C-189, il G58, che torna ad
+allineare i permessi dell'esca vecchia invece di ricrearla, la sola C-192. Il G54 resta non
+visto, per la ragione detta sopra, e lo stesso vale per il G59, che toglie dall'impronta
+l'identità del processo: una prova non può cambiare l'utente con cui gira. Il G49 non ha più un
+equivalente distinto: sul codice nuovo coincide con il G58. **Un guasto vicino al
 G31 non lo vede nessuna riga**, ed è detto qui: se il
 deposito dichiarasse alla guardia sempre `percorso_locale`, qualunque origine avesse ricevuto,
 la C-184 resterebbe verde, perché da riga di comando un deposito con origine `caricamento` non
@@ -1275,17 +1286,19 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G44 | Tolto il rifiuto del deposito annidato | C-188 |
 | G45 | Gli ambiti letti senza guardare la loro identità, solo quella del generale | C-187 |
 | G46 | Il segno del deposito in corso non tolto alla fine | C-188, e 48 altre |
-| G47 | Nessun allineamento dei permessi dell'esca | C-189, due prove |
-| G48 | Permessi allineati solo per le esche degli ambiti, non per quella generale | C-189 |
-| G49 | Permessi allineati solo per un'esca appena scritta, non per una che c'era già | C-189, due prove |
+| G47 | L'esca non ricreata, né allineata, prima della richiesta | C-189, C-192 |
+| G48 | Esca ricreata solo per gli ambiti, non per quella generale | C-189 |
+| G49 | Permessi allineati solo per un'esca appena scritta, non per una che c'era già (codice del decimo giro; oggi coincide con il G58) | C-189, due prove |
 | G50 | Gli ambiti letti senza guardare l'impronta di accesso della loro cartella | C-189, C-191 |
 | G51 | L'esito generale letto senza guardare l'impronta di accesso della cartella protetta | C-189 |
 | G52 | L'ambito conservato con l'identità riletta dopo la richiesta, invece che con quella fotografata | C-190 |
 | G53 | L'indirizzo dell'esca ricalcolato al momento della richiesta, invece che preso dalla fotografia | C-190 |
-| G54 | I permessi dell'esca non riletti dopo averli cambiati | nessuna, detto sopra |
+| G54 | I permessi dell'esca non riletti dopo averli cambiati, né prima né dopo il cambio di nome | nessuna, detto sopra |
 | G55 | L'impronta di accesso presa sulla sola cartella dell'esca, senza le cartelle sopra | C-191 |
 | G56 | L'impronta di accesso senza i bit di attraversamento | C-191, due prove |
 | G57 | L'impronta di accesso senza proprietario e gruppo | nessuna, detto sopra |
+| G58 | L'esca che c'era già allineata sul posto invece che ricreata | C-192 |
+| G59 | L'impronta di accesso senza l'identità del processo | nessuna, detto sopra |
 | G37 | Tolto il controllo sulla destinazione che esiste già | C-179 |
 | G38 | Gli esiti letti senza guardare la cartella in cui sono stati misurati | C-187 |
 | G39 | `prepara()` che non rifà la verifica quando la cartella è cambiata | C-187, C-183 |
@@ -1654,6 +1667,27 @@ di ogni cartella, dalla cartella dell'esca fino a quella dei caricamenti compres
 un'impronta diversa non si legge. Il proprietario è entrato nell'impronta senza che la
 revisione lo chiedesse: cambiare il proprietario di una cartella cambia chi la attraversa
 quanto cambiarne i permessi. Riga C-191.
+
+### Che cosa ha trovato il dodicesimo giro di revisione indipendente
+
+Un rilievo, accolto, di nuovo dentro la correzione di un giro precedente, e di nuovo giudicato
+realistico: basta un server statico con un utente diverso, un gruppo condiviso, e un'esca
+rimasta con il gruppo di prima di un ripristino o di una migrazione. Nessun aggiramento nuovo
+della catena pubblica, del nonce, della capability o della scadenza, per il sesto giro di
+seguito.
+
+**Un'esca vecchia non è un documento nuovo, anche con gli stessi permessi.** La correzione
+del decimo giro allineava i permessi dell'esca a quelli del documento, ma riusava il file che
+c'era. Un file porta anche proprietario, gruppo, liste di controllo d'accesso ed etichette di
+sicurezza: un'esca rimasta nel gruppo privato di prima era illeggibile al server, che la
+negava, mentre il documento nuovo nasceva nel gruppo condiviso e sarebbe stato servito.
+Invece di aggiungere un altro attributo da confrontare, la correzione toglie la differenza
+alla radice: a ogni verifica l'esca si scrive come file nuovo in un file temporaneo della
+stessa cartella, riceve i permessi del documento, e prende il posto di quella vecchia con un
+cambio di nome, che non lascia mai la cartella senza esca. Nasce quindi come nascerà il
+documento, qualunque sia l'attributo che conta. In più, dove l'estensione POSIX c'è, l'utente e
+il gruppo del processo entrano nell'impronta di accesso, così un processo che cambia identità
+non riusa esiti misurati con l'altra. Riga C-192.
 
 ### Due guasti su undici non hanno fatto diventare rossa nessuna riga, alla prima passata
 
