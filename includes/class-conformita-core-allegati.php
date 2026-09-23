@@ -967,7 +967,25 @@ final class Conformita_Core_Allegati {
 		$percorso = wp_normalize_path( $percorso );
 		$radice   = wp_normalize_path( self::cartella() );
 
-		if ( 0 !== strpos( $percorso, $radice . '/' ) ) {
+		/*
+		 * **Il confronto si fa sul percorso vero, non su quello scritto.** Il
+		 * nome puo' cominciare per quello della cartella protetta e portare
+		 * lo stesso fuori: basta che una delle sottocartelle sia un
+		 * collegamento simbolico verso un'altra parte del disco. La consegna
+		 * fa lo stesso confronto con `realpath()` prima di leggere, e la
+		 * stessa domanda va fatta prima di scrivere, perche' un file finito
+		 * fuori dalla cartella protetta non e' protetto da niente. Si guarda
+		 * la cartella di destinazione, che esiste gia', perche' il file no.
+		 * Riga C-180.
+		 */
+		$cartella_reale = realpath( dirname( $percorso ) );
+		$radice_reale   = realpath( $radice );
+
+		if ( 0 !== strpos( $percorso, $radice . '/' )
+			|| false === $cartella_reale
+			|| false === $radice_reale
+			|| ( $cartella_reale !== $radice_reale && 0 !== strpos( $cartella_reale, $radice_reale . DIRECTORY_SEPARATOR ) )
+		) {
 			self::$fermata = array(
 				'codice'    => 'conformita_core_destinazione_fuori_cartella',
 				'messaggio' => __( 'Deposito fermato: la destinazione definitiva del file è fuori dalla cartella protetta.', 'conformita-core' ),

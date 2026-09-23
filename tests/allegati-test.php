@@ -1672,4 +1672,65 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		return true;
 	}
+
+	/**
+	 * C-180: la destinazione si confronta sul percorso vero.
+	 *
+	 * Il nome puo' cominciare per quello della cartella protetta e portare lo
+	 * stesso fuori: basta che la sottocartella del mese sia un collegamento
+	 * simbolico verso un'altra parte del disco. La consegna fa il confronto
+	 * con `realpath()` prima di leggere; la guardia deve farlo prima di
+	 * scrivere, perche' un file finito fuori dalla cartella protetta non e'
+	 * protetto da niente.
+	 */
+	public function test_c180_la_destinazione_si_confronta_sul_percorso_vero() {
+		$atto   = $this->atto_valido();
+		$sotto  = Conformita_Core_Allegati::sottocartella_corrente();
+		$dentro = Conformita_Core_Allegati::cartella() . $sotto;
+		$fuori  = get_temp_dir() . 'cc-fuori-' . wp_generate_password( 8, false );
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions -- prova: si tocca il disco direttamente perche' e' il disco cio' che si sta verificando.
+		$this->assertTrue( wp_mkdir_p( dirname( $dentro ) ) );
+		$this->assertTrue( mkdir( $fuori ) );
+
+		if ( is_dir( $dentro ) && ! is_link( $dentro ) ) {
+			$this->assertTrue( rmdir( $dentro ), 'La sottocartella del mese deve essere vuota per poterla sostituire.' );
+		}
+
+		$this->assertTrue( symlink( $fuori, $dentro ) );
+
+		try {
+			$esito = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'atto.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $esito );
+			$this->assertSame( 'conformita_core_destinazione_fuori_cartella', $esito->get_error_code() );
+			$this->assertFileDoesNotExist( $fuori . '/atto.pdf', 'Nessun byte deve essere uscito dalla cartella protetta.' );
+		} finally {
+			unlink( $dentro );
+			wp_mkdir_p( $dentro );
+
+			foreach ( glob( $fuori . '/*' ) as $residuo ) {
+				unlink( $residuo );
+			}
+
+			rmdir( $fuori );
+		}
+		// phpcs:enable WordPress.WP.AlternativeFunctions
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			)
+		);
+	}
 }
