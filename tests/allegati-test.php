@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-191.
+ * C-169, C-170, C-172..C-175, C-177..C-192.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -3085,5 +3085,62 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			chmod( $cartella, $modo_cartella );
 		}
 		// phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+	}
+
+	/**
+	 * C-192: un'esca che c'era gia' si ricrea, non si riusa.
+	 *
+	 * Un file ha piu' di contenuto e permessi: proprietario, gruppo, liste di
+	 * controllo d'accesso, etichette di sicurezza. Un'esca rimasta da prima,
+	 * per esempio con il gruppo privato di prima di una migrazione, puo'
+	 * avere contenuto giusto e permessi giusti e restare illeggibile per il
+	 * server, mentre il documento nuovo, creato adesso dal processo, nasce
+	 * leggibile. La prova usa un server senza regole per i `.pdf` che non
+	 * sa leggere proprio quel file, riconosciuto dal suo numero sul disco,
+	 * e serve tutti gli altri: il deposito si deve rifiutare, perche'
+	 * l'esca va provata come file nuovo, come nascera' il documento.
+	 */
+	public function test_c192_unesca_che_cera_gia_si_ricrea() {
+		$atto     = $this->atto_valido();
+		$sotto    = Conformita_Core_Allegati::sottocartella_corrente();
+		$cartella = Conformita_Core_Allegati::cartella() . $sotto;
+		$esca     = $cartella . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf';
+
+		$this->assertTrue( Conformita_Core_Allegati::prepara() );
+		$this->assertTrue( wp_mkdir_p( $cartella ) );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- prova: l'esca vecchia deve esistere sul disco con il contenuto giusto.
+		file_put_contents( $esca, Conformita_Core_Allegati::contenuto_esca() );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- prova: i permessi sono gia' quelli giusti, e la differenza sta altrove.
+		chmod( $esca, fileperms( $cartella ) & 0666 );
+
+		clearstatcache();
+		$vecchia = fileinode( $esca );
+
+		$this->risposta_finta = function ( $indirizzo ) use ( $esca, $vecchia ) {
+			if ( '.pdf' !== substr( $indirizzo, -4 ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			clearstatcache();
+
+			return is_file( $esca ) && fileinode( $esca ) === $vecchia ? $this->rifiuto_del_server() : $this->esca_servita();
+		};
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito, 'Il documento nuovo il server lo leggerebbe: il deposito si rifiuta.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+		$this->assertFileDoesNotExist( $cartella . '/atto.pdf' );
+
+		clearstatcache();
+
+		$this->assertNotSame( $vecchia, fileinode( $esca ), 'L\'esca e\' un file nuovo.' );
+		$this->assertSame( Conformita_Core_Allegati::contenuto_esca(), file_get_contents( $esca ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- prova: file locale.
+		$this->assertSame( array(), glob( $cartella . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf.*' ), 'Nessun file temporaneo lasciato in giro.' );
 	}
 }

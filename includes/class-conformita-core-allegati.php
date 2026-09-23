@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-191.
+ * C-172..C-175, C-177..C-192.
  *
  * @package Conformita_Core
  */
@@ -583,7 +583,8 @@ final class Conformita_Core_Allegati {
 	 * portata a 0755 lo rende raggiungibile senza che i permessi del documento
 	 * cambino. Quindi l'impronta raccoglie, per ogni cartella dalla cartella
 	 * dell'esca fino a quella dei caricamenti compresa, proprietario, gruppo e
-	 * permessi interi; un esito misurato con un'impronta diversa non si legge.
+	 * permessi interi, più utente e gruppo del processo che crea i file; un
+	 * esito misurato con un'impronta diversa non si legge.
 	 * Le cartelle sopra quella dei caricamenti restano fuori: se il server non
 	 * le attraversasse, non servirebbe nessun caricamento del sito. Falso se
 	 * una cartella manca o la cartella non sta sotto quella dei caricamenti.
@@ -622,53 +623,87 @@ final class Conformita_Core_Allegati {
 			$corrente = dirname( $corrente );
 		}
 
+		/*
+		 * Il proprietario e il gruppo dei documenti nuovi dipendono anche da
+		 * chi li crea: un processo che cambia utente o gruppo crea file che il
+		 * server può leggere diversamente. Dove l'identità del processo si sa
+		 * leggere entra nell'impronta. Riga C-192.
+		 */
+		if ( function_exists( 'posix_geteuid' ) && function_exists( 'posix_getegid' ) ) {
+			$pezzi[] = 'processo|' . posix_geteuid() . '|' . posix_getegid();
+		}
+
 		return hash( 'sha256', implode( "\n", $pezzi ) );
 	}
 
 	/**
-	 * Dà all'esca i permessi che avrà il documento, e controlla che li abbia.
+	 * Ricrea l'esca come file nuovo, con i permessi che avrà il documento, e
+	 * controlla che li abbia.
 	 *
 	 * **Si prova un file che il server legge come leggerà il documento, o non
-	 * si prova niente.** L'esca nasce con i permessi che concede la maschera
-	 * del processo, il documento con quelli che gli dà WordPress: con una
-	 * maschera stretta l'esca è leggibile solo dal proprietario, un server
-	 * statico con un altro utente la nega perché non la sa leggere, e la
-	 * verifica scambia l'illeggibilità per una regola. Il documento, leggibile
-	 * da tutti, uscirebbe. Vale anche per un'esca che c'era già con il
-	 * contenuto giusto, perché i permessi non si vedono dal contenuto. Se non
-	 * si riesce ad allinearli, l'esito è `ignota`. Riga C-189.
+	 * si prova niente.** Il documento è un file nuovo, creato da questo
+	 * processo in questa cartella, con i permessi che gli dà WordPress. L'esca
+	 * deve nascere allo stesso modo, a ogni verifica.
+	 *
+	 * I permessi non bastano: con una maschera stretta l'esca nascerebbe
+	 * leggibile solo dal proprietario, un server statico con un altro utente
+	 * la negherebbe perché non la sa leggere, e la verifica scambierebbe
+	 * l'illeggibilità per una regola. Riga C-189.
+	 *
+	 * E riusare un'esca che c'era già non basta nemmeno con i permessi giusti:
+	 * un file porta anche proprietario, gruppo, liste di controllo d'accesso
+	 * ed etichette di sicurezza, e un file rimasto da prima, per esempio con
+	 * il gruppo privato di prima di una migrazione, può restare illeggibile
+	 * per il server mentre il documento nuovo nasce leggibile. Quindi l'esca
+	 * si scrive in un file temporaneo nella stessa cartella, gli si danno i
+	 * permessi, e lo si mette al posto di quella vecchia con un cambio di nome,
+	 * che non lascia mai un momento senza esca: un'esca mancante darebbe un
+	 * 404, cioè un diniego. Se un passo non riesce, l'esito è `ignota`. Riga
+	 * C-192.
 	 *
 	 * @param string    $percorso Percorso dell'esca.
 	 * @param int|false $permessi Permessi attesi per il documento.
 	 * @return true|WP_Error
 	 */
-	private static function allinea_esca( $percorso, $permessi ) {
-		$attuali = false;
+	private static function ricrea_esca( $percorso, $permessi ) {
+		$errore = new WP_Error(
+			'conformita_core_cartella_non_protetta',
+			sprintf(
+				/* translators: %s: nome del file esca. */
+				__( 'Esca %s non ricreata come un documento nuovo, con i suoi permessi: un diniego del server potrebbe voler dire solo che non la sa leggere.', 'conformita-core' ),
+				wp_basename( $percorso )
+			)
+		);
 
-		if ( false !== $permessi && is_file( $percorso ) ) {
-			clearstatcache( true, $percorso );
-			$attuali = fileperms( $percorso );
-
-			if ( false !== $attuali && ( $attuali & 0777 ) !== $permessi ) {
-				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- la protezione della cartella non può dipendere da credenziali FTP, come per la scrittura delle esche.
-				chmod( $percorso, $permessi );
-				clearstatcache( true, $percorso );
-				$attuali = fileperms( $percorso );
-			}
+		if ( false === $permessi ) {
+			return $errore;
 		}
 
-		if ( false === $permessi || false === $attuali || ( $attuali & 0777 ) !== $permessi ) {
-			return new WP_Error(
-				'conformita_core_cartella_non_protetta',
-				sprintf(
-					/* translators: %s: nome del file esca. */
-					__( 'Esca %s senza i permessi che avrebbe il documento: un diniego del server potrebbe voler dire solo che non la sa leggere.', 'conformita-core' ),
-					wp_basename( $percorso )
-				)
-			);
+		$temporaneo = $percorso . '.' . wp_generate_password( 12, false ) . '.nuova';
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- la protezione della cartella non può dipendere da credenziali FTP.
+		if ( false === file_put_contents( $temporaneo, self::contenuto_esca(), LOCK_EX ) ) {
+			return $errore;
 		}
 
-		return true;
+		clearstatcache( true, $temporaneo );
+
+		if ( ( fileperms( $temporaneo ) & 0777 ) !== $permessi ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- come sopra.
+			chmod( $temporaneo, $permessi );
+			clearstatcache( true, $temporaneo );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- come sopra: il cambio di nome è quello che non lascia la cartella senza esca.
+		if ( ( fileperms( $temporaneo ) & 0777 ) !== $permessi || ! rename( $temporaneo, $percorso ) ) {
+			wp_delete_file( $temporaneo );
+
+			return $errore;
+		}
+
+		clearstatcache( true, $percorso );
+
+		return ( fileperms( $percorso ) & 0777 ) === $permessi ? true : $errore;
 	}
 
 	/**
@@ -818,7 +853,7 @@ final class Conformita_Core_Allegati {
 		$prova = self::fotografia( $cartella, $indirizzo, $sotto );
 
 		if ( ! is_wp_error( $scrittura ) ) {
-			$scrittura = self::allinea_esca(
+			$scrittura = self::ricrea_esca(
 				$cartella . self::sotto( $sotto ) . '/' . self::nome_esca( $estensione ),
 				$prova['permessi']
 			);
