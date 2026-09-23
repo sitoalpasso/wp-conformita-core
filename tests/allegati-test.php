@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-187.
+ * C-169, C-170, C-172..C-175, C-177..C-188.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -75,6 +75,27 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * @var int
 	 */
 	private $spostamenti_altrui = 0;
+
+	/**
+	 * Il contenuto su cui il deposito annidato prova a scrivere.
+	 *
+	 * @var int
+	 */
+	private $atto_annidato = 0;
+
+	/**
+	 * Il file del deposito annidato.
+	 *
+	 * @var array<string, mixed>
+	 */
+	private $file_annidato = array();
+
+	/**
+	 * L'esito del deposito annidato: null prima, false durante.
+	 *
+	 * @var mixed
+	 */
+	private $deposito_annidato = null;
 
 	/**
 	 * Una sezione con un tipo gestito, e il server finto agganciato.
@@ -1796,6 +1817,13 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * un atto sostituito da una riga di prova, senza nessun errore. La prova
 	 * riproduce la premessa (ambito gia' provato, esca tolta) e pretende il
 	 * rifiuto prima che un byte si muova.
+	 *
+	 * Due meta'. Nella prima il nome riservato arriva gia' all'ingresso, e il
+	 * rifiuto viene dal nome previsto. Nella seconda il file arriva con un
+	 * nome qualunque e un aggancio gli impone quello dell'esca solo durante lo
+	 * spostamento: il rifiuto deve venire dalla guardia. La prima stesura
+	 * aveva solo la prima meta', e restava verde togliendo il controllo nella
+	 * guardia.
 	 */
 	public function test_c181_il_nome_dellesca_e_riservato() {
 		$atto  = $this->atto_valido();
@@ -1828,6 +1856,26 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$this->assertSame( 'conformita_core_nome_riservato', $rifiutato->get_error_code() );
 		$this->assertSame( $chieste, $this->richieste, 'Si rifiuta prima di chiedere niente al server.' );
 		$this->assertFileDoesNotExist( $esca, 'Nessun documento deve aver preso il posto dell\'esca.' );
+
+		$ordinario         = $this->file_da_depositare( 'ordinario.pdf' );
+		$this->nomi_decisi = 0;
+
+		add_filter( 'wp_unique_filename', array( $this, 'nome_dellesca_alla_seconda' ) );
+
+		try {
+			$imposto = conformita_core_deposita_allegato(
+				$atto,
+				$ordinario,
+				array( 'origine' => 'percorso_locale' )
+			);
+		} finally {
+			remove_filter( 'wp_unique_filename', array( $this, 'nome_dellesca_alla_seconda' ) );
+		}
+
+		$this->assertSame( 2, $this->nomi_decisi, 'Il nome e\' stato deciso due volte, quindi lo spostamento e\' partito.' );
+		$this->assertWPError( $imposto );
+		$this->assertSame( 'conformita_core_nome_riservato', $imposto->get_error_code(), 'Il rifiuto viene dalla guardia.' );
+		$this->assertFileDoesNotExist( $esca, 'Nemmeno un nome imposto durante lo spostamento prende il posto dell\'esca.' );
 
 		$this->assertCount(
 			1,
@@ -2471,5 +2519,173 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$caricamenti['url']     = $caricamenti['baseurl'] . $caricamenti['subdir'];
 
 		return $caricamenti;
+	}
+
+	/**
+	 * Alla seconda decisione del nome, impone quello dell'esca.
+	 *
+	 * @param string $nome Nome deciso.
+	 * @return string
+	 */
+	public function nome_dellesca_alla_seconda( $nome ) {
+		++$this->nomi_decisi;
+
+		return $this->nomi_decisi < 2 ? $nome : Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf';
+	}
+
+	/**
+	 * C-187: un ambito misurato su un'altra cartella non vale tornando indietro.
+	 *
+	 * La cartella dei caricamenti ha l'indirizzo A, dove il server nega i
+	 * `.txt` e serve i `.pdf`, e lo si e' verificato solo in generale. Poi
+	 * passa all'indirizzo B, dove si prova l'ambito dei `.pdf` e risulta
+	 * negato. Poi torna ad A. L'esito dei `.pdf` parla di B: tornati ad A non
+	 * deve valere, e il deposito deve riprovare l'ambito su A, dove e' servito.
+	 */
+	public function test_c187_un_ambito_misurato_altrove_non_vale_tornando_indietro() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+		$file  = $this->file_da_depositare( 'atto.pdf' );
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( 0 === strpos( $indirizzo, 'https://altrove.example/' ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			if ( '.pdf' === substr( $indirizzo, -4 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		$this->assertTrue( Conformita_Core_Allegati::prepara() );
+		$this->assertSame( 'verificata', Conformita_Core_Allegati::stato()['copertura'], 'Su A la cartella e\' negata in generale.' );
+
+		add_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+
+		try {
+			Conformita_Core_Allegati::verifica( $sotto, 'pdf' );
+		} finally {
+			remove_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+		}
+
+		$this->assertSame( 'verificata', Conformita_Core_Allegati::stato()['copertura'], 'Tornati ad A, il generale misurato su A vale ancora.' );
+		$this->assertSame(
+			'ignota',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'],
+			'L\'ambito dei PDF e\' stato misurato su B, e su A non vale.'
+		);
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$file,
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito, 'Su A i PDF sono serviti: il deposito si rifiuta.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf' );
+	}
+
+	/**
+	 * C-188: un deposito dentro un altro deposito si rifiuta, e non tocca quello esterno.
+	 *
+	 * Il deposito aggancia la guardia e il dirottamento dei caricamenti per il
+	 * tempo dello spostamento, e li sgancia alla fine. Un componente che,
+	 * dentro uno spostamento, chiamasse il deposito una seconda volta li
+	 * vedrebbe sganciare alla fine del deposito interno, e quello esterno
+	 * riprenderebbe senza guardia e senza dirottamento: il suo file finirebbe
+	 * nella cartella pubblica dei caricamenti. Il deposito interno deve
+	 * rifiutarsi senza toccare niente, e quello esterno deve restare protetto:
+	 * qui rinomina il file in `.pdf-x`, un ambito che il server serve, e la
+	 * guardia lo deve fermare.
+	 */
+	public function test_c188_un_deposito_annidato_si_rifiuta() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( '.pdf-x' === substr( $indirizzo, -6 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		$this->atto_annidato     = $atto;
+		$this->deposito_annidato = null;
+		$this->file_annidato     = $this->file_da_depositare( 'interno.pdf' );
+		$esterno                 = $this->file_da_depositare( 'esterno.pdf' );
+
+		add_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+		add_filter( 'wp_handle_sideload_prefilter', array( $this, 'deposita_dentro_lo_spostamento' ) );
+
+		try {
+			$esito = conformita_core_deposita_allegato(
+				$atto,
+				$esterno,
+				array( 'origine' => 'percorso_locale' )
+			);
+		} finally {
+			remove_filter( 'wp_handle_sideload_prefilter', array( $this, 'deposita_dentro_lo_spostamento' ) );
+			remove_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+		}
+
+		$caricamenti = wp_get_upload_dir();
+		$pubblico    = glob( $caricamenti['basedir'] . $sotto . '/esterno*.pdf-x' );
+
+		foreach ( $pubblico as $uscito ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: si toglie quello che il guasto avrebbe lasciato fuori dalla cartella protetta.
+			unlink( $uscito );
+		}
+
+		$this->assertSame( array(), $pubblico, 'Niente nella cartella pubblica dei caricamenti.' );
+
+		$this->assertWPError( $this->deposito_annidato, 'Il deposito annidato si rifiuta.' );
+		$this->assertSame( 'conformita_core_deposito_annidato', $this->deposito_annidato->get_error_code() );
+
+		$this->assertWPError( $esito, 'Il deposito esterno ha ancora la guardia, che ferma l\'ambito servito.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/esterno.pdf-x', 'Niente nell\'ambito servito.' );
+		$this->assertFalse( has_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) ), 'Finito il deposito, il dirottamento e\' sganciato.' );
+		$this->assertFalse( has_filter( 'pre_move_uploaded_file', array( 'Conformita_Core_Allegati', 'guardia_destinazione' ) ), 'E anche la guardia.' );
+
+		/*
+		 * L'ambito servito ha reso scoperto anche l'esito generale: si
+		 * rimisura con un server che nega tutto, e il deposito successivo
+		 * deve riuscire, cioe' il segno del deposito in corso e' stato tolto.
+		 */
+		$this->risposta_finta = $this->rifiuto_del_server();
+		Conformita_Core_Allegati::verifica();
+
+		$dopo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'dopo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $dopo, 'Finito il deposito esterno, se ne puo\' fare un altro.' );
+	}
+
+	/**
+	 * Dentro lo spostamento, chiama il deposito una seconda volta, e rinomina il file esterno.
+	 *
+	 * @param array<string, mixed> $file Voce del file.
+	 * @return array<string, mixed>
+	 */
+	public function deposita_dentro_lo_spostamento( $file ) {
+		if ( null === $this->deposito_annidato && 'esterno.pdf' === $file['name'] ) {
+			$this->deposito_annidato = false;
+			$this->deposito_annidato = conformita_core_deposita_allegato(
+				$this->atto_annidato,
+				$this->file_annidato,
+				array( 'origine' => 'percorso_locale' )
+			);
+		}
+
+		$file['name'] = 'esterno.pdf-x';
+
+		return $file;
 	}
 }

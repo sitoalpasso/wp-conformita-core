@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-187.
+ * C-172..C-175, C-177..C-188.
  *
  * @package Conformita_Core
  */
@@ -174,6 +174,18 @@ final class Conformita_Core_Allegati {
 	 * @var string
 	 */
 	private static $origine_in_corso = '';
+
+	/**
+	 * Un deposito è in corso.
+	 *
+	 * Il deposito aggancia la guardia e il dirottamento e li sgancia alla
+	 * fine, e la guardia legge l'origine da uno stato condiviso: un deposito
+	 * fatto dentro un altro li sgancerebbe sotto i piedi di quello esterno.
+	 * Riga C-188.
+	 *
+	 * @var bool
+	 */
+	private static $in_deposito = false;
 
 	/**
 	 * Percorso della cartella protetta.
@@ -813,7 +825,13 @@ final class Conformita_Core_Allegati {
 			$ambiti = array();
 		}
 
-		$ambiti[ self::chiave_ambito( $sotto, $estensione ) ] = $campi;
+		/*
+		 * Ogni ambito porta la sua identità, e non solo il generale: un
+		 * ambito misurato su una cartella B, conservato accanto al generale
+		 * di A, tornerebbe valido il giorno in cui si torna ad A, e direbbe
+		 * `verificata` per un indirizzo di A mai provato. Riga C-187.
+		 */
+		$ambiti[ self::chiave_ambito( $sotto, $estensione ) ] = array_merge( $campi, array( 'radice' => self::identita() ) );
 
 		$nuovi = array( 'ambiti' => $ambiti );
 
@@ -916,6 +934,17 @@ final class Conformita_Core_Allegati {
 		$conservato = is_array( $conservato ) ? $conservato : array();
 
 		if ( self::stessa_radice( $conservato ) ) {
+			$identita = self::identita();
+
+			if ( isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ) {
+				$conservato['ambiti'] = array_filter(
+					$conservato['ambiti'],
+					static function ( $ambito ) use ( $identita ) {
+						return is_array( $ambito ) && isset( $ambito['radice'] ) && $identita === $ambito['radice'];
+					}
+				);
+			}
+
 			return $conservato;
 		}
 
@@ -1389,6 +1418,42 @@ final class Conformita_Core_Allegati {
 	 * @return int|WP_Error Identificativo dell'allegato, oppure errore.
 	 */
 	public static function deposita( $post_id, array $file, array $opzioni ) {
+		/*
+		 * **Un deposito alla volta.** Dentro uno spostamento girano gli
+		 * agganci di chiunque, e uno di loro potrebbe chiamare il deposito
+		 * una seconda volta. Quel deposito aggancerebbe gli stessi filtri,
+		 * che WordPress non registra due volte, e alla fine li sgancerebbe:
+		 * il deposito esterno riprenderebbe senza guardia e senza
+		 * dirottamento, e il suo file finirebbe nella cartella pubblica dei
+		 * caricamenti. Il deposito interno si rifiuta prima di toccare
+		 * qualunque cosa, e il segno si toglie in un `finally` che copre
+		 * tutto il deposito esterno. Riga C-188.
+		 */
+		if ( self::$in_deposito ) {
+			return new WP_Error(
+				'conformita_core_deposito_annidato',
+				__( 'Deposito rifiutato: un altro deposito è in corso, e questo è stato chiamato dal suo interno. Si deposita un file alla volta.', 'conformita-core' )
+			);
+		}
+
+		self::$in_deposito = true;
+
+		try {
+			return self::deposita_uno( $post_id, $file, $opzioni );
+		} finally {
+			self::$in_deposito = false;
+		}
+	}
+
+	/**
+	 * Il deposito vero, con la garanzia che nessun altro sia in corso.
+	 *
+	 * @param int                  $post_id Contenuto padre.
+	 * @param array<string, mixed> $file    Voce nella forma di `$_FILES`.
+	 * @param array<string, mixed> $opzioni Opzioni.
+	 * @return int|WP_Error
+	 */
+	private static function deposita_uno( $post_id, array $file, array $opzioni ) {
 		$post_id = (int) $post_id;
 		$tipo    = get_post_type( $post_id );
 
@@ -1739,6 +1804,7 @@ final class Conformita_Core_Allegati {
 		self::$in_verifica      = false;
 		self::$fermata          = array();
 		self::$origine_in_corso = '';
+		self::$in_deposito      = false;
 
 		delete_option( self::OPZIONE );
 	}
