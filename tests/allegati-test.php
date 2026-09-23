@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-193.
+ * C-169, C-170, C-172..C-175, C-177..C-194.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -198,7 +198,7 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * Le esche hanno un nome nuovo a ogni verifica (riga C-193), quindi le
 	 * prove non possono scrivere l'indirizzo per intero. Scrivono per intero
 	 * tutto il resto, cartella ed estensione comprese, e del nome la forma:
-	 * il prefisso riservato, un trattino e dodici lettere o cifre minuscole.
+	 * il prefisso riservato, un trattino e trentadue cifre esadecimali.
 	 *
 	 * @param string $indirizzo Indirizzo chiesto.
 	 * @param string $cartella  Indirizzo della cartella, senza barra finale.
@@ -207,7 +207,7 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 */
 	private function esca_chiesta( $indirizzo, $cartella, $estensione ) {
 		return 1 === preg_match(
-			'#\A' . preg_quote( $cartella . '/prova-accesso-diretto-', '#' ) . '[a-z0-9]{12}\.' . preg_quote( $estensione, '#' ) . '\z#',
+			'#\A' . preg_quote( $cartella . '/prova-accesso-diretto-', '#' ) . '[0-9a-f]{32}\.' . preg_quote( $estensione, '#' ) . '\z#',
 			$indirizzo
 		);
 	}
@@ -3233,10 +3233,76 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		$this->assertCount( 1, $pdf, 'Una richiesta per l\'ambito dei PDF.' );
 		$this->assertMatchesRegularExpression(
-			'#\A' . preg_quote( $base . $sotto . '/prova-accesso-diretto-', '#' ) . '[a-z0-9]{12}\.pdf\z#',
+			'#\A' . preg_quote( $base . $sotto . '/prova-accesso-diretto-', '#' ) . '[0-9a-f]{32}\.pdf\z#',
 			$pdf[0],
 			'L\'esca chiesta ha un nome nuovo, nella sottocartella di destinazione.'
 		);
 		$this->assertSame( array(), glob( $radice . $sotto . '/prova-accesso-diretto*' ), 'Finita la richiesta, l\'esca non resta sul disco.' );
+	}
+
+	/**
+	 * C-194: il nome dell'esca non passa da niente che un altro componente possa filtrare.
+	 *
+	 * `wp_generate_password()` passa dal filtro `random_password`, e un
+	 * componente che impone caratteri speciali alle password ignora la
+	 * richiesta di non usarli. Con un `#` nel nome, il file sul disco e
+	 * l'indirizzo chiesto non sono piu' la stessa cosa: tutto quello che segue
+	 * il `#` e' un frammento, non arriva al server, e il server risponde 404 per
+	 * un file che non esiste. La verifica lo leggerebbe come un diniego. La
+	 * prova usa un server che serve liberamente ogni file che c'e', dopo aver
+	 * tolto il frammento come fa un cliente HTTP, e un filtro che aggiunge `#`
+	 * a ogni password: il deposito si deve rifiutare, e l'esca chiesta deve
+	 * essere un file che esiste davvero. Lo stesso filtro non deve toccare il
+	 * gettone, che si rigenera con il filtro acceso.
+	 */
+	public function test_c194_un_filtro_sulle_password_non_cambia_il_nome_dellesca() {
+		$atto    = $this->atto_valido();
+		$sotto   = Conformita_Core_Allegati::sottocartella_corrente();
+		$radice  = Conformita_Core_Allegati::cartella();
+		$base    = Conformita_Core_Allegati::indirizzo_cartella();
+		$chiesti = array();
+		$trovati = array();
+
+		add_filter(
+			'random_password',
+			static function ( $password ) {
+				return $password . '#';
+			}
+		);
+
+		// Il gettone si rigenera con il filtro acceso.
+		delete_option( Conformita_Core_Allegati::OPZIONE );
+
+		$this->risposta_finta = function ( $indirizzo ) use ( $radice, $base, &$chiesti, &$trovati ) {
+			$chiesti[] = $indirizzo;
+			$senza     = strtok( $indirizzo, '#' );
+
+			if ( 0 === strpos( $senza, $base . '/' ) && is_file( $radice . substr( $senza, strlen( $base ) ) ) ) {
+				$trovati[] = $indirizzo;
+
+				return $this->esca_servita();
+			}
+
+			return $this->risposta_con_stato( 404 );
+		};
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito, 'Il server serve tutto: il deposito si rifiuta.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+		$this->assertFileDoesNotExist( $radice . $sotto . '/atto.pdf' );
+		$this->assertNotEmpty( $chiesti );
+		$this->assertSame( $chiesti, $trovati, 'Ogni esca chiesta e\' un file che esiste davvero.' );
+
+		foreach ( $chiesti as $chiesto ) {
+			$this->assertStringNotContainsString( '#', $chiesto, 'Il nome dell\'esca non porta il carattere del filtro.' );
+		}
+
+		$this->assertSame( array(), glob( $radice . $sotto . '/prova-accesso-diretto*' ), 'Finita la richiesta, l\'esca non resta sul disco.' );
+		$this->assertMatchesRegularExpression( '#\A[0-9a-f]{32}\z#', Conformita_Core_Allegati::gettone(), 'Nemmeno il gettone passa dal filtro.' );
 	}
 }

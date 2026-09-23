@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-193.
+ * C-172..C-175, C-177..C-194.
  *
  * @package Conformita_Core
  */
@@ -232,11 +232,43 @@ final class Conformita_Core_Allegati {
 	 * non basterebbe, perché quella memoria è per percorso sul disco. Riga
 	 * C-193.
 	 *
+	 * Il suffisso viene da `casuale()`, non da `wp_generate_password()`. Riga
+	 * C-194.
+	 *
 	 * @param string $estensione Estensione, senza punto.
-	 * @return string
+	 * @return string|false False se non c'è una sorgente casuale.
 	 */
 	private static function nome_esca( $estensione ) {
-		return self::ESCA_PREFISSO . '-' . strtolower( wp_generate_password( 12, false ) ) . '.' . self::estensione( $estensione );
+		$suffisso = self::casuale();
+
+		if ( '' === $suffisso ) {
+			return false;
+		}
+
+		return self::ESCA_PREFISSO . '-' . $suffisso . '.' . self::estensione( $estensione );
+	}
+
+	/**
+	 * Trentadue cifre esadecimali casuali, o una stringa vuota.
+	 *
+	 * **Da una sorgente che nessun altro componente può filtrare.**
+	 * `wp_generate_password()` passa dal filtro `random_password`, e un
+	 * componente che impone caratteri speciali alle password ignora la
+	 * richiesta di non usarli: un `#` nel nome dell'esca farebbe chiedere al
+	 * server un altro percorso, perché quello che segue il `#` in un indirizzo
+	 * non gli arriva, e il 404 di un file che non esiste varrebbe come diniego.
+	 * Le cifre esadecimali stanno uguali sul disco e in un indirizzo. Se la
+	 * sorgente casuale manca, chi chiama tratta la stringa vuota come un
+	 * fallimento. Riga C-194.
+	 *
+	 * @return string
+	 */
+	private static function casuale() {
+		try {
+			return bin2hex( random_bytes( 16 ) );
+		} catch ( Exception $e ) {
+			return '';
+		}
 	}
 
 	/**
@@ -408,7 +440,17 @@ final class Conformita_Core_Allegati {
 			return (string) $conservato['gettone'];
 		}
 
-		$gettone = wp_generate_password( 32, false, false );
+		/*
+		 * Dalla stessa sorgente del nome dell'esca, e per la stessa ragione:
+		 * un gettone filtrato non deve poter essere vuoto o una parola che
+		 * compare in qualunque pagina. Se la sorgente manca non si conserva
+		 * niente, e `crea_esca()` non crea l'esca. Riga C-194.
+		 */
+		$gettone = self::casuale();
+
+		if ( '' === $gettone ) {
+			return '';
+		}
 
 		self::conserva( array( 'gettone' => $gettone ) );
 
@@ -654,15 +696,17 @@ final class Conformita_Core_Allegati {
 	 * @return string|WP_Error Il percorso dell'esca.
 	 */
 	private static function crea_esca( $cartella, $estensione, $permessi ) {
-		$percorso = $cartella . '/' . self::nome_esca( $estensione );
-		$errore   = new WP_Error(
+		$nome   = self::nome_esca( $estensione );
+		$errore = new WP_Error(
 			'conformita_core_cartella_non_protetta',
 			__( 'Esca non creata come un documento nuovo, con i suoi permessi: un diniego del server potrebbe voler dire solo che non la sa leggere.', 'conformita-core' )
 		);
 
-		if ( false === $permessi ) {
+		if ( false === $permessi || false === $nome || '' === self::gettone() ) {
 			return $errore;
 		}
+
+		$percorso = $cartella . '/' . $nome;
 
 		// phpcs:disable WordPress.WP.AlternativeFunctions -- la protezione della cartella non può dipendere da credenziali FTP, e l'apertura esclusiva non ha un equivalente in WP_Filesystem.
 		$file = fopen( $percorso, 'xb' );
