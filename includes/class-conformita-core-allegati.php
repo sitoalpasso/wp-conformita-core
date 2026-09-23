@@ -287,6 +287,29 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
+	 * Il nome, senza estensione, e' quello dell'esca.
+	 *
+	 * @param string $percorso Percorso o nome di file.
+	 * @return bool
+	 */
+	private static function nome_riservato( $percorso ) {
+		return self::ESCA_PREFISSO === pathinfo( $percorso, PATHINFO_FILENAME );
+	}
+
+	/**
+	 * Il messaggio con cui un nome riservato si rifiuta.
+	 *
+	 * @return string
+	 */
+	private static function messaggio_nome_riservato() {
+		return sprintf(
+			/* translators: %s: nome riservato all'esca. */
+			__( 'Deposito rifiutato: il nome «%s» è riservato al file esca della verifica, e un documento con quel nome verrebbe sovrascritto dalla verifica successiva.', 'conformita-core' ),
+			self::ESCA_PREFISSO
+		);
+	}
+
+	/**
 	 * La chiave con cui l'esito di un ambito si conserva.
 	 *
 	 * Un ambito è la coppia sottocartella più estensione, cioè esattamente
@@ -999,6 +1022,15 @@ final class Conformita_Core_Allegati {
 		$sotto      = '/' === $sotto || '.' === $sotto ? '' : $sotto;
 		$estensione = (string) pathinfo( $relativo, PATHINFO_EXTENSION );
 
+		if ( self::nome_riservato( $relativo ) ) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_nome_riservato',
+				'messaggio' => self::messaggio_nome_riservato(),
+			);
+
+			return false;
+		}
+
 		if ( ! self::provabile( $sotto, $estensione ) ) {
 			self::$fermata = array(
 				'codice'    => 'conformita_core_destinazione_non_provabile',
@@ -1198,6 +1230,19 @@ final class Conformita_Core_Allegati {
 			: (string) $tipo_file['proper_filename'];
 		$nome_finale     = wp_unique_filename( self::cartella() . self::sotto( $sotto ), $nome_dichiarato );
 		$estensione      = (string) pathinfo( $nome_finale, PATHINFO_EXTENSION );
+
+		/*
+		 * **Il nome dell'esca e' riservato.** Un documento che si chiamasse
+		 * come lei finirebbe al suo posto il giorno in cui l'esca manca, e la
+		 * verifica successiva, trovando un contenuto diverso da quello atteso,
+		 * lo sovrascriverebbe con il proprio: un atto sostituito da una riga di
+		 * prova, senza nessun errore. Il controllo sta qui per rifiutare prima
+		 * di chiedere niente al server, e nella guardia per il nome definitivo.
+		 * Riga C-181.
+		 */
+		if ( self::nome_riservato( $nome_finale ) ) {
+			return new WP_Error( 'conformita_core_nome_riservato', self::messaggio_nome_riservato() );
+		}
 
 		if ( ! self::provabile( $sotto, $estensione ) ) {
 			return new WP_Error(

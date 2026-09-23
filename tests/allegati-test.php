@@ -1733,4 +1733,60 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			)
 		);
 	}
+
+	/**
+	 * C-181: il nome dell'esca e' riservato.
+	 *
+	 * Un documento che si chiamasse come l'esca finirebbe al suo posto il
+	 * giorno in cui l'esca manca, e la verifica successiva, trovando un
+	 * contenuto diverso da quello atteso, lo sovrascriverebbe con il proprio:
+	 * un atto sostituito da una riga di prova, senza nessun errore. La prova
+	 * riproduce la premessa (ambito gia' provato, esca tolta) e pretende il
+	 * rifiuto prima che un byte si muova.
+	 */
+	public function test_c181_il_nome_dellesca_e_riservato() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'primo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+
+		$esca = Conformita_Core_Allegati::cartella() . $sotto . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf';
+
+		$this->assertFileExists( $esca, 'L\'ambito dei PDF e\' stato provato, quindi la sua esca c\'e\'.' );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: e' la premessa del guasto, l'esca che manca.
+		unlink( $esca );
+
+		$chieste = $this->richieste;
+
+		$rifiutato = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $rifiutato );
+		$this->assertSame( 'conformita_core_nome_riservato', $rifiutato->get_error_code() );
+		$this->assertSame( $chieste, $this->richieste, 'Si rifiuta prima di chiedere niente al server.' );
+		$this->assertFileDoesNotExist( $esca, 'Nessun documento deve aver preso il posto dell\'esca.' );
+
+		$this->assertCount(
+			1,
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			),
+			'Solo il primo file deve essere entrato.'
+		);
+	}
 }
