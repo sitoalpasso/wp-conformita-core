@@ -409,3 +409,86 @@ if ( ! function_exists( 'conformita_core_verifica_protezione_allegati' ) ) {
 		return Conformita_Core_Allegati::verifica();
 	}
 }
+
+if ( ! function_exists( 'conformita_core_registra_voce' ) ) {
+	/**
+	 * Aggiunge una voce al registro delle modifiche.
+	 *
+	 * La voce si aggiunge e non si modifica più. Chi agisce e quando non si
+	 * dichiarano: core scrive l'utente della richiesta in corso e l'istante del
+	 * proprio orologio.
+	 *
+	 * Chiavi ammesse, tutte le altre sono un errore:
+	 * - `sezione`, obbligatoria: una sezione registrata;
+	 * - `azione`, obbligatoria: il nome dell'operazione, in `[a-z0-9_]`, diverso
+	 *   da quelli che core registra da sé;
+	 * - `contenuto`: il contenuto interessato, di un tipo della stessa sezione;
+	 * - `motivazione`: il motivo, un testo non vuoto;
+	 * - `dettagli`: coppie di nome e valore semplice, o elenco di valori semplici;
+	 * - `riferimento`: una voce precedente dello stesso contenuto e della stessa
+	 *   sezione, per aggiungere qualcosa che la riguarda senza riscriverla;
+	 * - `chiave`: una chiave che nessun'altra voce può portare, per le
+	 *   operazioni che si fanno una volta sola. Due scritture con la stessa
+	 *   chiave, anche nello stesso istante, danno una voce e un errore, e
+	 *   l'errore porta nei dati il numero della voce che esiste già.
+	 *
+	 * @param array<string, mixed> $voce Descrizione della voce.
+	 * @return int|WP_Error Numero della voce, oppure errore.
+	 */
+	function conformita_core_registra_voce( $voce ) {
+		return Conformita_Core_Registro::registra( $voce );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_voce_registro' ) ) {
+	/**
+	 * Una voce del registro.
+	 *
+	 * @param int $id Numero della voce.
+	 * @return array<string, mixed>|null La voce, oppure nullo se non esiste.
+	 */
+	function conformita_core_voce_registro( $id ) {
+		return Conformita_Core_Registro::voce( $id );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_voci_registro' ) ) {
+	/**
+	 * Le voci del registro che rispondono ai filtri.
+	 *
+	 * Filtri ammessi: `sezione`, `contenuto`, `azione`, `utente`, `origine`,
+	 * `riferimento`, `dal` e `al` (giorni civili AAAA-MM-GG nel fuso del sito,
+	 * inclusi), `ordine` (`crescente`, che è l'ordine di scrittura, oppure
+	 * `decrescente`), `per_pagina` e `pagina`. Un filtro sconosciuto o
+	 * malformato è un errore, non un filtro ignorato.
+	 *
+	 * La funzione non controlla i permessi: chi la chiama risponde di chi vede
+	 * quello che restituisce.
+	 *
+	 * Ogni voce ha `id`, `istante` (un `DateTimeImmutable` in UTC, da portare
+	 * nel fuso del sito con `wp_timezone()` prima di mostrarlo), `utente` (il
+	 * numero, zero per il sistema), `sezione`, `contenuto` e `tipo` (nulli per
+	 * una voce della sola sezione), `azione`, `origine` (`automatica` o
+	 * `componente`), `motivazione` (nulla se assente), `dettagli` (elenco,
+	 * vuoto se assenti), `riferimento` e `chiave` (nulli se assenti).
+	 *
+	 * @param array<string, mixed> $filtri Filtri.
+	 * @return array<int, array<string, mixed>>|WP_Error
+	 */
+	function conformita_core_voci_registro( $filtri = array() ) {
+		return Conformita_Core_Registro::voci( $filtri );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_capacita_registro' ) ) {
+	/**
+	 * La capability che apre la schermata di consultazione del registro.
+	 *
+	 * Core non la assegna a nessun ruolo: la assegna il componente.
+	 *
+	 * @return string
+	 */
+	function conformita_core_capacita_registro() {
+		return Conformita_Core_Registro::CAPACITA;
+	}
+}

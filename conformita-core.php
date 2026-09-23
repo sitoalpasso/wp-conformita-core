@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.3.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.4.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -47,6 +47,9 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-filtro-s
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-deposito-fermato.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-allegati.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-consegna.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-automatico.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-schermata.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-dipendenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/funzioni-api.php';
 
@@ -73,9 +76,21 @@ Conformita_Core_Filtro_Scadenza::avvia();
 Conformita_Core_Consegna::avvia();
 
 /*
+ * Il registro delle modifiche si accende qui, per la stessa ragione del motore
+ * di scadenza: una voce che dipendesse dall'ordine di caricamento dei plugin
+ * mancherebbe proprio nelle operazioni compiute prima che l'ordine giusto si
+ * realizzi. La tabella si verifica a ogni caricamento, perché WordPress non
+ * chiama l'aggancio di attivazione quando un plugin si aggiorna.
+ */
+Conformita_Core_Registro::assicura_tabella();
+Conformita_Core_Registro_Automatico::avvia();
+Conformita_Core_Registro_Schermata::avvia();
+
+/*
  * All'attivazione la cartella protetta si crea, i file di regole si scrivono e
  * la protezione si verifica: cosi' l'esito e' gia' disponibile prima del primo
  * deposito invece che al primo deposito. E' l'unico momento in cui questo
  * meccanismo lavora fuori da una richiesta di consegna o di deposito.
  */
 register_activation_hook( __FILE__, array( 'Conformita_Core_Allegati', 'verifica' ) );
+register_activation_hook( __FILE__, array( 'Conformita_Core_Registro', 'installa' ) );

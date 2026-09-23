@@ -111,6 +111,20 @@ final class Conformita_Core_Scadenza {
 	}
 
 	/**
+	 * L'istante corrente, letto dallo stesso orologio del filtro.
+	 *
+	 * @internal Serve al registro delle modifiche: la voce di una defissione e
+	 *           il filtro che la rende effettiva devono leggere la stessa ora,
+	 *           altrimenti una prova con l'orologio fissato vedrebbe l'atto
+	 *           sparire in un istante e la voce scritta in un altro.
+	 *
+	 * @return DateTimeImmutable
+	 */
+	public static function ora() {
+		return self::adesso();
+	}
+
+	/**
 	 * Il giorno civile corrente nel fuso del sito, nel formato del metadato.
 	 *
 	 * Serve al primo strato del filtro, che deve esprimere la scadenza come
