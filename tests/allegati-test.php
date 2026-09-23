@@ -1906,10 +1906,12 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * percorso scritto lo e' anche dall'altro, e il server puo' trattare i due
 	 * indirizzi in modo diverso. Provare l'uno non dice niente dell'altro.
 	 *
-	 * Due meta'. Nella prima la sottocartella e' un collegamento a `aperta`,
+	 * Tre parti. Nella prima la sottocartella e' un collegamento a `aperta`,
 	 * che il server serve. Nella seconda la cartella e' vera ma al posto del
 	 * file c'e' gia' un collegamento che non punta a niente: il nome sembra
-	 * libero, e la copia scriverebbe attraverso il collegamento.
+	 * libero, e la copia scriverebbe attraverso il collegamento. Nella terza
+	 * e' la cartella protetta stessa a essere un collegamento verso un'altra
+	 * cartella dei caricamenti, che ha un indirizzo suo.
 	 */
 	public function test_c183_un_collegamento_interno_non_apre_un_altro_ambito() {
 		$atto   = $this->atto_valido();
@@ -1981,6 +1983,26 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			}
 
 			rmdir( $fuori );
+		}
+
+		$altrove = dirname( $radice ) . '/cc-altrove-' . wp_generate_password( 8, false );
+
+		$this->assertTrue( rename( $radice, $altrove ) );
+		$this->assertTrue( symlink( $altrove, $radice ) );
+
+		try {
+			$terzo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'atto.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $terzo );
+			$this->assertSame( 'conformita_core_destinazione_non_canonica', $terzo->get_error_code() );
+			$this->assertFileDoesNotExist( $altrove . $sotto . '/atto.pdf', 'Nessun byte deve essere entrato da un indirizzo diverso da quello provato.' );
+		} finally {
+			unlink( $radice );
+			rename( $altrove, $radice );
 		}
 		// phpcs:enable WordPress.WP.AlternativeFunctions
 
@@ -2062,6 +2084,21 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$this->assertInstanceOf( 'Conformita_Core_Deposito_Fermato', $fermato, 'Un file locale al posto di un caricamento non si sposta.' );
 		$this->assertSame( 'conformita_core_origine_incoerente', $fermata->getValue()['codice'] );
 		$this->assertFileExists( $locale['tmp_name'], 'Il file sorgente non si tocca.' );
+		$this->assertFileDoesNotExist( $destinazione );
+
+		$fermata->setValue( null, array() );
+		$fermato = null;
+
+		try {
+			Conformita_Core_Allegati::guardia_destinazione( null, $locale, $destinazione );
+		} catch ( Conformita_Core_Deposito_Fermato $eccezione ) {
+			$fermato = $eccezione;
+		} finally {
+			remove_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) );
+		}
+
+		$this->assertInstanceOf( 'Conformita_Core_Deposito_Fermato', $fermato, 'Fuori da un deposito la guardia non sa quale origine controllare, quindi ferma.' );
+		$this->assertSame( 'conformita_core_origine_non_dichiarata', $fermata->getValue()['codice'] );
 		$this->assertFileDoesNotExist( $destinazione );
 
 		$fermata->setValue( null, array() );

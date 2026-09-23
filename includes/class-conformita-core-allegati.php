@@ -986,7 +986,21 @@ final class Conformita_Core_Allegati {
 		 * e nessun aggancio viene dopo a cambiarlo. Si rifiuta prima di
 		 * guardare la destinazione, e non si tocca ne' la sorgente ne' la
 		 * destinazione. Riga C-184.
+		 *
+		 * Un'origine che la guardia non conosce la ferma, invece di lasciarla
+		 * passare: vuol dire che la guardia sta girando fuori da un deposito,
+		 * o che qualcosa ha azzerato lo stato a meta' strada, e in tutti e due
+		 * i casi il controllo sull'origine non si sa fare.
 		 */
+		if ( 'caricamento' !== self::$origine_in_corso && 'percorso_locale' !== self::$origine_in_corso ) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_origine_non_dichiarata',
+				'messaggio' => __( 'Deposito fermato: la guardia non conosce l\'origine dichiarata per questo spostamento, quindi non può controllarla.', 'conformita-core' ),
+			);
+
+			throw new Conformita_Core_Deposito_Fermato( 'conformita_core_origine_non_dichiarata' );
+		}
+
 		if ( 'caricamento' === self::$origine_in_corso
 			&& ( ! is_array( $file ) || empty( $file['tmp_name'] ) || ! is_string( $file['tmp_name'] ) || ! is_uploaded_file( $file['tmp_name'] ) )
 		) {
@@ -1074,14 +1088,23 @@ final class Conformita_Core_Allegati {
 		 * uno non dice niente dell'altro. Quindi la cartella vera deve essere
 		 * esattamente la radice vera piu' la sottocartella scritta.
 		 *
+		 * La radice vera si ricava da quella della cartella dei caricamenti, e
+		 * non dalla cartella protetta stessa: se fosse la cartella protetta a
+		 * essere un collegamento verso un'altra cartella servita, il confronto
+		 * con la sua stessa radice vera passerebbe sempre. La cartella dei
+		 * caricamenti invece puo' stare dietro un collegamento, com'e' normale
+		 * quando i file stanno su un disco condiviso: il suo indirizzo e'
+		 * quello che WordPress conosce, e non ne apre un altro.
+		 *
 		 * Per la stessa ragione il file di destinazione non puo' essere gia'
 		 * un collegamento: uno che non punta a niente fa sembrare libero il
 		 * nome, e la copia scriverebbe dove punta. Riga C-183.
 		 */
-		$attesa = wp_normalize_path( $radice_reale ) . $sotto;
-		$vera   = wp_normalize_path( $cartella_reale );
+		$base_reale = realpath( dirname( $radice ) );
+		$attesa     = false === $base_reale ? '' : wp_normalize_path( $base_reale ) . '/' . self::CARTELLA . $sotto;
+		$vera       = wp_normalize_path( $cartella_reale );
 
-		if ( $vera !== $attesa || is_link( $percorso ) ) {
+		if ( '' === $attesa || $vera !== $attesa || is_link( $percorso ) ) {
 			self::$fermata = array(
 				'codice'    => 'conformita_core_destinazione_non_canonica',
 				'messaggio' => __( 'Deposito fermato: la destinazione passa per un collegamento simbolico, quindi il file sarebbe raggiungibile anche da un percorso che non è stato provato.', 'conformita-core' ),
