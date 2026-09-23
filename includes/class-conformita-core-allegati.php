@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-184.
+ * C-172..C-175, C-177..C-187.
  *
  * @package Conformita_Core
  */
@@ -553,7 +553,13 @@ final class Conformita_Core_Allegati {
 			return $esito;
 		}
 
-		if ( $riscritto && ! self::$in_verifica ) {
+		/*
+		 * Anche quando la cartella dei caricamenti non è quella in cui gli
+		 * esiti sono stati misurati la verifica si rifà: è il secondo modo in
+		 * cui un esito conservato smette di parlare della configurazione di
+		 * adesso. Riga C-187.
+		 */
+		if ( ( $riscritto || ! self::stessa_radice( self::opzione() ) ) && ! self::$in_verifica ) {
 			self::verifica();
 		}
 
@@ -789,8 +795,19 @@ final class Conformita_Core_Allegati {
 
 		$conservato = get_option( self::OPZIONE, array() );
 		$conservato = is_array( $conservato ) ? $conservato : array();
+		$stessa     = self::stessa_radice( $conservato );
 
-		$ambiti = isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ? $conservato['ambiti'] : array();
+		/*
+		 * **L'identità della cartella si scrive solo insieme all'esito
+		 * generale**, perché dice dove quell'esito è stato misurato, e gli
+		 * esiti degli ambiti valgono solo accanto a un generale della stessa
+		 * cartella. Scriverla accanto all'esito di un ambito, dopo uno
+		 * spostamento, farebbe tornare valido il generale misurato sulla
+		 * cartella vecchia. Finché il generale non si rimisura, l'ambito appena
+		 * provato si conserva ma non si legge, e `prepara()` vede l'identità
+		 * diversa e rifà la verifica generale. Riga C-187.
+		 */
+		$ambiti = $stessa && isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ? $conservato['ambiti'] : array();
 
 		if ( $generale ) {
 			$ambiti = array();
@@ -801,10 +818,89 @@ final class Conformita_Core_Allegati {
 		$nuovi = array( 'ambiti' => $ambiti );
 
 		if ( $generale || 'non_coperta' === $campi['copertura'] ) {
-			$nuovi = array_merge( $campi, $nuovi );
+			$nuovi = array_merge( $campi, $nuovi, array( 'radice' => self::identita() ) );
 		}
 
 		return self::conserva( $nuovi );
+	}
+
+	/**
+	 * L'opzione conservata così com'è.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private static function opzione() {
+		$conservato = get_option( self::OPZIONE, array() );
+
+		return is_array( $conservato ) ? $conservato : array();
+	}
+
+	/**
+	 * L'identità della cartella protetta: dove sta sul disco e da quale
+	 * indirizzo si raggiunge.
+	 *
+	 * Un esito dice che un indirizzo è negato, e le regole di un server come
+	 * nginx parlano di indirizzi, non di cartelle. Se la cartella dei
+	 * caricamenti si sposta, o cambia indirizzo, con regole ed esche copiate
+	 * tali e quali, nessun file risulta riscritto: senza questa identità gli
+	 * esiti vecchi continuerebbero a valere per un indirizzo mai provato.
+	 * Riga C-187.
+	 *
+	 * @return string
+	 */
+	private static function identita() {
+		$cartella = self::cartella();
+		$reale    = realpath( $cartella );
+
+		return wp_normalize_path( false === $reale ? $cartella : $reale ) . '|' . self::indirizzo_cartella();
+	}
+
+	/**
+	 * Gli esiti conservati parlano della cartella di adesso.
+	 *
+	 * @param array<string, mixed> $conservato Opzione conservata.
+	 * @return bool
+	 */
+	private static function stessa_radice( array $conservato ) {
+		return isset( $conservato['radice'] ) && self::identita() === $conservato['radice'];
+	}
+
+	/**
+	 * L'opzione conservata, con gli esiti tolti se parlano di un'altra cartella.
+	 *
+	 * La scadenza di un esito è una proprietà del dato letto: non serve che
+	 * qualcuno rifaccia la verifica perché un esito misurato altrove smetta di
+	 * valere. Il gettone resta, perché non dipende dalla cartella.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private static function conservato() {
+		$conservato = get_option( self::OPZIONE, array() );
+		$conservato = is_array( $conservato ) ? $conservato : array();
+
+		if ( self::stessa_radice( $conservato ) ) {
+			return $conservato;
+		}
+
+		$misurato = isset( $conservato['copertura'] ) || ! empty( $conservato['ambiti'] );
+
+		unset( $conservato['copertura'], $conservato['istante'], $conservato['stato_http'], $conservato['motivo'], $conservato['ambiti'] );
+
+		if ( $misurato ) {
+			$conservato['copertura'] = 'ignota';
+			$conservato['motivo']    = self::motivo_radice_cambiata();
+		}
+
+		return $conservato;
+	}
+
+	/**
+	 * Il motivo con cui un esito misurato altrove smette di valere.
+	 *
+	 * @return string
+	 */
+	private static function motivo_radice_cambiata() {
+		return __( 'La cartella dei caricamenti, o il suo indirizzo, non è quella in cui la protezione è stata verificata: gli esiti misurati prima parlano di un\'altra cartella.', 'conformita-core' );
 	}
 
 	/**
@@ -830,6 +926,7 @@ final class Conformita_Core_Allegati {
 					'stato_http' => 0,
 					'motivo'     => __( 'I file di regole sono stati riscritti: quello che si sapeva prima non vale più.', 'conformita-core' ),
 					'ambiti'     => array(),
+					'radice'     => self::identita(),
 				)
 			),
 			false
@@ -844,8 +941,7 @@ final class Conformita_Core_Allegati {
 	 * @return array<string, mixed>
 	 */
 	public static function stato_ambito( $sotto, $estensione ) {
-		$conservato = get_option( self::OPZIONE, array() );
-		$conservato = is_array( $conservato ) ? $conservato : array();
+		$conservato = self::conservato();
 
 		$ambiti = isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ? $conservato['ambiti'] : array();
 		$chiave = self::chiave_ambito( $sotto, $estensione );
@@ -873,8 +969,7 @@ final class Conformita_Core_Allegati {
 	 * @return array<string, mixed>
 	 */
 	public static function stato() {
-		$conservato = get_option( self::OPZIONE, array() );
-		$conservato = is_array( $conservato ) ? $conservato : array();
+		$conservato = self::conservato();
 
 		$cartella = self::cartella();
 		$regole   = array();
@@ -958,10 +1053,12 @@ final class Conformita_Core_Allegati {
 	 * non si fa. Se la guardia tacesse ogni volta che trova una risposta
 	 * pronta, basterebbe uno di quei componenti perché il controllo sulla
 	 * destinazione non girasse mai. Quindi la guardia si aggancia per prima,
-	 * alla priorità più bassa che esiste, e controlla comunque; e se il file
-	 * risulta già al suo posto perché qualcuno lo ha messo prima di lei, lo
-	 * toglie, perché un file in un ambito non provato non deve restare.
-	 * Riga C-179.
+	 * alla priorità più bassa che esiste, e controlla comunque. Chi si fosse
+	 * agganciato a quella stessa priorità prima di lei parlerebbe prima di
+	 * lei, e per questo il deposito, in quel caso, si rifiuta prima di
+	 * cominciare. Un file che la guardia trova già al suo posto, quindi,
+	 * c'era prima dello spostamento: lo spostamento si ferma, e il file non si
+	 * tocca. Righe C-179 e C-186.
 	 *
 	 * @internal Aggiunta e tolta attorno allo spostamento dei byte, come il
 	 *           dirottamento.
@@ -1013,6 +1110,27 @@ final class Conformita_Core_Allegati {
 		}
 
 		/*
+		 * **Una destinazione che esiste gia' ferma lo spostamento, e non si
+		 * tocca.** Nessuno puo' averla scritta in questo spostamento: il
+		 * deposito si rifiuta se trova qualcuno agganciato prima della guardia
+		 * (riga C-186), e la guardia e' la prima a parlare. Quindi un file gia'
+		 * li' c'era prima, e l'ha fatto trovare un aggancio che ha imposto quel
+		 * nome: copiarci sopra sostituirebbe un documento senza nessun errore,
+		 * e toglierlo lo cancellerebbe. La prima stesura della guardia lo
+		 * toglieva, pensando a un file messo li' da chi aveva risposto prima di
+		 * lei; adesso quel caso non si puo' piu' dare, e il file che si
+		 * toglierebbe e' solo quello di qualcun altro. Righe C-179 e C-186.
+		 */
+		if ( '' === $nuovo_file || file_exists( $nuovo_file ) ) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_destinazione_occupata',
+				'messaggio' => __( 'Deposito fermato: al percorso di destinazione c\'è già un file, e copiarci sopra lo sostituirebbe senza nessun errore.', 'conformita-core' ),
+			);
+
+			throw new Conformita_Core_Deposito_Fermato( 'conformita_core_destinazione_occupata' );
+		}
+
+		/*
 		 * Il dirottamento si spegne per il tempo del controllo: `cartella()` e
 		 * `indirizzo_cartella()` leggono la cartella dei caricamenti, e con il
 		 * dirottamento acceso vedrebbero la cartella protetta dentro se stessa.
@@ -1026,10 +1144,6 @@ final class Conformita_Core_Allegati {
 		}
 
 		if ( ! $ammessa ) {
-			if ( '' !== $nuovo_file && is_file( $nuovo_file ) ) {
-				wp_delete_file( $nuovo_file );
-			}
-
 			throw new Conformita_Core_Deposito_Fermato( 'conformita_core_destinazione_non_ammessa' );
 		}
 
@@ -1043,6 +1157,25 @@ final class Conformita_Core_Allegati {
 	 * @return bool
 	 */
 	private static function destinazione_ammessa( $percorso ) {
+		/*
+		 * **La barra inversa si guarda prima di normalizzare.** Dove il
+		 * separatore e' la barra, la barra inversa e' un carattere come un
+		 * altro e puo' stare nel nome di un file; `wp_normalize_path()` la
+		 * trasforma in un separatore. Si controllerebbe allora il file `b`
+		 * nella cartella `a`, mentre la copia scrive il file `a\b` nella
+		 * cartella di sopra, che e' un altro ambito. Il percorso che si
+		 * controlla deve essere quello che si copia, carattere per carattere.
+		 * Riga C-185.
+		 */
+		if ( '/' === DIRECTORY_SEPARATOR && false !== strpos( (string) $percorso, '\\' ) ) {
+			self::$fermata = array(
+				'codice'    => 'conformita_core_destinazione_non_canonica',
+				'messaggio' => __( 'Deposito fermato: il nome della destinazione contiene una barra inversa, che su questo sistema non separa le cartelle, quindi il percorso controllato non sarebbe quello copiato.', 'conformita-core' ),
+			);
+
+			return false;
+		}
+
 		$percorso = wp_normalize_path( $percorso );
 		$radice   = wp_normalize_path( self::cartella() );
 
@@ -1249,6 +1382,28 @@ final class Conformita_Core_Allegati {
 			return new WP_Error(
 				'conformita_core_origine_incoerente',
 				__( 'Deposito: dichiarata origine «caricamento», ma il file non proviene da un caricamento HTTP. Un percorso ricevuto dall\'esterno e trattato come caricamento sarebbe una lettura di file arbitrari.', 'conformita-core' )
+			);
+		}
+
+		/*
+		 * **Nessuno prima della guardia.** La guardia si aggancia alla
+		 * priorita' piu' bassa che esiste, ma a quella stessa priorita' un
+		 * componente agganciato prima di lei parla prima di lei: se copia il
+		 * file, i byte sono sul disco prima di ogni controllo; se lo manda
+		 * altrove, la guardia non ha nemmeno piu' niente da togliere. Non c'e'
+		 * modo di passargli davanti, quindi il deposito si rifiuta prima di
+		 * cominciare, senza chiedere niente al server. Chi si aggancia dopo, a
+		 * qualunque priorita', parla dopo la guardia. Riga C-186.
+		 */
+		global $wp_filter;
+
+		if ( isset( $wp_filter['pre_move_uploaded_file'] )
+			&& $wp_filter['pre_move_uploaded_file'] instanceof WP_Hook
+			&& ! empty( $wp_filter['pre_move_uploaded_file']->callbacks[ PHP_INT_MIN ] )
+		) {
+			return new WP_Error(
+				'conformita_core_spostamento_conteso',
+				__( 'Deposito rifiutato: un altro componente è agganciato allo spostamento dei file prima del controllo sulla destinazione, quindi potrebbe scrivere i byte prima che il controllo avvenga.', 'conformita-core' )
 			);
 		}
 

@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-184.
+ * C-169, C-170, C-172..C-175, C-177..C-187.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -68,6 +68,13 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * @var int
 	 */
 	private $nomi_decisi = 0;
+
+	/**
+	 * Quante volte il componente estraneo ha spostato un file per conto proprio.
+	 *
+	 * @var int
+	 */
+	private $spostamenti_altrui = 0;
 
 	/**
 	 * Una sezione con un tipo gestito, e il server finto agganciato.
@@ -1606,9 +1613,20 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 *
 	 * Due meta'. Nella prima il componente estraneo si aggancia con una
 	 * priorita' normale: la guardia, che sta alla piu' bassa che esiste, passa
-	 * prima di lui e ferma tutto. Nella seconda si aggancia alla stessa
-	 * priorita' della guardia ma prima di lei, quindi copia il file prima che
-	 * lei parli: la guardia lo trova al suo posto, lo toglie e ferma lo stesso.
+	 * prima di lui e ferma tutto, e lui non viene mai chiamato. Nella seconda
+	 * la guardia riceve una risposta gia' data e un file gia' al suo posto:
+	 * deve fermare lo stesso, e **non** togliere il file. Da quando il deposito
+	 * rifiuta chi si aggancia prima della guardia (riga C-186), un file gia' li'
+	 * non puo' averlo scritto questo spostamento: c'era prima, ed e' di
+	 * qualcun altro.
+	 *
+	 * **Perche' la seconda meta' chiama la guardia direttamente.** Da un
+	 * deposito vero quella situazione non si raggiunge piu': un componente
+	 * agganciato prima della guardia fa rifiutare il deposito prima di
+	 * cominciare (riga C-186). La prima stesura provava a raggiungerla con un
+	 * secondo deposito, che pero' si fermava prima, sull'esito generale reso
+	 * scoperto dal primo, con lo stesso codice d'errore: era verde senza aver
+	 * mai chiamato la guardia.
 	 */
 	public function test_c179_la_guardia_decide_anche_se_qualcun_altro_ha_risposto() {
 		$atto  = $this->atto_valido();
@@ -1627,6 +1645,8 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		add_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), 5, 3 );
 
+		$this->spostamenti_altrui = 0;
+
 		$primo = conformita_core_deposita_allegato(
 			$atto,
 			$this->file_da_depositare( 'atto.pdf' ),
@@ -1634,29 +1654,46 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		);
 
 		remove_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), 5 );
-
-		$this->assertWPError( $primo, 'La guardia passa prima del componente estraneo.' );
-		$this->assertSame( 'conformita_core_protezione_non_verificata', $primo->get_error_code() );
-		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf-x' );
-
-		add_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN, 3 );
-
-		$secondo = conformita_core_deposita_allegato(
-			$atto,
-			$this->file_da_depositare( 'atto.pdf' ),
-			array( 'origine' => 'percorso_locale' )
-		);
-
-		remove_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN );
 		remove_filter( 'wp_handle_sideload_prefilter', array( $this, 'rinomina_in_pdf_x' ) );
 		remove_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
 
-		$this->assertWPError( $secondo, 'Il componente estraneo ha copiato prima, e la guardia ferma lo stesso.' );
-		$this->assertSame( 'conformita_core_protezione_non_verificata', $secondo->get_error_code() );
-		$this->assertFileDoesNotExist(
-			Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf-x',
-			'Il file messo li\' da qualcun altro non deve restare in un ambito non provato.'
-		);
+		$this->assertWPError( $primo, 'La guardia passa prima del componente estraneo.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $primo->get_error_code() );
+		$this->assertSame( 0, $this->spostamenti_altrui, 'Il componente estraneo non e\' mai stato chiamato: la guardia ha fermato prima.' );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf-x' );
+
+		$in_corso = new ReflectionProperty( 'Conformita_Core_Allegati', 'origine_in_corso' );
+		$fermata  = new ReflectionProperty( 'Conformita_Core_Allegati', 'fermata' );
+
+		$in_corso->setAccessible( true );
+		$fermata->setAccessible( true );
+
+		$sorgente     = $this->file_da_depositare( 'altro.pdf' );
+		$destinazione = Conformita_Core_Allegati::cartella() . $sotto . '/altro.pdf-x';
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_copy -- prova: il file messo al suo posto da chi ha risposto prima.
+		$this->assertTrue( copy( $sorgente['tmp_name'], $destinazione ) );
+
+		$in_corso->setValue( null, 'percorso_locale' );
+		$fermata->setValue( null, array() );
+		$fermato = null;
+
+		try {
+			Conformita_Core_Allegati::guardia_destinazione( true, $sorgente, $destinazione );
+		} catch ( Conformita_Core_Deposito_Fermato $eccezione ) {
+			$fermato = $eccezione;
+		} finally {
+			$in_corso->setValue( null, '' );
+			remove_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) );
+		}
+
+		$this->assertInstanceOf( 'Conformita_Core_Deposito_Fermato', $fermato, 'Una risposta gia\' data non spegne la guardia.' );
+		$this->assertSame( 'conformita_core_destinazione_occupata', $fermata->getValue()['codice'] );
+		$this->assertFileExists( $destinazione, 'Un file che c\'era gia\' non si cancella.' );
+		$this->assertFileExists( $sorgente['tmp_name'], 'La sorgente non si tocca.' );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: si toglie il file messo li' dalla prova stessa.
+		unlink( $destinazione );
 
 		$this->assertSame(
 			array(),
@@ -1681,6 +1718,8 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 */
 	public function sposta_per_conto_proprio( $esito, $file, $nuovo_file ) {
 		unset( $esito );
+
+		++$this->spostamenti_altrui;
 
 		copy( $file['tmp_name'], $nuovo_file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_copy -- prova: fa quello che farebbe un componente che sposta i file da se'.
 
@@ -1821,13 +1860,29 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$atto  = $this->atto_valido();
 		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
 
+		/*
+		 * Il server nega i `.txt` e i `.pdf`, e serve tutto il resto, compresi i
+		 * file senza estensione. Negare anche i `.pdf` serve alla seconda meta':
+		 * il nome previsto conserva `.pdf`, e se quell'ambito risultasse
+		 * scoperto il deposito si fermerebbe prima dello spostamento, senza
+		 * arrivare alla guardia che la prova vuole esercitare.
+		 */
 		$this->risposta_finta = function ( $indirizzo ) {
-			if ( '.txt' === substr( $indirizzo, -4 ) ) {
+			if ( '.txt' === substr( $indirizzo, -4 ) || '.pdf' === substr( $indirizzo, -4 ) ) {
 				return $this->rifiuto_del_server();
 			}
 
 			return $this->esca_servita();
 		};
+
+		/*
+		 * I file si creano prima di agganciare il filtro: anche `wp_tempnam()`
+		 * passa da `wp_unique_filename`, e contarne le chiamate insieme a
+		 * quelle del deposito faceva credere che lo spostamento fosse partito
+		 * quando non lo era.
+		 */
+		$primo_file   = $this->file_da_depositare( 'atto.pdf' );
+		$secondo_file = $this->file_da_depositare( 'atto.pdf' );
 
 		$this->togli_estensione_dalla = 1;
 		$this->nomi_decisi            = 0;
@@ -1840,13 +1895,14 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		$primo = conformita_core_deposita_allegato(
 			$atto,
-			$this->file_da_depositare( 'atto.pdf' ),
+			$primo_file,
 			array( 'origine' => 'percorso_locale' )
 		);
 
 		$this->assertWPError( $primo );
 		$this->assertSame( 'conformita_core_destinazione_non_provabile', $primo->get_error_code() );
 		$this->assertSame( $chieste, $this->richieste, 'Un ambito senza estensione non si prova, quindi non parte nessuna richiesta.' );
+		$this->assertSame( 1, $this->nomi_decisi, 'Il nome e\' stato deciso una volta sola: lo spostamento non e\' partito.' );
 		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto' );
 
 		$this->togli_estensione_dalla = 2;
@@ -1854,7 +1910,7 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 		$secondo = conformita_core_deposita_allegato(
 			$atto,
-			$this->file_da_depositare( 'atto.pdf' ),
+			$secondo_file,
 			array( 'origine' => 'percorso_locale' )
 		);
 
@@ -2086,6 +2142,37 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$this->assertFileExists( $locale['tmp_name'], 'Il file sorgente non si tocca.' );
 		$this->assertFileDoesNotExist( $destinazione );
 
+		/*
+		 * Lo stesso rifiuto, con un file gia' al suo posto. Il rifiuto arriva
+		 * dall'origine, e il file non si tocca: nessuno puo' averlo scritto in
+		 * questo spostamento, perche' chi si aggancia prima della guardia fa
+		 * rifiutare il deposito prima di cominciare (riga C-186). Quindi c'era
+		 * prima, e cancellarlo cancellerebbe il documento di qualcun altro.
+		 */
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_copy -- prova: un file che c'era prima dello spostamento.
+		$this->assertTrue( copy( $locale['tmp_name'], $destinazione ) );
+
+		$fermata->setValue( null, array() );
+		$in_corso->setValue( null, 'caricamento' );
+		$fermato = null;
+
+		try {
+			Conformita_Core_Allegati::guardia_destinazione( true, $locale, $destinazione );
+		} catch ( Conformita_Core_Deposito_Fermato $eccezione ) {
+			$fermato = $eccezione;
+		} finally {
+			$in_corso->setValue( null, '' );
+			remove_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) );
+		}
+
+		$this->assertInstanceOf( 'Conformita_Core_Deposito_Fermato', $fermato );
+		$this->assertSame( 'conformita_core_origine_incoerente', $fermata->getValue()['codice'] );
+		$this->assertFileExists( $destinazione, 'Un file che c\'era gia\' non si cancella.' );
+		$this->assertFileExists( $locale['tmp_name'], 'Il file sorgente non si tocca.' );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: si toglie il file messo li' dalla prova stessa.
+		unlink( $destinazione );
+
 		$fermata->setValue( null, array() );
 		$fermato = null;
 
@@ -2113,5 +2200,243 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			$in_corso->setValue( null, '' );
 			remove_filter( 'upload_dir', array( 'Conformita_Core_Allegati', 'dirotta' ) );
 		}
+	}
+
+	/**
+	 * C-185: una barra inversa nel nome non cambia cartella.
+	 *
+	 * Su un sistema dove il separatore e' la barra, la barra inversa e' un
+	 * carattere come un altro e puo' stare nel nome di un file. La guardia
+	 * normalizza il percorso prima di leggerlo, e la normalizzazione la
+	 * trasforma in un separatore: `chiusa\atto.pdf-x` verrebbe letto come il
+	 * file `atto.pdf-x` nella sottocartella `chiusa`, e provato li', mentre la
+	 * copia scrive un file con quel nome nella cartella del mese, che e' un
+	 * altro ambito. Il server qui nega `chiusa` e serve i `.pdf-x` altrove.
+	 */
+	public function test_c185_una_barra_inversa_non_cambia_cartella() {
+		if ( '/' !== DIRECTORY_SEPARATOR ) {
+			$this->markTestSkipped( 'Dove la barra inversa e\' un separatore, non puo\' stare in un nome.' );
+		}
+
+		$atto   = $this->atto_valido();
+		$sotto  = Conformita_Core_Allegati::sottocartella_corrente();
+		$chiusa = Conformita_Core_Allegati::cartella() . $sotto . '/chiusa';
+		$file   = $this->file_da_depositare( 'atto.pdf' );
+
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( false !== strpos( $indirizzo, '/chiusa/' ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			if ( '.pdf-x' === substr( $indirizzo, -6 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		$this->assertTrue( wp_mkdir_p( $chiusa ) );
+
+		$this->nomi_decisi = 0;
+
+		add_filter( 'wp_unique_filename', array( $this, 'barra_inversa_alla_seconda' ) );
+
+		try {
+			$esito = conformita_core_deposita_allegato(
+				$atto,
+				$file,
+				array( 'origine' => 'percorso_locale' )
+			);
+		} finally {
+			remove_filter( 'wp_unique_filename', array( $this, 'barra_inversa_alla_seconda' ) );
+		}
+
+		$scritto  = Conformita_Core_Allegati::cartella() . $sotto . '/chiusa\\atto.pdf-x';
+		$presente = file_exists( $scritto );
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions -- prova: si tocca il disco direttamente perche' e' il disco cio' che si sta verificando.
+		if ( $presente ) {
+			unlink( $scritto );
+		}
+
+		foreach ( glob( $chiusa . '/*' ) as $residuo ) {
+			unlink( $residuo );
+		}
+
+		rmdir( $chiusa );
+		// phpcs:enable WordPress.WP.AlternativeFunctions
+
+		$this->assertSame( 2, $this->nomi_decisi, 'Il nome e\' stato deciso due volte, quindi lo spostamento e\' partito.' );
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_destinazione_non_canonica', $esito->get_error_code() );
+		$this->assertFalse( $presente, 'Nessun byte deve essere finito nella cartella del mese con un nome che contiene la barra inversa.' );
+
+		$this->assertSame(
+			array(),
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			)
+		);
+	}
+
+	/**
+	 * Alla seconda decisione del nome, mette una barra inversa nel nome.
+	 *
+	 * @param string $nome Nome deciso.
+	 * @return string
+	 */
+	public function barra_inversa_alla_seconda( $nome ) {
+		++$this->nomi_decisi;
+
+		return $this->nomi_decisi < 2 ? $nome : 'chiusa\\atto.pdf-x';
+	}
+
+	/**
+	 * C-186: un componente agganciato prima della guardia fa rifiutare il deposito.
+	 *
+	 * La guardia sta alla priorita' piu' bassa che esiste, ma un altro
+	 * componente puo' essersi agganciato alla stessa priorita' prima di lei, e
+	 * allora parla prima. Se copia il file, i byte sono sul disco prima di
+	 * qualunque controllo; se lo manda altrove, la guardia non puo' nemmeno
+	 * toglierlo. Quindi il deposito guarda l'aggancio prima di cominciare, e
+	 * se trova qualcuno al posto della guardia si rifiuta: senza nessuna
+	 * richiesta al server, e senza che quel componente venga chiamato.
+	 */
+	public function test_c186_un_aggancio_prima_della_guardia_fa_rifiutare() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+		$file  = $this->file_da_depositare( 'atto.pdf' );
+
+		$this->spostamenti_altrui = 0;
+
+		add_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN, 3 );
+
+		$chieste = $this->richieste;
+
+		try {
+			$esito = conformita_core_deposita_allegato(
+				$atto,
+				$file,
+				array( 'origine' => 'percorso_locale' )
+			);
+		} finally {
+			remove_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN );
+		}
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_spostamento_conteso', $esito->get_error_code() );
+		$this->assertSame( $chieste, $this->richieste, 'Si rifiuta prima di chiedere niente al server.' );
+		$this->assertSame( 0, $this->spostamenti_altrui, 'Il componente agganciato prima non e\' mai stato chiamato.' );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf' );
+
+		$dopo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'atto.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $dopo, 'Tolto l\'aggancio, il deposito torna a funzionare.' );
+	}
+
+	/**
+	 * C-187: gli esiti valgono per la cartella dei caricamenti in cui sono stati misurati.
+	 *
+	 * Un esito dice che un certo indirizzo e' negato. Se la cartella dei
+	 * caricamenti si sposta, con le regole e le esche copiate tali e quali,
+	 * nessun file risulta riscritto e niente fa rifare la verifica: gli esiti
+	 * vecchi continuerebbero a dire `verificata` per un indirizzo che il server
+	 * potrebbe servire, perche' le regole di un server come nginx parlano di
+	 * indirizzi e non di cartelle. La prova cambia l'indirizzo pubblico dei
+	 * caricamenti e pretende che lo stato torni `ignota` senza richieste, e che
+	 * il deposito successivo rifaccia la verifica sull'indirizzo nuovo.
+	 */
+	public function test_c187_gli_esiti_valgono_per_la_cartella_provata() {
+		$atto = $this->atto_valido();
+
+		$primo = conformita_core_deposita_allegato(
+			$atto,
+			$this->file_da_depositare( 'primo.pdf' ),
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+		$this->assertSame( 'verificata', Conformita_Core_Allegati::stato()['copertura'] );
+
+		/*
+		 * Sull'indirizzo nuovo il server nega i `.pdf` ma serve i `.txt`, cioe'
+		 * la cartella in generale e' scoperta. Negare i `.pdf` serve alla
+		 * meta' di mezzo: un ambito provato sull'indirizzo nuovo non deve far
+		 * tornare valido l'esito generale misurato su quello vecchio.
+		 */
+		$this->risposta_finta = function ( $indirizzo ) {
+			if ( 0 === strpos( $indirizzo, 'https://altrove.example/' ) && '.txt' === substr( $indirizzo, -4 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		$file  = $this->file_da_depositare( 'secondo.pdf' );
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+
+		add_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+
+		try {
+			$chieste = $this->richieste;
+			$stato   = Conformita_Core_Allegati::stato();
+
+			$this->assertSame( 'ignota', $stato['copertura'], 'Con la cartella spostata, l\'esito vecchio non vale.' );
+			$this->assertSame( array(), $stato['ambiti'], 'Nemmeno gli esiti degli ambiti.' );
+			$this->assertSame( $chieste, $this->richieste, 'Leggere lo stato non fa richieste.' );
+
+			$ambito = Conformita_Core_Allegati::verifica( $sotto, 'pdf' );
+
+			$this->assertSame( 'ignota', $ambito['copertura'], 'Un ambito provato sull\'indirizzo nuovo non fa tornare valido l\'esito generale vecchio.' );
+			$this->assertSame( 'ignota', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'], 'Finche\' il generale non si rimisura qui, nemmeno l\'ambito vale.' );
+
+			$secondo = conformita_core_deposita_allegato(
+				$atto,
+				$file,
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $secondo, 'Sull\'indirizzo nuovo il server serve i file: il deposito si rifiuta.' );
+			$this->assertSame( 'conformita_core_protezione_non_verificata', $secondo->get_error_code() );
+			$this->assertGreaterThan( $chieste, $this->richieste, 'La verifica e\' stata rifatta.' );
+			$this->assertSame( 'non_coperta', Conformita_Core_Allegati::stato()['copertura'] );
+		} finally {
+			remove_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+		}
+
+		$this->assertCount(
+			1,
+			get_posts(
+				array(
+					'post_type'   => 'attachment',
+					'post_parent' => $atto,
+					'post_status' => 'inherit',
+					'fields'      => 'ids',
+				)
+			),
+			'Solo il primo file deve essere entrato.'
+		);
+	}
+
+	/**
+	 * La cartella dei caricamenti servita da un altro indirizzo.
+	 *
+	 * @param array<string, string> $caricamenti Cartella dei caricamenti.
+	 * @return array<string, string>
+	 */
+	public function indirizzo_spostato( $caricamenti ) {
+		$caricamenti['baseurl'] = 'https://altrove.example/caricamenti';
+		$caricamenti['url']     = $caricamenti['baseurl'] . $caricamenti['subdir'];
+
+		return $caricamenti;
 	}
 }
