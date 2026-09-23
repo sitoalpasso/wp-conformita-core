@@ -825,6 +825,43 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
+	 * Qualcuno parlerebbe prima della guardia sullo spostamento dei byte.
+	 *
+	 * Vero quando alla priorità più bassa che esiste c'è già un aggancio che
+	 * non è la guardia, in testa alla fila: prima che la guardia sia agganciata
+	 * vuol dire un aggancio qualunque, dopo vuol dire uno che le sta davanti.
+	 * Riga C-186.
+	 *
+	 * @return bool
+	 */
+	private static function conteso() {
+		global $wp_filter;
+
+		if ( ! isset( $wp_filter['pre_move_uploaded_file'] )
+			|| ! $wp_filter['pre_move_uploaded_file'] instanceof WP_Hook
+			|| empty( $wp_filter['pre_move_uploaded_file']->callbacks[ PHP_INT_MIN ] )
+		) {
+			return false;
+		}
+
+		$primo = array_key_first( $wp_filter['pre_move_uploaded_file']->callbacks[ PHP_INT_MIN ] );
+
+		return _wp_filter_build_unique_id( 'pre_move_uploaded_file', array( __CLASS__, 'guardia_destinazione' ), PHP_INT_MIN ) !== $primo;
+	}
+
+	/**
+	 * L'errore con cui un deposito conteso si rifiuta.
+	 *
+	 * @return WP_Error
+	 */
+	private static function errore_conteso() {
+		return new WP_Error(
+			'conformita_core_spostamento_conteso',
+			__( 'Deposito rifiutato: un altro componente è agganciato allo spostamento dei file prima del controllo sulla destinazione, quindi potrebbe scrivere i byte prima che il controllo avvenga.', 'conformita-core' )
+		);
+	}
+
+	/**
 	 * L'opzione conservata così com'è.
 	 *
 	 * @return array<string, mixed>
@@ -1395,16 +1432,8 @@ final class Conformita_Core_Allegati {
 		 * cominciare, senza chiedere niente al server. Chi si aggancia dopo, a
 		 * qualunque priorita', parla dopo la guardia. Riga C-186.
 		 */
-		global $wp_filter;
-
-		if ( isset( $wp_filter['pre_move_uploaded_file'] )
-			&& $wp_filter['pre_move_uploaded_file'] instanceof WP_Hook
-			&& ! empty( $wp_filter['pre_move_uploaded_file']->callbacks[ PHP_INT_MIN ] )
-		) {
-			return new WP_Error(
-				'conformita_core_spostamento_conteso',
-				__( 'Deposito rifiutato: un altro componente è agganciato allo spostamento dei file prima del controllo sulla destinazione, quindi potrebbe scrivere i byte prima che il controllo avvenga.', 'conformita-core' )
-			);
+		if ( self::conteso() ) {
+			return self::errore_conteso();
 		}
 
 		$preparata = self::prepara();
@@ -1558,6 +1587,18 @@ final class Conformita_Core_Allegati {
 		 * la riga C-115 sorveglia, per un'altra via. Riga C-166.
 		 */
 		try {
+			/*
+			 * Lo stesso controllo, ripetuto adesso che la guardia e'
+			 * agganciata: fra il primo e questo punto ci sono la preparazione
+			 * della cartella e le richieste al server, e un aggancio aggiunto
+			 * li' in mezzo, alla priorita' della guardia, parlerebbe prima di
+			 * lei. Da qui in poi chi si aggancia a quella priorita' finisce
+			 * dopo. Riga C-186.
+			 */
+			if ( self::conteso() ) {
+				return self::errore_conteso();
+			}
+
 			$spostato = wp_handle_sideload(
 				$file,
 				array(

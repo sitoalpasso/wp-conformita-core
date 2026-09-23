@@ -2341,6 +2341,39 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		);
 
 		$this->assertIsInt( $dopo, 'Tolto l\'aggancio, il deposito torna a funzionare.' );
+
+		/*
+		 * Lo stesso aggancio, aggiunto a meta' deposito: durante la richiesta
+		 * con cui si prova un ambito nuovo, cioe' dopo il primo controllo e
+		 * prima che la guardia sia agganciata. Il controllo si ripete a guardia
+		 * agganciata, e il deposito si rifiuta lo stesso.
+		 */
+		$this->spostamenti_altrui = 0;
+		$this->risposta_finta     = function () {
+			if ( ! has_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ) ) ) {
+				add_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN, 3 );
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		add_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+
+		try {
+			$tardivo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'tardivo.pdf-x' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+		} finally {
+			remove_filter( 'upload_mimes', array( $this, 'ammetti_pdf_x' ) );
+			remove_filter( 'pre_move_uploaded_file', array( $this, 'sposta_per_conto_proprio' ), PHP_INT_MIN );
+		}
+
+		$this->assertWPError( $tardivo );
+		$this->assertSame( 'conformita_core_spostamento_conteso', $tardivo->get_error_code() );
+		$this->assertSame( 0, $this->spostamenti_altrui, 'L\'aggancio arrivato a meta\' deposito non e\' mai stato chiamato.' );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/tardivo.pdf-x' );
 	}
 
 	/**

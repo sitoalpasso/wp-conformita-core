@@ -957,7 +957,7 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 | C-178 | fatto | Un componente cambia il nome del file, estensione compresa, dentro lo spostamento: la guardia sul percorso definitivo prova l'ambito vero e, se risulta scoperto, ferma lo spostamento. Nessun byte entra nell'ambito aperto |
 | C-179 | fatto | Un componente agganciato dopo la guardia non viene mai chiamato, perché lei ferma prima. Chiamata con una risposta già data e un file già al suo posto, la guardia ferma lo stesso e non tocca il file, che c'era prima |
 | C-185 | fatto | Un aggancio mette una barra inversa nel nome del file alla seconda decisione: la guardia non la trasforma in una cartella, ferma lo spostamento, e nessun byte entra nella cartella del mese |
-| C-186 | fatto | Un componente agganciato allo spostamento alla priorità della guardia, ma prima di lei: il deposito si rifiuta con un codice suo, senza richieste e senza che quel componente venga chiamato; tolto l'aggancio, il deposito torna a funzionare |
+| C-186 | fatto | Un componente agganciato allo spostamento alla priorità della guardia, ma prima di lei: il deposito si rifiuta con un codice suo, senza richieste e senza che quel componente venga chiamato; tolto l'aggancio, il deposito torna a funzionare. Lo stesso quando l'aggancio arriva a metà deposito, durante la richiesta che prova un ambito nuovo |
 | C-187 | fatto | La cartella dei caricamenti cambia indirizzo con regole ed esche intatte: lo stato si legge `ignota` senza richieste, un ambito provato sull'indirizzo nuovo non fa tornare valido il generale vecchio, e il deposito successivo rifà la verifica e si rifiuta dove l'indirizzo nuovo è servito |
 | C-180 | fatto | La sottocartella di destinazione è un collegamento simbolico verso fuori: la guardia confronta il percorso vero con `realpath()` e ferma lo spostamento. Nessun byte esce dalla cartella protetta |
 | C-181 | fatto | Un documento con il nome dell'esca, con l'ambito già provato e l'esca tolta: il deposito si rifiuta con un codice suo, prima di chiedere niente al server, e nessun file prende il posto dell'esca |
@@ -1066,7 +1066,7 @@ parametro `$adesso`.
 
 ### Come si legge il conteggio, e come non si legge
 
-La verifica riporta **222 prove e 1322 asserzioni**, di cui 68 prove nuove. È un **controllo
+La verifica riporta **222 prove e 1326 asserzioni**, di cui 68 prove nuove. È un **controllo
 di esecuzione**: dice che le prove nuove sono state eseguite e non saltate, il che serve
 perché un lavoro verde con una prova saltata ha lo stesso colore di uno con la prova passata.
 Non è una prova di copertura: che le righe siano coperte lo dimostrano la tracciabilità, cioè
@@ -1142,21 +1142,21 @@ prove che diventano rosse, o verdi, per motivi che non c'entrano con quello che 
 
 ## 13. La tabella dei guasti: quale riga misura che cosa
 
-Quarantuno guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
+Quarantadue guasti, introdotti **uno alla volta** in una copia del repository presa fuori dal
 controllo di versione, con la suite eseguita per intero dopo ognuno. Un guasto che non fa
 diventare rossa nessuna riga è una riga di collaudo che stava misurando qualcos'altro.
 
 *I primi undici sono della passata originale. Le correzioni arrivate dopo il primo giro di
 revisione non l'hanno fatta rifare, perché nessuna tocca la catena di controlli della
 consegna: cambiano la lettura della risposta dentro `verifica()` e la forma di `deposita()`, e
-ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G41 sono invece gli
+ognuna ha la sua riga verde nella suite, vista rossa prima della correzione. I guasti dal G12 al G42 sono invece gli
 anelli e i controlli nati dai giri di revisione, e sono stati misurati uno per uno: il G12 e
 il G13 come stato in cui il ramo si trovava prima della correzione, con le righe viste rosse
-lì; dal G14 al G41 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
+lì; dal G14 al G42 spegnendo davvero il controllo e rieseguendo la suite. Il G14 ha dato
 quattro righe rosse, fra cui la C-169 con il deposito che riusciva; il G16 la C-172, anche lì
 con il deposito che riusciva. Dal G18 al G26 ognuno ha fatto diventare rossa una riga sola, e
 solo la sua; il G23, il G24, il G25 e il G26 con il deposito che riusciva, e nel G25 con il
-file che usciva dalla cartella protetta attraverso il collegamento. Dal G27 al G41 ognuno è
+file che usciva dalla cartella protetta attraverso il collegamento. Dal G27 al G42 ognuno è
 stato eseguito con la suite intera, dopo le correzioni dell'ottavo giro, e ognuno ha fatto
 diventare rossa la sua riga: il G27, il G28, il G29 e il G32 con il deposito che riusciva; il
 G31 fa rifiutare ogni deposito e manda in rosso 51 prove; il G39 anche la C-183, perché la
@@ -1227,7 +1227,8 @@ per cui è fuori è nel riquadro del punto 1.2, e il costo della scelta è dichi
 | G33 | Un'origine sconosciuta alla guardia lasciata passare invece che fermata | C-184 |
 | G34 | L'estensione vuota rimessa a `txt` solo nella guardia, non nel nome previsto | C-182 |
 | G35 | Tolto il controllo sulla barra inversa prima di normalizzare | C-185 |
-| G36 | Tolto il rifiuto del deposito quando qualcuno è agganciato prima della guardia | C-186 |
+| G36 | Tolto il rifiuto del deposito quando qualcuno è agganciato prima della guardia, al primo controllo | C-186 |
+| G42 | Tolto il secondo controllo, quello fatto a guardia agganciata | C-186 |
 | G37 | Tolto il controllo sulla destinazione che esiste già | C-179 |
 | G38 | Gli esiti letti senza guardare la cartella in cui sono stati misurati | C-187 |
 | G39 | `prepara()` che non rifà la verifica quando la cartella è cambiata | C-187, C-183 |
@@ -1491,7 +1492,11 @@ anche quando il rifiuto viene dall'origine. È stato fatto di più, e in un'altr
 deposito guarda l'aggancio prima di cominciare, e se trova qualcuno prima della guardia si
 rifiuta. Togliere la copia dopo non bastava, perché un componente che manda il file altrove
 lascia la guardia senza niente da togliere, e perché i byte restavano esposti fra la copia e la
-rimozione. Riga C-186. **Con questo è cambiata anche la guardia**, in un punto che la rilettura
+rimozione. **Trovato rileggendo la correzione**: il primo controllo sta prima della
+preparazione della cartella e delle richieste al server, e un aggancio aggiunto lì in mezzo
+sarebbe passato. Il controllo si ripete a guardia agganciata, e da quel momento chi si
+aggancia alla stessa priorità finisce dopo di lei. Riga C-186. **Con questo è cambiata anche
+la guardia**, in un punto che la rilettura
 ha trovato mentre si scriveva la correzione: se nessuno può scrivere prima di lei, un file che
 trova già al suo posto c'era prima dello spostamento, cioè è il documento di qualcun altro, a
 cui un aggancio ha fatto puntare il nome. La prima stesura lo cancellava; adesso la guardia
