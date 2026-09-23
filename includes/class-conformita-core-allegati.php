@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-188.
+ * C-172..C-175, C-177..C-190.
  *
  * @package Conformita_Core
  */
@@ -441,12 +441,13 @@ final class Conformita_Core_Allegati {
 	/**
 	 * Crea la cartella e scrive i file che mancano o che sono cambiati.
 	 *
-	 * @param bool $riscritto Riferimento: diventa vero se qualcosa è stato scritto.
+	 * @param bool        $riscritto Riferimento: diventa vero se qualcosa è stato scritto.
+	 * @param string|null $cartella  Cartella fotografata dalla verifica, o null per quella di adesso.
 	 * @return true|WP_Error
 	 */
-	private static function scrivi( &$riscritto ) {
+	private static function scrivi( &$riscritto, $cartella = null ) {
 		$riscritto = false;
-		$cartella  = self::cartella();
+		$cartella  = null === $cartella ? self::cartella() : $cartella;
 
 		if ( ! wp_mkdir_p( $cartella ) ) {
 			return new WP_Error(
@@ -508,10 +509,11 @@ final class Conformita_Core_Allegati {
 	 *
 	 * @param string $sotto      Sottocartella.
 	 * @param string $estensione Estensione.
+	 * @param string $radice     Cartella protetta fotografata dalla verifica.
 	 * @return true|WP_Error
 	 */
-	private static function scrivi_esca( $sotto, $estensione ) {
-		$cartella = self::cartella() . self::sotto( $sotto );
+	private static function scrivi_esca( $sotto, $estensione, $radice ) {
+		$cartella = $radice . self::sotto( $sotto );
 
 		if ( ! wp_mkdir_p( $cartella ) ) {
 			return new WP_Error(
@@ -545,6 +547,90 @@ final class Conformita_Core_Allegati {
 		}
 
 		return true;
+	}
+
+	/**
+	 * I permessi che WordPress darà a un documento scritto in una cartella.
+	 *
+	 * Sono quelli della cartella, tolta l'esecuzione: è la regola con cui
+	 * `_wp_handle_upload()` sistema il file appena spostato, qualunque sia la
+	 * maschera del processo. Falso se la cartella non c'è. Riga C-189.
+	 *
+	 * @param string $cartella Cartella di destinazione.
+	 * @return int|false
+	 */
+	private static function permessi_attesi( $cartella ) {
+		clearstatcache( true, $cartella );
+
+		if ( ! is_dir( $cartella ) ) {
+			return false;
+		}
+
+		$stato = stat( $cartella );
+
+		return false === $stato ? false : $stato['mode'] & 0666;
+	}
+
+	/**
+	 * Dà all'esca i permessi che avrà il documento, e controlla che li abbia.
+	 *
+	 * **Si prova un file che il server legge come leggerà il documento, o non
+	 * si prova niente.** L'esca nasce con i permessi che concede la maschera
+	 * del processo, il documento con quelli che gli dà WordPress: con una
+	 * maschera stretta l'esca è leggibile solo dal proprietario, un server
+	 * statico con un altro utente la nega perché non la sa leggere, e la
+	 * verifica scambia l'illeggibilità per una regola. Il documento, leggibile
+	 * da tutti, uscirebbe. Vale anche per un'esca che c'era già con il
+	 * contenuto giusto, perché i permessi non si vedono dal contenuto. Se non
+	 * si riesce ad allinearli, l'esito è `ignota`. Riga C-189.
+	 *
+	 * @param string    $percorso Percorso dell'esca.
+	 * @param int|false $permessi Permessi attesi per il documento.
+	 * @return true|WP_Error
+	 */
+	private static function allinea_esca( $percorso, $permessi ) {
+		$attuali = false;
+
+		if ( false !== $permessi && is_file( $percorso ) ) {
+			clearstatcache( true, $percorso );
+			$attuali = fileperms( $percorso );
+
+			if ( false !== $attuali && ( $attuali & 0777 ) !== $permessi ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- la protezione della cartella non può dipendere da credenziali FTP, come per la scrittura delle esche.
+				chmod( $percorso, $permessi );
+				clearstatcache( true, $percorso );
+				$attuali = fileperms( $percorso );
+			}
+		}
+
+		if ( false === $permessi || false === $attuali || ( $attuali & 0777 ) !== $permessi ) {
+			return new WP_Error(
+				'conformita_core_cartella_non_protetta',
+				sprintf(
+					/* translators: %s: nome del file esca. */
+					__( 'Esca %s senza i permessi che avrebbe il documento: un diniego del server potrebbe voler dire solo che non la sa leggere.', 'conformita-core' ),
+					wp_basename( $percorso )
+				)
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * La fotografia di quello che una verifica prova.
+	 *
+	 * @param string $cartella  Cartella protetta, com'era all'inizio della verifica.
+	 * @param string $indirizzo Indirizzo della cartella, com'era all'inizio della verifica.
+	 * @param string $sotto     Sottocartella dell'esca.
+	 * @return array<string, mixed>
+	 */
+	private static function fotografia( $cartella, $indirizzo, $sotto ) {
+		return array(
+			'cartella' => $cartella,
+			'identita' => self::identita_di( $cartella, $indirizzo ),
+			'permessi' => self::permessi_attesi( $cartella . self::sotto( $sotto ) ),
+		);
 	}
 
 	/**
@@ -611,6 +697,20 @@ final class Conformita_Core_Allegati {
 	 */
 	public static function verifica( $sotto = '', $estensione = 'txt' ) {
 		/*
+		 * **Una fotografia sola, presa prima di scrivere l'esca.** Cartella e
+		 * indirizzo si leggono qui una volta, e da qui vengono il percorso in
+		 * cui si scrive l'esca, l'indirizzo che si chiede e l'identità con cui
+		 * l'esito si conserva. Rileggerli dopo la richiesta attribuirebbe la
+		 * risposta alla cartella che c'è dopo, che può non essere quella a cui
+		 * si è chiesto: un diniego ricevuto da un indirizzo finirebbe
+		 * conservato come esito di un altro, e il deposito lo riuserebbe senza
+		 * chiedere. Conservato con l'identità della fotografia, un esito che
+		 * non parla della cartella di adesso non si legge. Riga C-190.
+		 */
+		$cartella  = self::cartella();
+		$indirizzo = self::indirizzo_cartella();
+
+		/*
 		 * Un ambito che non si sa provare non si misura nemmeno: scrivere
 		 * un'esca in un percorso che non si sa chiedere darebbe una risposta
 		 * che parla di un altro file. Vale `ignota`, cioe' il deposito si
@@ -625,14 +725,15 @@ final class Conformita_Core_Allegati {
 					'istante'    => self::adesso(),
 					'stato_http' => 0,
 					'motivo'     => __( 'Questo percorso non si sa provare: il nome della sottocartella o dell\'estensione non si può chiedere al server così com\'è.', 'conformita-core' ),
-				)
+				),
+				self::fotografia( $cartella, $indirizzo, $sotto )
 			);
 		}
 
 		self::$in_verifica = true;
 
 		$riscritto = false;
-		$scrittura = self::scrivi( $riscritto );
+		$scrittura = self::scrivi( $riscritto, $cartella );
 
 		self::$in_verifica = false;
 
@@ -651,7 +752,21 @@ final class Conformita_Core_Allegati {
 		}
 
 		if ( ! is_wp_error( $scrittura ) && ! self::generale( $sotto, $estensione ) ) {
-			$scrittura = self::scrivi_esca( $sotto, $estensione );
+			$scrittura = self::scrivi_esca( $sotto, $estensione, $cartella );
+		}
+
+		/*
+		 * La fotografia si completa qui, a cartelle create: l'identità legge
+		 * il percorso vero della cartella, e i permessi attesi quelli della
+		 * sottocartella in cui il documento finirà.
+		 */
+		$prova = self::fotografia( $cartella, $indirizzo, $sotto );
+
+		if ( ! is_wp_error( $scrittura ) ) {
+			$scrittura = self::allinea_esca(
+				$cartella . self::sotto( $sotto ) . '/' . self::nome_esca( $estensione ),
+				$prova['permessi']
+			);
 		}
 
 		if ( is_wp_error( $scrittura ) ) {
@@ -663,12 +778,13 @@ final class Conformita_Core_Allegati {
 					'istante'    => self::adesso(),
 					'stato_http' => 0,
 					'motivo'     => $scrittura->get_error_message(),
-				)
+				),
+				$prova
 			);
 		}
 
 		$risposta = wp_remote_get(
-			self::indirizzo_esca( $sotto, $estensione ),
+			$indirizzo . self::sotto( $sotto ) . '/' . self::nome_esca( $estensione ),
 			array(
 				'timeout'     => 10,
 				'redirection' => 0,
@@ -684,7 +800,8 @@ final class Conformita_Core_Allegati {
 					'istante'    => self::adesso(),
 					'stato_http' => 0,
 					'motivo'     => __( 'La richiesta all\'esca non è riuscita: il giro sul sito stesso è bloccato o irraggiungibile.', 'conformita-core' ),
-				)
+				),
+				$prova
 			);
 		}
 
@@ -708,7 +825,8 @@ final class Conformita_Core_Allegati {
 					'istante'    => self::adesso(),
 					'stato_http' => $stato,
 					'motivo'     => __( 'Il server serve il contenuto della cartella protetta: i file sarebbero scaricabili dal loro percorso.', 'conformita-core' ),
-				)
+				),
+				$prova
 			);
 		}
 
@@ -721,7 +839,8 @@ final class Conformita_Core_Allegati {
 					'istante'    => self::adesso(),
 					'stato_http' => $stato,
 					'motivo'     => __( 'Il server nega il percorso della cartella protetta.', 'conformita-core' ),
-				)
+				),
+				$prova
 			);
 		}
 
@@ -734,7 +853,8 @@ final class Conformita_Core_Allegati {
 					'istante'    => self::adesso(),
 					'stato_http' => $stato,
 					'motivo'     => __( 'Risposta positiva ma estranea: non è il nostro file, e non è un rifiuto. Può essere una schermata di accesso o una pagina generica.', 'conformita-core' ),
-				)
+				),
+				$prova
 			);
 		}
 
@@ -753,7 +873,8 @@ final class Conformita_Core_Allegati {
 				'istante'    => self::adesso(),
 				'stato_http' => $stato,
 				'motivo'     => __( 'Il server non serve e non nega: risponde con un reindirizzamento, con un\'indisponibilità temporanea o con un altro stato che non dice niente sulle regole della cartella.', 'conformita-core' ),
-			)
+			),
+			$prova
 		);
 	}
 
@@ -800,14 +921,15 @@ final class Conformita_Core_Allegati {
 	 * @param string               $sotto      Sottocartella provata.
 	 * @param string               $estensione Estensione provata.
 	 * @param array<string, mixed> $campi      Esito misurato.
+	 * @param array<string, mixed> $prova      Fotografia di quello che si è provato: l'esito si conserva per quella, non per la cartella di adesso.
 	 * @return array<string, mixed> Lo stato completo.
 	 */
-	private static function conserva_esito( $sotto, $estensione, array $campi ) {
+	private static function conserva_esito( $sotto, $estensione, array $campi, array $prova ) {
 		$generale = self::generale( $sotto, $estensione );
 
 		$conservato = get_option( self::OPZIONE, array() );
 		$conservato = is_array( $conservato ) ? $conservato : array();
-		$stessa     = self::stessa_radice( $conservato );
+		$stessa     = isset( $conservato['radice'] ) && $prova['identita'] === $conservato['radice'];
 
 		/*
 		 * **L'identità della cartella si scrive solo insieme all'esito
@@ -831,12 +953,25 @@ final class Conformita_Core_Allegati {
 		 * di A, tornerebbe valido il giorno in cui si torna ad A, e direbbe
 		 * `verificata` per un indirizzo di A mai provato. Riga C-187.
 		 */
-		$ambiti[ self::chiave_ambito( $sotto, $estensione ) ] = array_merge( $campi, array( 'radice' => self::identita() ) );
+		$ambiti[ self::chiave_ambito( $sotto, $estensione ) ] = array_merge(
+			$campi,
+			array(
+				'radice'   => $prova['identita'],
+				'permessi' => $prova['permessi'],
+			)
+		);
 
 		$nuovi = array( 'ambiti' => $ambiti );
 
 		if ( $generale || 'non_coperta' === $campi['copertura'] ) {
-			$nuovi = array_merge( $campi, $nuovi, array( 'radice' => self::identita() ) );
+			$nuovi = array_merge(
+				$campi,
+				$nuovi,
+				array(
+					'radice'   => $prova['identita'],
+					'permessi' => self::permessi_attesi( $prova['cartella'] ),
+				)
+			);
 		}
 
 		return self::conserva( $nuovi );
@@ -904,20 +1039,51 @@ final class Conformita_Core_Allegati {
 	 * @return string
 	 */
 	private static function identita() {
-		$cartella = self::cartella();
-		$reale    = realpath( $cartella );
+		return self::identita_di( self::cartella(), self::indirizzo_cartella() );
+	}
 
-		return wp_normalize_path( false === $reale ? $cartella : $reale ) . '|' . self::indirizzo_cartella();
+	/**
+	 * L'identità di una cartella e di un indirizzo dati.
+	 *
+	 * @param string $cartella  Cartella protetta.
+	 * @param string $indirizzo Indirizzo della cartella protetta.
+	 * @return string
+	 */
+	private static function identita_di( $cartella, $indirizzo ) {
+		$reale = realpath( $cartella );
+
+		return wp_normalize_path( false === $reale ? $cartella : $reale ) . '|' . $indirizzo;
+	}
+
+	/**
+	 * La cartella in cui sta l'esca di un ambito conservato.
+	 *
+	 * @param string $chiave Chiave dell'ambito.
+	 * @return string
+	 */
+	private static function cartella_ambito( $chiave ) {
+		$fine  = strrpos( $chiave, '|' );
+		$sotto = false === $fine ? '' : substr( $chiave, 0, $fine );
+
+		return self::cartella() . ( '/' === $sotto ? '' : $sotto );
 	}
 
 	/**
 	 * Gli esiti conservati parlano della cartella di adesso.
 	 *
+	 * Della stessa cartella, allo stesso indirizzo, e con gli stessi
+	 * permessi: i permessi che WordPress dà a un documento sono quelli della
+	 * cartella di adesso, e un esito misurato quando erano altri parla di
+	 * documenti diversi da quelli che si scriverebbero. Righe C-187 e C-189.
+	 *
 	 * @param array<string, mixed> $conservato Opzione conservata.
 	 * @return bool
 	 */
 	private static function stessa_radice( array $conservato ) {
-		return isset( $conservato['radice'] ) && self::identita() === $conservato['radice'];
+		return isset( $conservato['radice'] )
+			&& array_key_exists( 'permessi', $conservato )
+			&& self::identita() === $conservato['radice']
+			&& self::permessi_attesi( self::cartella() ) === $conservato['permessi'];
 	}
 
 	/**
@@ -939,9 +1105,14 @@ final class Conformita_Core_Allegati {
 			if ( isset( $conservato['ambiti'] ) && is_array( $conservato['ambiti'] ) ) {
 				$conservato['ambiti'] = array_filter(
 					$conservato['ambiti'],
-					static function ( $ambito ) use ( $identita ) {
-						return is_array( $ambito ) && isset( $ambito['radice'] ) && $identita === $ambito['radice'];
-					}
+					static function ( $ambito, $chiave ) use ( $identita ) {
+						return is_array( $ambito )
+							&& isset( $ambito['radice'] )
+							&& array_key_exists( 'permessi', $ambito )
+							&& $identita === $ambito['radice']
+							&& self::permessi_attesi( self::cartella_ambito( (string) $chiave ) ) === $ambito['permessi'];
+					},
+					ARRAY_FILTER_USE_BOTH
 				);
 			}
 
@@ -966,7 +1137,7 @@ final class Conformita_Core_Allegati {
 	 * @return string
 	 */
 	private static function motivo_radice_cambiata() {
-		return __( 'La cartella dei caricamenti, o il suo indirizzo, non è quella in cui la protezione è stata verificata: gli esiti misurati prima parlano di un\'altra cartella.', 'conformita-core' );
+		return __( 'La cartella dei caricamenti, il suo indirizzo o i suoi permessi non sono quelli con cui la protezione è stata verificata: gli esiti misurati prima parlano di un\'altra cartella.', 'conformita-core' );
 	}
 
 	/**
@@ -993,6 +1164,7 @@ final class Conformita_Core_Allegati {
 					'motivo'     => __( 'I file di regole sono stati riscritti: quello che si sapeva prima non vale più.', 'conformita-core' ),
 					'ambiti'     => array(),
 					'radice'     => self::identita(),
+					'permessi'   => self::permessi_attesi( self::cartella() ),
 				)
 			),
 			false

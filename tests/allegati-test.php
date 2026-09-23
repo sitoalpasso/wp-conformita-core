@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-188.
+ * C-169, C-170, C-172..C-175, C-177..C-190.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -2687,5 +2687,303 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 		$file['name'] = 'esterno.pdf-x';
 
 		return $file;
+	}
+
+	/**
+	 * Un server che nega i `.txt` per regola e per il resto serve quello che riesce a leggere.
+	 *
+	 * Serve un file solo se e' leggibile da tutti, come un server statico che
+	 * gira con un utente diverso da quello di PHP: un file che non puo'
+	 * leggere lo nega, qualunque siano le regole. Per i `.pdf` non ha nessuna
+	 * regola, quindi un documento leggibile esce.
+	 *
+	 * @return Closure
+	 */
+	private function server_senza_regole_per_i_pdf() {
+		$indirizzo_radice = Conformita_Core_Allegati::indirizzo_cartella();
+		$radice           = Conformita_Core_Allegati::cartella();
+
+		return function ( $indirizzo ) use ( $indirizzo_radice, $radice ) {
+			if ( '.txt' === substr( $indirizzo, -4 ) || 0 !== strpos( $indirizzo, $indirizzo_radice . '/' ) ) {
+				return $this->rifiuto_del_server();
+			}
+
+			$percorso = $radice . substr( $indirizzo, strlen( $indirizzo_radice ) );
+
+			clearstatcache( true, $percorso );
+
+			if ( is_file( $percorso ) && 0 !== ( fileperms( $percorso ) & 0004 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+	}
+
+	/**
+	 * C-189: l'esca si prova con i permessi che avra' il documento.
+	 *
+	 * WordPress da' al documento spostato i permessi della cartella di
+	 * destinazione, tolta l'esecuzione; l'esca invece nasce con quelli che la
+	 * maschera del processo concede. Con una maschera stretta l'esca nasce
+	 * leggibile solo dal proprietario: un server statico con un altro utente
+	 * la nega perche' non la sa leggere, non perche' una regola lo vieta, e la
+	 * verifica scambia l'illeggibilita' per protezione. Il documento, che
+	 * WordPress rende leggibile a tutti, uscirebbe.
+	 *
+	 * La prova usa quella maschera e un server senza regole per i `.pdf`: il
+	 * deposito si deve rifiutare, e le esche devono avere i permessi che
+	 * avrebbe il documento. La seconda meta' parte da un'esca gia' esistente,
+	 * con il contenuto giusto e i permessi sbagliati: anche quella va
+	 * allineata prima di chiedere.
+	 */
+	public function test_c189_lesca_ha_i_permessi_del_documento() {
+		$atto     = $this->atto_valido();
+		$sotto    = Conformita_Core_Allegati::sottocartella_corrente();
+		$radice   = Conformita_Core_Allegati::cartella();
+		$cartella = $radice . $sotto;
+		$esca     = $cartella . '/' . Conformita_Core_Allegati::ESCA_PREFISSO . '.pdf';
+
+		$this->assertTrue( wp_mkdir_p( $cartella ) );
+
+		$modo_radice   = fileperms( $radice ) & 07777;
+		$modo_cartella = fileperms( $cartella ) & 07777;
+
+		$this->risposta_finta = $this->server_senza_regole_per_i_pdf();
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- prova: i permessi sul disco sono cio' che si sta verificando.
+		chmod( $radice, 0755 );
+		chmod( $cartella, 0755 );
+
+		$maschera = umask( 0077 );
+
+		try {
+			$esito = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'atto.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $esito, 'Senza una regola per i PDF il server servirebbe il documento: il deposito si rifiuta.' );
+			$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+			$this->assertFileDoesNotExist( $cartella . '/atto.pdf' );
+
+			clearstatcache();
+
+			$this->assertSame( 0644, fileperms( $esca ) & 0777, 'L\'esca dei PDF ha i permessi che WordPress darebbe al documento.' );
+			$this->assertSame( 0644, fileperms( $radice . '/' . Conformita_Core_Allegati::ESCA ) & 0777, 'E anche quella generale.' );
+
+			chmod( $esca, 0600 );
+
+			Conformita_Core_Allegati::verifica( $sotto, 'pdf' );
+
+			clearstatcache();
+
+			$this->assertSame( 0644, fileperms( $esca ) & 0777, 'Un\'esca gia\' esistente, con il contenuto giusto, si riallinea lo stesso.' );
+			$this->assertSame( 'non_coperta', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'] );
+		} finally {
+			umask( $maschera );
+			chmod( $cartella, $modo_cartella );
+			chmod( $radice, $modo_radice );
+		}
+		// phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+	}
+
+	/**
+	 * C-189: cambiati i permessi della cartella, l'esito misurato prima non vale.
+	 *
+	 * I permessi che WordPress da' al documento dipendono da quelli che la
+	 * cartella ha al momento del deposito. Un ambito provato quando la
+	 * cartella era chiusa agli altri utenti dice che un file leggibile solo
+	 * dal proprietario e' negato: niente sui documenti che, riaperta la
+	 * cartella, nascono leggibili da tutti. La prova deposita a cartella
+	 * chiusa, la riapre, e pretende che l'ambito torni da provare senza
+	 * richieste e che il deposito successivo lo riprovi.
+	 */
+	public function test_c189_permessi_della_cartella_cambiati_lesito_non_vale() {
+		$atto     = $this->atto_valido();
+		$sotto    = Conformita_Core_Allegati::sottocartella_corrente();
+		$cartella = Conformita_Core_Allegati::cartella() . $sotto;
+
+		$this->assertTrue( wp_mkdir_p( $cartella ) );
+
+		$modo = fileperms( $cartella ) & 07777;
+
+		$this->risposta_finta = $this->server_senza_regole_per_i_pdf();
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- prova: i permessi sul disco sono cio' che si sta verificando.
+		chmod( $cartella, 0700 );
+
+		try {
+			$primo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'primo.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+
+			chmod( $cartella, 0755 );
+
+			$chieste = $this->richieste;
+
+			$this->assertSame(
+				'ignota',
+				Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'],
+				'Riaperta la cartella, l\'ambito misurato a cartella chiusa non vale.'
+			);
+			$this->assertSame( $chieste, $this->richieste, 'Leggere lo stato non fa richieste.' );
+
+			$secondo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'secondo.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $secondo, 'A cartella aperta il documento uscirebbe: il deposito si rifiuta.' );
+			$this->assertSame( 'conformita_core_protezione_non_verificata', $secondo->get_error_code() );
+			$this->assertFileDoesNotExist( $cartella . '/secondo.pdf' );
+		} finally {
+			chmod( $cartella, $modo );
+		}
+		// phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+	}
+
+	/**
+	 * C-189: cambiati i permessi della radice, l'esito generale non vale.
+	 *
+	 * Lo stesso della prova precedente per la cartella protetta stessa, dove
+	 * sta l'esca generale: cambiati i suoi permessi, lo stato torna `ignota`
+	 * senza richieste, e la preparazione rifa' la verifica.
+	 */
+	public function test_c189_permessi_della_radice_cambiati_il_generale_non_vale() {
+		$this->assertTrue( Conformita_Core_Allegati::prepara() );
+		$this->assertSame( 'verificata', Conformita_Core_Allegati::stato()['copertura'] );
+
+		$radice = Conformita_Core_Allegati::cartella();
+		$modo   = fileperms( $radice ) & 07777;
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- prova: i permessi sul disco sono cio' che si sta verificando.
+		chmod( $radice, 0700 === $modo ? 0755 : 0700 );
+
+		try {
+			$chieste = $this->richieste;
+
+			$this->assertSame( 'ignota', Conformita_Core_Allegati::stato()['copertura'], 'Con altri permessi, l\'esito generale misurato prima non vale.' );
+			$this->assertSame( $chieste, $this->richieste, 'Leggere lo stato non fa richieste.' );
+
+			$this->assertTrue( Conformita_Core_Allegati::prepara() );
+			$this->assertSame( $chieste + 1, $this->richieste, 'La preparazione rifa\' la verifica.' );
+			$this->assertSame( 'verificata', Conformita_Core_Allegati::stato()['copertura'] );
+		} finally {
+			chmod( $radice, $modo );
+		}
+		// phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+	}
+
+	/**
+	 * C-190: l'esito si conserva per la cartella provata, non per quella che c'e' dopo.
+	 *
+	 * La cartella dei caricamenti ha l'indirizzo B, dove il server nega i
+	 * `.txt` e serve i `.pdf`, verificato in generale. Un componente la
+	 * espone per un momento come A e si prova l'ambito dei `.pdf`: A lo nega,
+	 * e mentre la risposta torna indietro l'indirizzo ritorna B. Il diniego
+	 * parla di A: se l'identita' si rileggesse dopo la richiesta, finirebbe
+	 * conservato come esito di B, e il deposito su B lo riuserebbe senza
+	 * chiedere. Il deposito deve invece riprovare B, dove i `.pdf` escono.
+	 */
+	public function test_c190_lesito_va_alla_cartella_provata() {
+		$atto  = $this->atto_valido();
+		$sotto = Conformita_Core_Allegati::sottocartella_corrente();
+		$file  = $this->file_da_depositare( 'atto.pdf' );
+		$su_a  = 0;
+
+		$this->risposta_finta = function ( $indirizzo ) use ( &$su_a ) {
+			if ( 0 === strpos( $indirizzo, 'https://altrove.example/' ) ) {
+				++$su_a;
+				remove_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+
+				return $this->rifiuto_del_server();
+			}
+
+			if ( '.pdf' === substr( $indirizzo, -4 ) ) {
+				return $this->esca_servita();
+			}
+
+			return $this->rifiuto_del_server();
+		};
+
+		$this->assertTrue( Conformita_Core_Allegati::prepara() );
+		$this->assertSame( 'verificata', Conformita_Core_Allegati::stato()['copertura'], 'Su B la cartella e\' negata in generale.' );
+
+		add_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+
+		try {
+			Conformita_Core_Allegati::verifica( $sotto, 'pdf' );
+		} finally {
+			remove_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+		}
+
+		$this->assertSame( 1, $su_a, 'L\'ambito e\' stato chiesto ad A, una volta.' );
+		$this->assertSame( 'verificata', Conformita_Core_Allegati::stato()['copertura'], 'Il generale di B vale ancora.' );
+		$this->assertSame(
+			'ignota',
+			Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'],
+			'Il diniego e\' arrivato da A, e per B non vale.'
+		);
+
+		$esito = conformita_core_deposita_allegato(
+			$atto,
+			$file,
+			array( 'origine' => 'percorso_locale' )
+		);
+
+		$this->assertWPError( $esito, 'Su B i PDF sono serviti: il deposito si rifiuta.' );
+		$this->assertSame( 'conformita_core_protezione_non_verificata', $esito->get_error_code() );
+		$this->assertFileDoesNotExist( Conformita_Core_Allegati::cartella() . $sotto . '/atto.pdf' );
+	}
+
+	/**
+	 * C-190: l'indirizzo chiesto e' quello della fotografia, anche se nel frattempo e' cambiato.
+	 *
+	 * La verifica di un ambito, se deve riscrivere le regole, rifa' prima
+	 * quella generale, con una richiesta sua. Se durante quella richiesta
+	 * l'indirizzo dei caricamenti passa da A a B, la verifica dell'ambito,
+	 * cominciata su A, deve continuare a chiedere ad A: chiedere a B e
+	 * conservare l'esito come di A attribuirebbe ad A una risposta di B.
+	 */
+	public function test_c190_lindirizzo_chiesto_e_quello_della_fotografia() {
+		$sotto   = Conformita_Core_Allegati::sottocartella_corrente();
+		$chiesti = array();
+
+		$this->assertTrue( Conformita_Core_Allegati::prepara() );
+
+		$this->risposta_finta = function ( $indirizzo ) use ( &$chiesti ) {
+			$chiesti[] = $indirizzo;
+			remove_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+
+			return $this->rifiuto_del_server();
+		};
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- prova: si tocca il disco direttamente perche' e' il disco cio' che si sta verificando.
+		unlink( Conformita_Core_Allegati::cartella() . '/.htaccess' );
+
+		add_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+
+		try {
+			Conformita_Core_Allegati::verifica( $sotto, 'pdf' );
+		} finally {
+			remove_filter( 'upload_dir', array( $this, 'indirizzo_spostato' ) );
+		}
+
+		$this->assertSame(
+			array(
+				'https://altrove.example/caricamenti/conformita-core-protetto/prova-accesso-diretto.txt',
+				'https://altrove.example/caricamenti/conformita-core-protetto' . $sotto . '/prova-accesso-diretto.pdf',
+			),
+			$chiesti,
+			'Tutte e due le richieste vanno ad A, dove la verifica e\' cominciata.'
+		);
+		$this->assertSame( 'ignota', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'], 'Su B l\'ambito provato su A non vale.' );
 	}
 }
