@@ -524,6 +524,57 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			$this->assertSame( $id, $voce['contenuto'], 'La voce sta sul contenuto padre.' );
 			$this->assertSame( array( 'allegato' => $allegato ), $voce['dettagli'] );
 		}
+
+		/*
+		 * Un allegato gia' esistente che cambia padre: con il salvataggio di
+		 * WordPress, e con il collegamento della libreria dei media, che scrive
+		 * sulla banca dati direttamente e lo annuncia con un aggancio suo.
+		 */
+		$altro  = $this->contenuto( 'publish' );
+		$libero = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'libero.pdf',
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $libero,
+				'post_parent' => $id,
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'          => $libero,
+				'post_parent' => $altro,
+			)
+		);
+		$this->assertSame(
+			array( array( 'allegato_aggiunto', $id ), array( 'allegato_eliminato', $id ), array( 'allegato_aggiunto', $altro ) ),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['contenuto'] );
+				},
+				$this->nuove()
+			),
+			'Il padre cambiato col salvataggio: tolto da uno, aggiunto all\'altro.'
+		);
+
+		$this->segna();
+		do_action( 'wp_media_attach_action', 'detach', $libero, $altro );
+		do_action( 'wp_media_attach_action', 'attach', $libero, $id );
+		$this->assertSame(
+			array( array( 'allegato_eliminato', $altro ), array( 'allegato_aggiunto', $id ) ),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['contenuto'] );
+				},
+				$this->nuove()
+			),
+			'Il collegamento dalla libreria dei media.'
+		);
 	}
 
 	/**

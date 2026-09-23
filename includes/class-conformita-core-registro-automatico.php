@@ -195,6 +195,18 @@ final class Conformita_Core_Registro_Automatico {
 				'argomenti' => 2,
 			),
 			array(
+				'aggancio'  => 'attachment_updated',
+				'metodo'    => 'modifica',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 3,
+			),
+			array(
+				'aggancio'  => 'wp_media_attach_action',
+				'metodo'    => 'allegato_collegato',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 3,
+			),
+			array(
 				'aggancio'  => 'add_post_meta',
 				'metodo'    => 'fine_prima_aggiunta',
 				'priorita'  => PHP_INT_MIN,
@@ -286,6 +298,22 @@ final class Conformita_Core_Registro_Automatico {
 			return;
 		}
 
+		/*
+		 * Un allegato che cambia padre esce da un contenuto ed entra in un
+		 * altro: per ciascuno dei due è un allegato tolto o aggiunto, anche se
+		 * nessun file è stato caricato o cancellato. Per gli allegati WordPress
+		 * non chiama `post_updated` ma `attachment_updated`, con gli stessi
+		 * argomenti: per questo lo stesso metodo ascolta tutti e due.
+		 */
+		if ( 'attachment' === $dopo->post_type ) {
+			if ( (int) $prima->post_parent !== (int) $dopo->post_parent ) {
+				self::allegato( $dopo->ID, (int) $prima->post_parent, 'allegato_eliminato' );
+				self::allegato( $dopo->ID, (int) $dopo->post_parent, 'allegato_aggiunto' );
+			}
+
+			return;
+		}
+
 		if ( in_array( $prima->post_status, self::STATI_IN_LAVORAZIONE, true ) ) {
 			return;
 		}
@@ -350,7 +378,9 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param int $allegato_id Identificativo dell'allegato.
 	 */
 	public static function allegato_aggiunto( $allegato_id ) {
-		self::allegato( $allegato_id, get_post( $allegato_id ), 'allegato_aggiunto' );
+		$allegato = get_post( $allegato_id );
+
+		self::allegato( $allegato_id, $allegato instanceof WP_Post ? (int) $allegato->post_parent : 0, 'allegato_aggiunto' );
 	}
 
 	/**
@@ -360,22 +390,40 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param WP_Post|null $allegato    Allegato.
 	 */
 	public static function allegato_eliminato( $allegato_id, $allegato = null ) {
-		self::allegato( $allegato_id, $allegato instanceof WP_Post ? $allegato : get_post( $allegato_id ), 'allegato_eliminato' );
+		$allegato = $allegato instanceof WP_Post ? $allegato : get_post( $allegato_id );
+
+		self::allegato( $allegato_id, $allegato instanceof WP_Post ? (int) $allegato->post_parent : 0, 'allegato_eliminato' );
+	}
+
+	/**
+	 * Un allegato collegato o scollegato dalla libreria dei media.
+	 *
+	 * La libreria cambia il padre con un'istruzione diretta sulla banca dati,
+	 * senza passare dal salvataggio di WordPress, e lo annuncia solo con questo
+	 * aggancio. Nello scollegamento il padre passato è quello di prima; nel
+	 * collegamento è quello nuovo, e il padre di prima non si conosce più.
+	 *
+	 * @param string $azione      `attach` oppure `detach`.
+	 * @param int    $allegato_id Identificativo dell'allegato.
+	 * @param int    $padre       Contenuto padre.
+	 */
+	public static function allegato_collegato( $azione, $allegato_id, $padre ) {
+		self::allegato( $allegato_id, (int) $padre, 'detach' === $azione ? 'allegato_eliminato' : 'allegato_aggiunto' );
 	}
 
 	/**
 	 * Scrive la voce di un allegato sul contenuto a cui appartiene.
 	 *
-	 * @param int          $allegato_id Identificativo dell'allegato.
-	 * @param WP_Post|null $allegato    Allegato.
-	 * @param string       $azione      Operazione.
+	 * @param int    $allegato_id Identificativo dell'allegato.
+	 * @param int    $padre_id    Contenuto padre.
+	 * @param string $azione      Operazione.
 	 */
-	private static function allegato( $allegato_id, $allegato, $azione ) {
-		if ( ! $allegato instanceof WP_Post || $allegato->post_parent <= 0 ) {
+	private static function allegato( $allegato_id, $padre_id, $azione ) {
+		if ( $padre_id <= 0 ) {
 			return;
 		}
 
-		$padre = get_post( $allegato->post_parent );
+		$padre = get_post( $padre_id );
 
 		if ( ! $padre instanceof WP_Post || in_array( $padre->post_status, self::STATI_IN_LAVORAZIONE, true ) ) {
 			return;

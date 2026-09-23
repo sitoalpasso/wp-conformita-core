@@ -36,7 +36,7 @@ se due persone la compiono nello stesso istante.
 
 **Come si prova che funziona, e che la prova è vera.** Ogni comportamento ha una prova
 automatica, e ogni prova è stata fatta fallire di proposito: si è rotto il codice in
-trentatré modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
+trentacinque modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
 11). Per esempio: se il registro si dimentica di scrivere la pubblicazione, cinque prove
 diventano rosse; se la pagina mostra il motivo senza neutralizzarne il codice, diventa rossa
 la prova C-219; se il permesso di lettura viene dato all'amministratore, diventano rosse
@@ -119,7 +119,7 @@ sono potute scrivere, con la data della prima e dell'ultima.
 | `modifica` | un campo del contenuto cambiato, fuori dalla bozza; si registrano i nomi dei campi, non i valori |
 | `modifica_fine_pubblicazione` | ogni cambio della data di fine, con il valore di prima e di dopo |
 | `eliminazione` | l'eliminazione definitiva, con lo stato da cui è stato eliminato; bozze comprese |
-| `allegato_aggiunto`, `allegato_eliminato` | sul contenuto padre, con il numero dell'allegato |
+| `allegato_aggiunto`, `allegato_eliminato` | sul contenuto padre, con il numero dell'allegato: al caricamento e all'eliminazione del file, quando un allegato cambia padre con il salvataggio di WordPress (tolto da uno, aggiunto all'altro), e quando lo si collega o scollega dalla libreria dei media |
 
 Questi nomi sono riservati: un componente non li può usare per le proprie voci.
 
@@ -163,6 +163,10 @@ Righe C-195..C-224 al punto 10; file e metodi al punto 1. In locale, su WordPres
   registrano.
 - **I valori dei campi non si conservano**, solo i loro nomi. Il titolo e il testo di un atto
   possono contenere dati personali.
+- **Collegando dalla libreria dei media un allegato che aveva già un padre**, la voce
+  `allegato_aggiunto` va sul padre nuovo ma il padre di prima non riceve la sua: la libreria
+  sovrascrive il padre con un'istruzione diretta e annuncia solo quello nuovo. La libreria
+  offre il collegamento per i soli allegati liberi, quindi il caso richiede di aggirarla.
 - **Le modifiche ai metadati propri di un componente non si registrano da sole**: core
   conosce solo la data di fine. Il componente scrive la voce quando il suo dato lo richiede.
 - **Nessuna garanzia verso chi amministra il server.** Chi scrive direttamente nella banca
@@ -214,7 +218,7 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 | C-200 | Eliminazione definitiva di un pubblicato con data di fine | una sola voce `eliminazione` con lo stato; le voci di prima restano tutte |
 | C-201 | Le stesse tre operazioni (titolo, data di fine, allegato) su una bozza e su un contenuto in verifica; eliminazione di una bozza che era stata pubblicata | nella bozza nessuna voce, in verifica tre; l'eliminazione della bozza si registra |
 | C-202 | Data di fine scritta, riscritta uguale, cambiata, tolta; poi due righe duplicate aggiornate con una scrittura | tre voci con prima e dopo, nessuna per la riscrittura uguale; una sola voce per la scrittura su due righe |
-| C-203 | Allegato aggiunto ed eliminato su un pubblicato | `allegato_aggiunto` e `allegato_eliminato` sul contenuto padre, con il numero dell'allegato |
+| C-203 | Allegato aggiunto ed eliminato su un pubblicato; un allegato libero assegnato a un contenuto e poi spostato su un altro; scollegato e ricollegato dalla libreria dei media | `allegato_aggiunto` e `allegato_eliminato` sul contenuto padre, con il numero dell'allegato; allo spostamento, tolto dal primo e aggiunto al secondo; lo stesso dalla libreria |
 | C-204 | Le stesse operazioni su un articolo di WordPress | nessuna voce e nessuna voce mancata annotata; controllo positivo sul tipo gestito |
 | C-205 | Operazione senza utente, poi con un utente con nome ed email | utente zero, poi il numero; le colonne sono quelle del punto 4 e nella riga non c'è nessun dato della persona |
 
@@ -289,7 +293,9 @@ rimesso a posto subito dopo.
 | G23 | giorni dei filtri letti in UTC | C-216 |
 | G24 | filtro sconosciuto ignorato | C-216 |
 | G25 | voci automatiche tentate anche sui tipi non gestiti | C-204 |
-| G26 | voce dell'allegato scritta sull'allegato | C-201, C-203 |
+| G26 | voce dell'allegato scritta sull'allegato | C-201, C-203, C-204 |
+| G34 | cambio di padre con il salvataggio non ascoltato | C-203 |
+| G35 | scollegamento dalla libreria scritto come aggiunta | C-203 |
 | G27 | permesso di lettura dato all'amministratore | C-214, C-215 |
 | G28 | una funzione che cancella | C-212 |
 | G29 | una rotta dell'interfaccia per programmi | C-213 |
