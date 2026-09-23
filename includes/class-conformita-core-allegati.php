@@ -37,7 +37,7 @@
  * momento in cui può ancora rimediare.
  *
  * Righe di collaudo C-115..C-125, C-146, C-154..C-158, C-163..C-166, C-169, C-170,
- * C-172..C-175, C-177..C-190.
+ * C-172..C-175, C-177..C-191.
  *
  * @package Conformita_Core
  */
@@ -572,6 +572,60 @@ final class Conformita_Core_Allegati {
 	}
 
 	/**
+	 * L'impronta di quello che decide se un utente qualunque arriva a un file
+	 * di questa cartella.
+	 *
+	 * **I permessi del file non bastano.** Il server arriva al documento solo
+	 * se può attraversare ogni cartella lungo il percorso, e questo lo
+	 * decidono i permessi di esecuzione delle cartelle e i loro proprietari,
+	 * non i permessi che WordPress dà al file. Una cartella a 0744 lascia il
+	 * documento leggibile ma irraggiungibile, e l'ambito risulta negato;
+	 * portata a 0755 lo rende raggiungibile senza che i permessi del documento
+	 * cambino. Quindi l'impronta raccoglie, per ogni cartella dalla cartella
+	 * dell'esca fino a quella dei caricamenti compresa, proprietario, gruppo e
+	 * permessi interi; un esito misurato con un'impronta diversa non si legge.
+	 * Le cartelle sopra quella dei caricamenti restano fuori: se il server non
+	 * le attraversasse, non servirebbe nessun caricamento del sito. Falso se
+	 * una cartella manca o la cartella non sta sotto quella dei caricamenti.
+	 * Riga C-191.
+	 *
+	 * @param string $cartella          Cartella dell'esca.
+	 * @param string $cartella_protetta Cartella protetta, di cui si risale fino al genitore.
+	 * @return string|false
+	 */
+	private static function impronta_accesso( $cartella, $cartella_protetta ) {
+		$corrente = realpath( $cartella );
+		$fine     = realpath( dirname( $cartella_protetta ) );
+
+		if ( false === $corrente || false === $fine
+			|| ( $corrente !== $fine && 0 !== strpos( $corrente, $fine . DIRECTORY_SEPARATOR ) )
+		) {
+			return false;
+		}
+
+		$pezzi = array();
+
+		while ( true ) {
+			clearstatcache( true, $corrente );
+			$stato = stat( $corrente );
+
+			if ( false === $stato ) {
+				return false;
+			}
+
+			$pezzi[] = $corrente . '|' . $stato['uid'] . '|' . $stato['gid'] . '|' . decoct( $stato['mode'] & 07777 );
+
+			if ( $corrente === $fine ) {
+				break;
+			}
+
+			$corrente = dirname( $corrente );
+		}
+
+		return hash( 'sha256', implode( "\n", $pezzi ) );
+	}
+
+	/**
 	 * Dà all'esca i permessi che avrà il documento, e controlla che li abbia.
 	 *
 	 * **Si prova un file che il server legge come leggerà il documento, o non
@@ -630,6 +684,7 @@ final class Conformita_Core_Allegati {
 			'cartella' => $cartella,
 			'identita' => self::identita_di( $cartella, $indirizzo ),
 			'permessi' => self::permessi_attesi( $cartella . self::sotto( $sotto ) ),
+			'accesso'  => self::impronta_accesso( $cartella . self::sotto( $sotto ), $cartella ),
 		);
 	}
 
@@ -956,8 +1011,8 @@ final class Conformita_Core_Allegati {
 		$ambiti[ self::chiave_ambito( $sotto, $estensione ) ] = array_merge(
 			$campi,
 			array(
-				'radice'   => $prova['identita'],
-				'permessi' => $prova['permessi'],
+				'radice'  => $prova['identita'],
+				'accesso' => $prova['accesso'],
 			)
 		);
 
@@ -968,8 +1023,8 @@ final class Conformita_Core_Allegati {
 				$campi,
 				$nuovi,
 				array(
-					'radice'   => $prova['identita'],
-					'permessi' => self::permessi_attesi( $prova['cartella'] ),
+					'radice'  => $prova['identita'],
+					'accesso' => self::impronta_accesso( $prova['cartella'], $prova['cartella'] ),
 				)
 			);
 		}
@@ -1071,19 +1126,20 @@ final class Conformita_Core_Allegati {
 	/**
 	 * Gli esiti conservati parlano della cartella di adesso.
 	 *
-	 * Della stessa cartella, allo stesso indirizzo, e con gli stessi
-	 * permessi: i permessi che WordPress dà a un documento sono quelli della
-	 * cartella di adesso, e un esito misurato quando erano altri parla di
-	 * documenti diversi da quelli che si scriverebbero. Righe C-187 e C-189.
+	 * Della stessa cartella, allo stesso indirizzo, e con la stessa impronta
+	 * di accesso: permessi e proprietari delle cartelle decidono sia i
+	 * permessi che WordPress dà a un documento sia se il server ci arriva, e
+	 * un esito misurato quando erano altri parla di documenti diversi da
+	 * quelli che si scriverebbero. Righe C-187, C-189 e C-191.
 	 *
 	 * @param array<string, mixed> $conservato Opzione conservata.
 	 * @return bool
 	 */
 	private static function stessa_radice( array $conservato ) {
 		return isset( $conservato['radice'] )
-			&& array_key_exists( 'permessi', $conservato )
+			&& array_key_exists( 'accesso', $conservato )
 			&& self::identita() === $conservato['radice']
-			&& self::permessi_attesi( self::cartella() ) === $conservato['permessi'];
+			&& self::impronta_accesso( self::cartella(), self::cartella() ) === $conservato['accesso'];
 	}
 
 	/**
@@ -1108,9 +1164,9 @@ final class Conformita_Core_Allegati {
 					static function ( $ambito, $chiave ) use ( $identita ) {
 						return is_array( $ambito )
 							&& isset( $ambito['radice'] )
-							&& array_key_exists( 'permessi', $ambito )
+							&& array_key_exists( 'accesso', $ambito )
 							&& $identita === $ambito['radice']
-							&& self::permessi_attesi( self::cartella_ambito( (string) $chiave ) ) === $ambito['permessi'];
+							&& self::impronta_accesso( self::cartella_ambito( (string) $chiave ), self::cartella() ) === $ambito['accesso'];
 					},
 					ARRAY_FILTER_USE_BOTH
 				);
@@ -1137,7 +1193,7 @@ final class Conformita_Core_Allegati {
 	 * @return string
 	 */
 	private static function motivo_radice_cambiata() {
-		return __( 'La cartella dei caricamenti, il suo indirizzo o i suoi permessi non sono quelli con cui la protezione è stata verificata: gli esiti misurati prima parlano di un\'altra cartella.', 'conformita-core' );
+		return __( 'La cartella dei caricamenti, il suo indirizzo o i permessi delle sue cartelle non sono quelli con cui la protezione è stata verificata: gli esiti misurati prima parlano di un\'altra cartella.', 'conformita-core' );
 	}
 
 	/**
@@ -1164,7 +1220,7 @@ final class Conformita_Core_Allegati {
 					'motivo'     => __( 'I file di regole sono stati riscritti: quello che si sapeva prima non vale più.', 'conformita-core' ),
 					'ambiti'     => array(),
 					'radice'     => self::identita(),
-					'permessi'   => self::permessi_attesi( self::cartella() ),
+					'accesso'    => self::impronta_accesso( self::cartella(), self::cartella() ),
 				)
 			),
 			false

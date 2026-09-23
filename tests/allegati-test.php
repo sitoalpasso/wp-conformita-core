@@ -3,7 +3,7 @@
  * Cartella protetta, verifica della protezione, deposito e impronta.
  *
  * Righe di collaudo C-115..C-125, C-146, C-147, C-153, C-154..C-158, C-163..C-166,
- * C-169, C-170, C-172..C-175, C-177..C-190.
+ * C-169, C-170, C-172..C-175, C-177..C-191.
  *
  * **Come si simula il server.** La verifica della protezione e' una richiesta
  * HTTP verso il sito stesso. Qui non c'e' nessun server web, quindi la
@@ -2692,10 +2692,13 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	/**
 	 * Un server che nega i `.txt` per regola e per il resto serve quello che riesce a leggere.
 	 *
-	 * Serve un file solo se e' leggibile da tutti, come un server statico che
-	 * gira con un utente diverso da quello di PHP: un file che non puo'
-	 * leggere lo nega, qualunque siano le regole. Per i `.pdf` non ha nessuna
-	 * regola, quindi un documento leggibile esce.
+	 * Serve un file solo se lo raggiunge e lo legge un utente qualunque, come
+	 * un server statico che gira con un utente diverso da quello di PHP: ogni
+	 * cartella lungo il percorso, dalla cartella dei caricamenti in giu',
+	 * deve essere attraversabile da tutti, e il file leggibile da tutti. Un
+	 * file che non raggiunge o non legge lo nega, qualunque siano le regole.
+	 * Per i `.pdf` non ha nessuna regola, quindi un documento raggiungibile
+	 * esce.
 	 *
 	 * @return Closure
 	 */
@@ -2710,13 +2713,28 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 
 			$percorso = $radice . substr( $indirizzo, strlen( $indirizzo_radice ) );
 
-			clearstatcache( true, $percorso );
+			clearstatcache();
 
-			if ( is_file( $percorso ) && 0 !== ( fileperms( $percorso ) & 0004 ) ) {
-				return $this->esca_servita();
+			if ( ! is_file( $percorso ) || 0 === ( fileperms( $percorso ) & 0004 ) ) {
+				return $this->rifiuto_del_server();
 			}
 
-			return $this->rifiuto_del_server();
+			$fine     = dirname( $radice );
+			$cartella = dirname( $percorso );
+
+			while ( true ) {
+				if ( 0 === ( fileperms( $cartella ) & 0001 ) ) {
+					return $this->rifiuto_del_server();
+				}
+
+				if ( $cartella === $fine ) {
+					break;
+				}
+
+				$cartella = dirname( $cartella );
+			}
+
+			return $this->esca_servita();
 		};
 	}
 
@@ -2985,5 +3003,87 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 			'Tutte e due le richieste vanno ad A, dove la verifica e\' cominciata.'
 		);
 		$this->assertSame( 'ignota', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'], 'Su B l\'ambito provato su A non vale.' );
+	}
+
+	/**
+	 * C-191: resa attraversabile la sottocartella del mese, l'esito misurato prima non vale.
+	 *
+	 * I permessi che WordPress da' al documento non dicono tutto: il server
+	 * arriva al file solo se puo' attraversare ogni cartella lungo il
+	 * percorso. Con la cartella a 0744 il documento e' leggibile da tutti ma
+	 * nessuno ci arriva, e l'ambito risulta negato; portata a 0755, il
+	 * documento ha gli stessi permessi di prima e diventa raggiungibile.
+	 * L'esito deve smettere di valere senza richieste, e il deposito
+	 * successivo deve riprovare l'ambito e rifiutarsi.
+	 */
+	public function test_c191_sottocartella_resa_attraversabile_lesito_non_vale() {
+		$this->attraversamento_cambiato( Conformita_Core_Allegati::sottocartella_corrente() );
+	}
+
+	/**
+	 * C-191: lo stesso per una cartella intermedia, quella dell'anno.
+	 */
+	public function test_c191_cartella_intermedia_resa_attraversabile_lesito_non_vale() {
+		$this->attraversamento_cambiato( dirname( Conformita_Core_Allegati::sottocartella_corrente() ) );
+	}
+
+	/**
+	 * Deposita con una cartella del percorso chiusa all'attraversamento, la apre, e riprova.
+	 *
+	 * @param string $sotto_da_aprire Cartella, dentro quella protetta, da portare da 0744 a 0755.
+	 */
+	private function attraversamento_cambiato( $sotto_da_aprire ) {
+		$atto      = $this->atto_valido();
+		$sotto     = Conformita_Core_Allegati::sottocartella_corrente();
+		$cartella  = Conformita_Core_Allegati::cartella() . $sotto;
+		$da_aprire = Conformita_Core_Allegati::cartella() . $sotto_da_aprire;
+
+		$this->assertTrue( wp_mkdir_p( $cartella ) );
+
+		$modo_cartella  = fileperms( $cartella ) & 07777;
+		$modo_da_aprire = fileperms( $da_aprire ) & 07777;
+
+		$this->risposta_finta = $this->server_senza_regole_per_i_pdf();
+
+		// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- prova: i permessi sul disco sono cio' che si sta verificando.
+		chmod( $cartella, 0755 );
+		chmod( $da_aprire, 0744 );
+
+		try {
+			$primo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'primo.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertIsInt( $primo, is_wp_error( $primo ) ? $primo->get_error_message() : '' );
+			$this->assertSame( 'verificata', Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'], 'A cartella non attraversabile il server non arriva al documento.' );
+
+			chmod( $da_aprire, 0755 );
+
+			$chieste = $this->richieste;
+
+			$this->assertSame(
+				'ignota',
+				Conformita_Core_Allegati::stato_ambito( $sotto, 'pdf' )['copertura'],
+				'Resa attraversabile la cartella, l\'ambito misurato prima non vale.'
+			);
+			$this->assertSame( $chieste, $this->richieste, 'Leggere lo stato non fa richieste.' );
+
+			$secondo = conformita_core_deposita_allegato(
+				$atto,
+				$this->file_da_depositare( 'secondo.pdf' ),
+				array( 'origine' => 'percorso_locale' )
+			);
+
+			$this->assertWPError( $secondo, 'Adesso il server arriva al documento: il deposito si rifiuta.' );
+			$this->assertSame( 'conformita_core_protezione_non_verificata', $secondo->get_error_code() );
+			$this->assertGreaterThan( $chieste, $this->richieste, 'L\'ambito e\' stato riprovato.' );
+			$this->assertFileDoesNotExist( $cartella . '/secondo.pdf' );
+		} finally {
+			chmod( $da_aprire, $modo_da_aprire );
+			chmod( $cartella, $modo_cartella );
+		}
+		// phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_chmod
 	}
 }
