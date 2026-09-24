@@ -26,6 +26,21 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	const TIPO_ALTRO    = 'prova_altra';
 
 	/**
+	 * Le operazioni che core registra da sé, scritte per esteso.
+	 */
+	const AZIONI_RISERVATE = array(
+		'creazione',
+		'pubblicazione',
+		'rimozione',
+		'cambio_stato',
+		'modifica',
+		'modifica_fine_pubblicazione',
+		'eliminazione',
+		'allegato_aggiunto',
+		'allegato_eliminato',
+	);
+
+	/**
 	 * Numero dell'ultima voce prima dell'operazione provata.
 	 *
 	 * @var int
@@ -287,6 +302,25 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->assertCount( 1, $voci );
 		$this->assertSame( array( 'campi' => array( 'post_content', 'post_excerpt' ) ), $voci[0]['dettagli'] );
 		$this->assertStringNotContainsString( 'Testo nuovo', wp_json_encode( $voci[0] ), 'Il registro conserva i nomi dei campi, non i valori.' );
+
+		/*
+		 * Al cambio di stato si tralasciano solo i campi che WordPress riscrive
+		 * da sé. L'indirizzo e la data cambiati da chi agisce, nello stesso
+		 * salvataggio che cambia lo stato, sono una modifica come le altre.
+		 */
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'            => $id,
+				'post_status'   => 'private',
+				'post_name'     => 'indirizzo-scelto',
+				'post_date'     => '2026-09-01 10:00:00',
+				'post_date_gmt' => '2026-09-01 10:00:00',
+			)
+		);
+		$this->assertSame( array( 'rimozione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name', 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'] );
 	}
 
 	/**
@@ -358,6 +392,22 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 				$voci
 			)
 		);
+
+		/*
+		 * Un contenuto pubblicato, messo nel cestino e ripreso: WordPress
+		 * aggiunge e poi toglie il suffisso del cestino al suo indirizzo, e
+		 * nessuna delle due cose è una modifica di chi agisce.
+		 */
+		$ripreso = $this->contenuto( 'publish' );
+		$this->assertNotSame( '', get_post( $ripreso )->post_name, 'Precondizione: il contenuto pubblicato ha un indirizzo.' );
+
+		$this->segna();
+		wp_trash_post( $ripreso );
+		$this->assertStringContainsString( '__trashed', get_post( $ripreso )->post_name, 'Precondizione: nel cestino l\'indirizzo ha il suffisso.' );
+		wp_untrash_post( $ripreso );
+		$this->assertStringNotContainsString( '__trashed', get_post( $ripreso )->post_name, 'Precondizione: fuori dal cestino il suffisso sparisce.' );
+
+		$this->assertSame( array( 'rimozione', 'cambio_stato' ), $this->azioni_nuove() );
 	}
 
 	/**
@@ -390,6 +440,38 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			array_slice( wp_list_pluck( $dopo, 'id' ), 0, count( $prima ) ),
 			'Le voci di prima restano tutte.'
 		);
+
+		/*
+		 * La voce attesta un fatto avvenuto: se la banca dati rifiuta la
+		 * cancellazione della riga, il contenuto c'è ancora e la voce non si
+		 * scrive.
+		 */
+		$resta = $this->contenuto( 'publish' );
+
+		$this->segna();
+		add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+		$esito = wp_delete_post( $resta, true );
+		remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+
+		$this->assertFalse( $esito, 'Precondizione: l\'eliminazione e\' fallita.' );
+		$this->assertInstanceOf( WP_Post::class, get_post( $resta ), 'Precondizione: il contenuto c\'e\' ancora.' );
+		$this->assertNotContains( 'eliminazione', $this->azioni_nuove(), 'Nessuna voce per un\'eliminazione non avvenuta.' );
+	}
+
+	/**
+	 * Fa fallire la cancellazione della riga di un contenuto.
+	 *
+	 * @param string $sql Istruzione.
+	 * @return string
+	 */
+	public function rompi_eliminazione( $sql ) {
+		global $wpdb;
+
+		if ( 0 === strpos( $sql, 'DELETE FROM `' . $wpdb->posts . '`' ) ) {
+			return 'SELECT * FROM tabella_che_non_esiste';
+		}
+
+		return $sql;
 	}
 
 	/**
@@ -495,6 +577,75 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->assertCount( 1, $voci, 'Una scrittura su due righe, una voce.' );
 		$this->assertSame( array( '2026-10-05', '2026-10-06' ), $voci[0]['dettagli']['valore_precedente'] );
 		$this->assertSame( array( '2026-10-09', '2026-10-09' ), $voci[0]['dettagli']['valore_nuovo'] );
+	}
+
+	/**
+	 * C-202, seconda parte: le strade che non nominano il contenuto giusto.
+	 *
+	 * La cancellazione per chiave su tutti i contenuti annuncia la scrittura
+	 * senza contenuto, o con quello che ha passato chi la chiede, che non è
+	 * detto sia fra quelli toccati. Il cambio di chiave di una riga annuncia la
+	 * chiave nuova. In tutti e tre i casi la fine della pubblicazione cambia su
+	 * contenuti precisi, e ciascuno deve avere la sua voce.
+	 */
+	public function test_c202_fine_pubblicazione_strade_indirette() {
+		global $wpdb;
+
+		wp_set_current_user( $this->utente() );
+
+		$chiave = conformita_core_chiave_fine_pubblicazione();
+		$primo  = $this->contenuto( 'publish' );
+		$altro  = $this->contenuto( 'publish' );
+		$bozza  = $this->contenuto( 'draft' );
+		$senza  = $this->contenuto( 'publish' );
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $primo, '2026-10-20' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $altro, '2026-10-21' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $bozza, '2026-10-22' ) );
+
+		$this->segna();
+		$this->assertTrue( delete_post_meta_by_key( $chiave ) );
+		$this->assertSame( array(), get_post_meta( $primo, $chiave, false ), 'Precondizione: la fine non c\'e\' piu\'.' );
+
+		$attese = array(
+			$primo => array( array( '2026-10-20' ), array() ),
+			$altro => array( array( '2026-10-21' ), array() ),
+		);
+		$lette  = array();
+
+		foreach ( $this->nuove() as $voce ) {
+			$this->assertSame( 'modifica_fine_pubblicazione', $voce['azione'] );
+			$lette[ $voce['contenuto'] ] = array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+		}
+
+		ksort( $lette );
+		$this->assertSame( $attese, $lette, 'Cancellazione per chiave: una voce per ogni contenuto pubblicato toccato, nessuna per la bozza.' );
+
+		// La stessa cancellazione, chiesta nominando un contenuto che non ha la fine.
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $primo, '2026-10-25' ) );
+		$this->segna();
+		$this->assertTrue( delete_metadata( 'post', $senza, $chiave, '', true ) );
+		$this->assertSame( array( $primo ), wp_list_pluck( $this->nuove(), 'contenuto' ), 'La voce va al contenuto toccato, non a quello nominato.' );
+
+		// Una riga della fine che cambia chiave: la fine sparisce.
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $primo, '2026-10-26' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: serve il numero della riga.
+		$mid = (int) $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $primo, $chiave ) );
+		$this->assertGreaterThan( 0, $mid, 'Precondizione: la riga della fine esiste.' );
+
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-26', 'chiave_qualunque' ) );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Cambio di chiave verso un\'altra: ' . wp_json_encode( $voci ) );
+		$this->assertSame( $primo, $voci[0]['contenuto'] );
+		$this->assertSame( array( array( '2026-10-26' ), array() ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+
+		// E il contrario: un'altra riga che prende la chiave della fine.
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-27', $chiave ) );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Cambio di chiave verso la fine: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array(), array( '2026-10-27' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
 	}
 
 	/**
@@ -796,7 +947,12 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			'origine dichiarata'                => array( array_merge( $base, array( 'origine' => 'automatica' ) ), 'conformita_core_registro_chiave_sconosciuta' ),
 		);
 
-		foreach ( Conformita_Core_Registro_Automatico::azioni() as $riservata ) {
+		/*
+		 * L'elenco è scritto qui e non letto dal codice: se un nome sparisse
+		 * dall'elenco dei riservati, una prova che lo leggesse da lì
+		 * smetterebbe di provarlo senza accorgersene.
+		 */
+		foreach ( self::AZIONI_RISERVATE as $riservata ) {
 			$casi[ 'azione riservata ' . $riservata ] = array( array_merge( $base, array( 'azione' => $riservata ) ), 'conformita_core_registro_azione_riservata' );
 		}
 
@@ -1165,7 +1321,8 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	public function test_c223_contratto_pubblico() {
 		$this->assertSame( '1.4.0', conformita_core_versione_api() );
 		$this->assertTrue( conformita_core_api_compatibile( '1.3.0', conformita_core_versione_api() ), 'Chi chiedeva 1.3.0 resta compatibile.' );
-		$this->assertSame( Conformita_Core_Registro::CAPACITA, conformita_core_capacita_registro() );
+		$this->assertSame( 'conformita_core_leggere_registro', conformita_core_capacita_registro(), 'Il nome della capability e\' parte del contratto: si scrive per esteso.' );
+		$this->assertSame( self::AZIONI_RISERVATE, Conformita_Core_Registro_Automatico::azioni(), 'I nomi riservati sono parte del contratto.' );
 	}
 
 	/**

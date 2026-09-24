@@ -58,9 +58,14 @@ final class Conformita_Core_Registro_Automatico {
 	);
 
 	/**
-	 * I campi che WordPress riscrive da sé quando lo stato cambia.
+	 * Data che WordPress usa per dire "non ancora fissata".
 	 */
-	const CAMPI_DEL_CAMBIO_DI_STATO = array( 'post_name', 'post_date', 'post_date_gmt' );
+	const DATA_NON_FISSATA = '0000-00-00 00:00:00';
+
+	/**
+	 * Suffisso che WordPress aggiunge all'indirizzo di un contenuto nel cestino.
+	 */
+	const SUFFISSO_CESTINO = '__trashed';
 
 	/**
 	 * Il meccanismo ha già agganciato i propri ascoltatori.
@@ -75,6 +80,14 @@ final class Conformita_Core_Registro_Automatico {
 	 * @var array<int, array<int, string>>
 	 */
 	private static $fine_prima = array();
+
+	/**
+	 * Righe della fine pubblicazione toccate da una scrittura il cui annuncio
+	 * non nomina il contenuto giusto, per numero di riga.
+	 *
+	 * @var array<int, int>
+	 */
+	private static $righe_fine = array();
 
 	/**
 	 * Contenuti in corso di eliminazione, per identificativo.
@@ -141,6 +154,7 @@ final class Conformita_Core_Registro_Automatico {
 
 		self::$avviato         = false;
 		self::$fine_prima      = array();
+		self::$righe_fine      = array();
 		self::$in_eliminazione = array();
 	}
 
@@ -178,6 +192,12 @@ final class Conformita_Core_Registro_Automatico {
 			),
 			array(
 				'aggancio'  => 'before_delete_post',
+				'metodo'    => 'eliminazione_inizio',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'deleted_post',
 				'metodo'    => 'eliminazione',
 				'priorita'  => PHP_INT_MIN,
 				'argomenti' => 2,
@@ -223,6 +243,12 @@ final class Conformita_Core_Registro_Automatico {
 				'metodo'    => 'fine_prima',
 				'priorita'  => PHP_INT_MIN,
 				'argomenti' => 3,
+			),
+			array(
+				'aggancio'  => 'update_post_metadata_by_mid',
+				'metodo'    => 'fine_rinominata',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 4,
 			),
 			array(
 				'aggancio'  => 'added_post_meta',
@@ -319,22 +345,9 @@ final class Conformita_Core_Registro_Automatico {
 		}
 
 		$cambiati = array();
-		$campi    = self::CAMPI;
 
-		/*
-		 * Quando lo stato cambia, WordPress assegna da sé il nome nell'indirizzo
-		 * (lo genera alla pubblicazione, gli aggiunge un suffisso nel cestino) e
-		 * la data in UTC (la scrive alla pubblicazione). Contarli come modifica
-		 * affiancherebbe a ogni cambio di stato una voce che attribuisce a chi ha
-		 * agito un cambiamento che non ha fatto. Lo stesso salvataggio registra
-		 * comunque ogni altro campo cambiato.
-		 */
-		if ( $prima->post_status !== $dopo->post_status ) {
-			$campi = array_diff( $campi, self::CAMPI_DEL_CAMBIO_DI_STATO );
-		}
-
-		foreach ( $campi as $campo ) {
-			if ( (string) $prima->$campo !== (string) $dopo->$campo ) {
+		foreach ( self::CAMPI as $campo ) {
+			if ( (string) $prima->$campo !== (string) $dopo->$campo && ! self::riscritto_da_wordpress( $campo, $prima, $dopo ) ) {
 				$cambiati[] = $campo;
 			}
 		}
@@ -344,6 +357,71 @@ final class Conformita_Core_Registro_Automatico {
 		}
 
 		self::scrivi( $dopo, 'modifica', array( 'campi' => $cambiati ) );
+	}
+
+	/**
+	 * Il campo è cambiato perché WordPress lo riscrive da sé al cambio di stato.
+	 *
+	 * Contare questi cambiamenti come modifica affiancherebbe a ogni cambio di
+	 * stato una voce che attribuisce a chi ha agito un cambiamento che non ha
+	 * fatto. Ma il cambio di stato da solo non basta a dirlo: chi pubblica o
+	 * rimuove può, nello stesso salvataggio, cambiare lui l'indirizzo o la
+	 * data, e quello è una modifica. Per questo si riconosce la forma precisa
+	 * di ciò che fa WordPress, e solo quella.
+	 *
+	 * - Il nome nell'indirizzo: WordPress lo genera quando il contenuto non ne
+	 *   aveva uno, gli aggiunge il suffisso del cestino quando ci entra e lo
+	 *   toglie quando ne esce, e lo svuota quando il contenuto passa in attesa
+	 *   di revisione per mano di chi non può pubblicarlo.
+	 * - Le due date: WordPress le fissa quando la data non era ancora fissata,
+	 *   cioè quando quella in UTC era la data nulla.
+	 *
+	 * @param string  $campo Nome del campo.
+	 * @param WP_Post $prima Contenuto prima.
+	 * @param WP_Post $dopo  Contenuto dopo.
+	 * @return bool
+	 */
+	private static function riscritto_da_wordpress( $campo, WP_Post $prima, WP_Post $dopo ) {
+		if ( $prima->post_status === $dopo->post_status ) {
+			return false;
+		}
+
+		if ( 'post_name' === $campo ) {
+			$nome_prima = (string) $prima->post_name;
+			$nome_dopo  = (string) $dopo->post_name;
+
+			return '' === $nome_prima
+				|| ( 'pending' === $dopo->post_status && '' === $nome_dopo )
+				|| ( 'trash' === $dopo->post_status && ! str_contains( $nome_prima, self::SUFFISSO_CESTINO ) && str_contains( $nome_dopo, self::SUFFISSO_CESTINO ) )
+				|| ( 'trash' === $prima->post_status && str_contains( $nome_prima, self::SUFFISSO_CESTINO ) );
+		}
+
+		if ( 'post_date' === $campo || 'post_date_gmt' === $campo ) {
+			return self::DATA_NON_FISSATA === (string) $prima->post_date_gmt;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Segna il contenuto che WordPress sta per eliminare.
+	 *
+	 * WordPress cancella i metadati del contenuto prima della sua riga: il
+	 * segno tiene fuori dal registro la cancellazione della fine
+	 * pubblicazione, che l'eliminazione comprende. La voce si scrive dopo, in
+	 * `eliminazione()`, quando la riga non c'è più.
+	 *
+	 * @param int          $post_id Identificativo del contenuto.
+	 * @param WP_Post|null $post    Contenuto.
+	 */
+	public static function eliminazione_inizio( $post_id, $post = null ) {
+		$post = $post instanceof WP_Post ? $post : get_post( $post_id );
+
+		if ( ! $post instanceof WP_Post || ! Conformita_Core_Tipi::registrato( $post->post_type ) || in_array( $post->post_status, array( 'new', 'auto-draft' ), true ) ) {
+			return;
+		}
+
+		self::$in_eliminazione[ (int) $post->ID ] = true;
 	}
 
 	/**
@@ -357,17 +435,28 @@ final class Conformita_Core_Registro_Automatico {
 	 * proprio nell'ultimo passo. Resta fuori solo la bozza automatica, che non
 	 * è mai diventata un contenuto.
 	 *
+	 * La voce si scrive dopo che la banca dati ha cancellato la riga, non
+	 * prima: attesta un fatto avvenuto, e se la cancellazione fallisce il
+	 * contenuto c'è ancora. Si scrive solo per i contenuti segnati da
+	 * `eliminazione_inizio()`: WordPress annuncia così anche l'eliminazione
+	 * degli allegati, che hanno le loro voci.
+	 *
 	 * @param int          $post_id Identificativo del contenuto.
-	 * @param WP_Post|null $post    Contenuto.
+	 * @param WP_Post|null $post    Contenuto, com'era prima dell'eliminazione.
 	 */
 	public static function eliminazione( $post_id, $post = null ) {
-		$post = $post instanceof WP_Post ? $post : get_post( $post_id );
+		$post_id = (int) $post_id;
 
-		if ( ! $post instanceof WP_Post || in_array( $post->post_status, array( 'new', 'auto-draft' ), true ) ) {
+		if ( ! isset( self::$in_eliminazione[ $post_id ] ) ) {
 			return;
 		}
 
-		self::$in_eliminazione[ (int) $post->ID ] = true;
+		unset( self::$in_eliminazione[ $post_id ], self::$fine_prima[ $post_id ] );
+
+		if ( ! $post instanceof WP_Post || (int) $post->ID !== $post_id ) {
+			Conformita_Core_Registro::annota_mancata();
+			return;
+		}
 
 		self::scrivi( $post, 'eliminazione', array( 'stato' => (string) $post->post_status ) );
 	}
@@ -451,16 +540,81 @@ final class Conformita_Core_Registro_Automatico {
 	 * in memoria un valore vecchio, e la voce successiva lo confronterebbe con
 	 * un dato che non c'entra.
 	 *
+	 * Quando la scrittura è una cancellazione, WordPress passa l'elenco delle
+	 * righe, e il contenuto che nomina non è detto sia quello delle righe: la
+	 * cancellazione per chiave su tutti i contenuti non ne nomina nessuno, o
+	 * nomina quello che ha passato chi l'ha chiesta. Il contenuto si legge
+	 * allora da ciascuna riga, finché le righe esistono, e si ricorda per
+	 * l'annuncio che segue la scrittura.
+	 *
 	 * @param int|array $meta_id Identificativo della riga, o delle righe.
 	 * @param int       $post_id Identificativo del contenuto.
 	 * @param string    $chiave  Chiave del metadato.
 	 */
 	public static function fine_prima( $meta_id, $post_id, $chiave ) {
-		unset( $meta_id );
-
-		if ( Conformita_Core_Scadenza::CHIAVE === $chiave ) {
-			self::$fine_prima[ (int) $post_id ] = self::valori_fine( (int) $post_id );
+		if ( Conformita_Core_Scadenza::CHIAVE !== $chiave ) {
+			return;
 		}
+
+		if ( ! is_array( $meta_id ) ) {
+			self::$fine_prima[ (int) $post_id ] = self::valori_fine( (int) $post_id );
+			return;
+		}
+
+		/*
+		 * Più righe dello stesso contenuto nella stessa scrittura: i valori di
+		 * prima si leggono alla prima riga, quando nessuna è ancora cambiata.
+		 */
+		$letti = array();
+
+		foreach ( $meta_id as $riga_id ) {
+			$riga = get_metadata_by_mid( 'post', (int) $riga_id );
+
+			if ( ! $riga ) {
+				continue;
+			}
+
+			$contenuto = (int) $riga->post_id;
+
+			self::$righe_fine[ (int) $riga_id ] = $contenuto;
+
+			if ( ! isset( $letti[ $contenuto ] ) ) {
+				$letti[ $contenuto ]            = true;
+				self::$fine_prima[ $contenuto ] = self::valori_fine( $contenuto );
+			}
+		}
+	}
+
+	/**
+	 * Legge la fine della pubblicazione prima che una riga cambi chiave.
+	 *
+	 * Una riga della fine che prende un'altra chiave toglie la fine al suo
+	 * contenuto, ma WordPress annuncia la scrittura con la chiave nuova, prima
+	 * e dopo. Solo questo filtro, che WordPress chiama prima di cambiare una
+	 * riga per numero, vede la chiave di prima. Il filtro non cambia niente:
+	 * restituisce quello che ha ricevuto.
+	 *
+	 * @param mixed        $risposta Risposta di un filtro precedente, nulla se nessuno ha risposto.
+	 * @param int          $meta_id  Identificativo della riga.
+	 * @param mixed        $valore   Valore nuovo.
+	 * @param string|false $chiave   Chiave nuova, falso se non cambia.
+	 * @return mixed
+	 */
+	public static function fine_rinominata( $risposta, $meta_id, $valore, $chiave ) {
+		unset( $valore );
+
+		if ( null !== $risposta || false === $chiave || Conformita_Core_Scadenza::CHIAVE === $chiave ) {
+			return $risposta;
+		}
+
+		$riga = get_metadata_by_mid( 'post', (int) $meta_id );
+
+		if ( $riga && Conformita_Core_Scadenza::CHIAVE === $riga->meta_key ) {
+			self::$righe_fine[ (int) $meta_id ]       = (int) $riga->post_id;
+			self::$fine_prima[ (int) $riga->post_id ] = self::valori_fine( (int) $riga->post_id );
+		}
+
+		return $risposta;
 	}
 
 	/**
@@ -476,12 +630,31 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param string    $chiave  Chiave del metadato.
 	 */
 	public static function fine_dopo( $meta_id, $post_id, $chiave ) {
-		unset( $meta_id );
+		$contenuti = array();
 
-		if ( Conformita_Core_Scadenza::CHIAVE !== $chiave ) {
-			return;
+		foreach ( (array) $meta_id as $riga_id ) {
+			if ( isset( self::$righe_fine[ (int) $riga_id ] ) ) {
+				$contenuti[] = self::$righe_fine[ (int) $riga_id ];
+				unset( self::$righe_fine[ (int) $riga_id ] );
+			}
 		}
 
+		if ( array() === $contenuti && Conformita_Core_Scadenza::CHIAVE === $chiave ) {
+			$contenuti[] = (int) $post_id;
+		}
+
+		foreach ( array_unique( $contenuti ) as $contenuto ) {
+			self::confronta_fine( $contenuto );
+		}
+	}
+
+	/**
+	 * Confronta la fine della pubblicazione di un contenuto con quella di
+	 * prima, e scrive la voce se è cambiata.
+	 *
+	 * @param int $post_id Identificativo del contenuto.
+	 */
+	private static function confronta_fine( $post_id ) {
 		$post_id = (int) $post_id;
 		$prima   = isset( self::$fine_prima[ $post_id ] ) ? self::$fine_prima[ $post_id ] : array();
 		$dopo    = self::valori_fine( $post_id );
