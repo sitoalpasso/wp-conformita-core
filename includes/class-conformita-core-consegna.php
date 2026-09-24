@@ -679,6 +679,18 @@ final class Conformita_Core_Consegna {
 			)
 		);
 
+		/*
+		 * Il file di un contenuto che la sua sezione vieta di indicizzare porta
+		 * il divieto anche lui: il documento di un atto contiene gli stessi dati
+		 * dell'atto, e i motori indicizzano i PDF. Il punto di consegna esce
+		 * prima che WordPress prepari le intestazioni della pagina, quindi il
+		 * divieto si aggiunge qui. Nessun divieto sui file delle sezioni che
+		 * consentono l'indicizzazione. Riga C-228.
+		 */
+		if ( Conformita_Core_Indicizzazione::contenuto_vietato( $allegato ) ) {
+			$intestazioni = Conformita_Core_Indicizzazione::aggiungi_divieto( $intestazioni );
+		}
+
 		if ( $dentro ) {
 			/*
 			 * La direttiva `sandbox` e' deliberatamente fuori. I visualizzatori
