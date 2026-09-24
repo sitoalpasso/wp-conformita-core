@@ -9,7 +9,8 @@ un passaggio che lo prevede, leggere le voci di un atto quando costruirà il ref
 un proprio ruolo il permesso di consultare il registro. Nessun registro proprio nell'albo:
 se ci fosse, esisterebbero due verità su chi ha fatto che cosa.
 
-**Stato: costruita, con le righe di collaudo verdi in locale; verifica continua in corso.**
+**Stato: costruita, riletta in proprio prima del primo giro di revisione (punto 11, ultima
+parte), con le righe di collaudo verdi in locale.**
 Le sezioni sono al passato dove dicono cosa il codice fa.
 
 ---
@@ -116,9 +117,9 @@ sono potute scrivere, con la data della prima e dell'ultima.
 | `pubblicazione` | l'ingresso nello stato pubblicato, da qualunque stato |
 | `rimozione` | l'uscita dallo stato pubblicato, verso qualunque stato, cestino compreso |
 | `cambio_stato` | ogni altro cambio di stato, compresi quelli verso gli stati propri di un componente |
-| `modifica` | un campo del contenuto cambiato, fuori dalla bozza; si registrano i nomi dei campi, non i valori |
-| `modifica_fine_pubblicazione` | ogni cambio della data di fine, con il valore di prima e di dopo |
-| `eliminazione` | l'eliminazione definitiva, con lo stato da cui è stato eliminato; bozze comprese |
+| `modifica` | un campo del contenuto cambiato, fuori dalla bozza; si registrano i nomi dei campi, non i valori. Restano fuori solo i cambiamenti che WordPress fa da sé al cambio di stato (punto 8) |
+| `modifica_fine_pubblicazione` | ogni cambio della data di fine, con il valore di prima e di dopo, anche quando la scrittura non nomina il contenuto: la cancellazione per chiave su tutti i contenuti, il cambio di chiave di una riga |
+| `eliminazione` | l'eliminazione definitiva, con lo stato da cui è stato eliminato; bozze comprese. Si scrive dopo che la banca dati ha cancellato la riga del contenuto |
 | `allegato_aggiunto`, `allegato_eliminato` | sul contenuto padre, con il numero dell'allegato: al caricamento e all'eliminazione del file, quando un allegato cambia padre con il salvataggio di WordPress (tolto da uno, aggiunto all'altro), e quando lo si collega o scollega dalla libreria dei media |
 
 Questi nomi sono riservati: un componente non li può usare per le proprie voci.
@@ -141,14 +142,15 @@ Questi nomi sono riservati: un componente non li può usare per le proprie voci.
 | La scrittura riesce ma la riga non dice quello che si voleva | la rilettura se ne accorge e la funzione restituisce errore. La riga resta, perché il registro non cancella |
 | Due scritture con la stessa chiave nello stesso istante | una riesce, l'altra riceve l'errore con il numero della voce che esiste già. Lo garantisce il vincolo della banca dati, non solo il controllo che lo precede (guasto G12) |
 | La tabella non c'è | la scrittura fallisce come sopra; l'opzione della versione non si scrive, quindi l'avvio successivo riprova a crearla |
-| Un filtro sconosciuto o malformato | errore, mai un filtro ignorato: un filtro ignorato mostrerebbe tutte le voci come se fossero quelle chieste |
+| Un filtro sconosciuto o malformato | errore, mai un filtro ignorato: un filtro ignorato mostrerebbe tutte le voci come se fossero quelle chieste. Un filtro con valore nullo è malformato, e così la pagina senza la misura della pagina |
+| La banca dati rifiuta la cancellazione della riga di un contenuto | il contenuto c'è ancora e la voce `eliminazione` non si scrive. WordPress però ha già cancellato i metadati, data di fine compresa, e quella cancellazione resta senza voce (punto 8) |
 | Un utente eliminato | la voce resta con il suo numero, e la schermata scrive "utente N, non più presente" |
 | Un contenuto eliminato | le sue voci restano; la schermata scrive "N (tipo), non più presente" |
 
 ## 7. Le prove
 
 Righe C-195..C-224 al punto 10; file e metodi al punto 1. In locale, su WordPress 6.5 con PHP
-8.4, l'intera batteria dà 266 prove verdi, e il controllo di stile è pulito.
+8.4, l'intera batteria dà 267 prove verdi, e il controllo di stile è pulito.
 
 ## 8. Che cosa deliberatamente non fa
 
@@ -157,10 +159,16 @@ Righe C-195..C-224 al punto 10; file e metodi al punto 1. In locale, su WordPres
   illeggibile. Si registrano la nascita, ogni cambio di stato, l'eliminazione e ogni modifica
   da quando il contenuto non è più una bozza. Stessa regola per la data di fine e per gli
   allegati di una bozza.
-- **Quando lo stato cambia, il nome nell'indirizzo e le date non contano come modifica.**
-  WordPress li riscrive da sé in quel passaggio (il nome alla pubblicazione e nel cestino, la
-  data in UTC alla pubblicazione). Gli altri campi cambiati nello stesso salvataggio si
-  registrano.
+- **Quando lo stato cambia, ciò che WordPress riscrive da sé non conta come modifica**, e si
+  riconosce dalla sua forma precisa: il nome nell'indirizzo generato quando mancava, svuotato
+  al passaggio in verifica per chi non può pubblicare, con il suffisso del cestino aggiunto
+  entrando e tolto uscendo; le due date fissate quando non lo erano ancora. Un nome o una data
+  cambiati da chi agisce nello stesso salvataggio si registrano.
+- **Un'eliminazione che fallisce a metà lascia un buco.** WordPress cancella i metadati del
+  contenuto prima della sua riga. Se la banca dati rifiuta poi la cancellazione della riga, il
+  contenuto resta senza la data di fine e senza la voce che lo dice. Serve un guasto della
+  banca dati nel mezzo di un'eliminazione; accorgersene richiederebbe di rimandare la voce a
+  fine richiesta, e nessuna riga del catalogo lo chiede.
 - **I valori dei campi non si conservano**, solo i loro nomi. Il titolo e il testo di un atto
   possono contenere dati personali.
 - **Collegando dalla libreria dei media un allegato che aveva già un padre**, la voce
@@ -212,12 +220,12 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 |---|---|---|
 | C-195 | Un contenuto in verifica viene pubblicato, con il sito in un fuso diverso da UTC | una voce e una sola, `pubblicazione`, con utente, contenuto, tipo, sezione, origine automatica, stati di prima e di dopo, e l'istante dell'orologio di core conservato in UTC |
 | C-196 | Nascita di una bozza, di un contenuto già pubblicato, di una bozza automatica poi salvata | `creazione`; `creazione` e `pubblicazione`; niente per la bozza automatica e `creazione` al suo primo salvataggio |
-| C-197 | Modifica del titolo di un pubblicato e di uno in verifica; salvataggio senza modifiche; modifica di testo e riassunto | una voce `modifica` con i nomi dei campi; nessuna voce; una voce con i due nomi e nessun valore |
+| C-197 | Modifica del titolo di un pubblicato e di uno in verifica; salvataggio senza modifiche; modifica di testo e riassunto; un pubblicato reso privato cambiando nello stesso salvataggio indirizzo e data | una voce `modifica` con i nomi dei campi; nessuna voce; una voce con i due nomi e nessun valore; `rimozione` e `modifica` con indirizzo e date |
 | C-198 | Un pubblicato va in bozza, in verifica, privato, nel cestino | una voce `rimozione` ciascuno, e nessuna `modifica` accanto |
-| C-199 | Bozza, verifica, bozza, cestino, ripristino | quattro `cambio_stato` con gli stati giusti |
-| C-200 | Eliminazione definitiva di un pubblicato con data di fine | una sola voce `eliminazione` con lo stato; le voci di prima restano tutte |
+| C-199 | Bozza, verifica, bozza, cestino, ripristino; un pubblicato messo nel cestino e ripreso | quattro `cambio_stato` con gli stati giusti; `rimozione` e `cambio_stato`, nessuna `modifica` per il suffisso del cestino |
+| C-200 | Eliminazione definitiva di un pubblicato con data di fine; eliminazione che la banca dati rifiuta | una sola voce `eliminazione` con lo stato; le voci di prima restano tutte; nessuna voce `eliminazione` per il contenuto che c'è ancora |
 | C-201 | Le stesse tre operazioni (titolo, data di fine, allegato) su una bozza e su un contenuto in verifica; eliminazione di una bozza che era stata pubblicata | nella bozza nessuna voce, in verifica tre; l'eliminazione della bozza si registra |
-| C-202 | Data di fine scritta, riscritta uguale, cambiata, tolta; poi due righe duplicate aggiornate con una scrittura | tre voci con prima e dopo, nessuna per la riscrittura uguale; una sola voce per la scrittura su due righe |
+| C-202 | Data di fine scritta, riscritta uguale, cambiata, tolta; poi due righe duplicate aggiornate con una scrittura. Seconda parte: cancellazione per chiave su tutti i contenuti, la stessa nominando un contenuto senza data di fine, una riga della data che cambia chiave e che la riprende | tre voci con prima e dopo, nessuna per la riscrittura uguale; una sola voce per la scrittura su due righe. Una voce per ogni contenuto pubblicato toccato e nessuna per la bozza; la voce va al contenuto toccato, non a quello nominato; una voce per ciascun cambio di chiave |
 | C-203 | Allegato aggiunto ed eliminato su un pubblicato; un allegato libero assegnato a un contenuto e poi spostato su un altro; scollegato e ricollegato dalla libreria dei media | `allegato_aggiunto` e `allegato_eliminato` sul contenuto padre, con il numero dell'allegato; allo spostamento, tolto dal primo e aggiunto al secondo; lo stesso dalla libreria |
 | C-204 | Le stesse operazioni su un articolo di WordPress | nessuna voce e nessuna voce mancata annotata; controllo positivo sul tipo gestito |
 | C-205 | Operazione senza utente, poi con un utente con nome ed email | utente zero, poi il numero; le colonne sono quelle del punto 4 e nella riga non c'è nessun dato della persona |
@@ -247,7 +255,7 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 |---|---|---|
 | C-214 | Amministratore, redattore e abbonato senza il permesso; poi un utente con il permesso | la voce di menu chiede il permesso dedicato; i tre sono rifiutati; il quarto legge |
 | C-215 | Ruoli dopo l'installazione | nessun ruolo ha il permesso di lettura |
-| C-216 | Ogni filtro da solo, due giorni di confine attorno alla mezzanotte del sito, due filtri insieme; filtri sconosciuti o malformati | ogni filtro mostra le voci giuste e nasconde le altre; una voce delle 22:30 UTC è del giorno dopo a Roma; un filtro sbagliato è un errore e la pagina non mostra tutto |
+| C-216 | Ogni filtro da solo, due giorni di confine attorno alla mezzanotte del sito, due filtri insieme; filtri sconosciuti o malformati, compresi quelli con valore nullo e la pagina senza misura | ogni filtro mostra le voci giuste e nasconde le altre; una voce delle 22:30 UTC è del giorno dopo a Roma; un filtro sbagliato è un errore e la pagina non mostra tutto |
 | C-217 | Filtri senza gettone o con gettone sbagliato | non applicati, e la pagina lo dice; controllo positivo con il gettone valido |
 | C-218 | Due voci a cavallo del cambio d'ora, due fusi del sito | orari giusti in entrambi i casi |
 | C-219 | Motivazione, dettagli e titolo con codice | stampati come testo; l'a capo della motivazione diventa un a capo della pagina |
@@ -258,7 +266,7 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 | # | Caso | Atteso |
 |---|---|---|
 | C-222 | Avvio con la versione giusta; installazione con la tabella che non si trova; installazione su tabella allineata | nessuna istruzione alla banca dati; nessuna versione scritta; nessun cambio di struttura |
-| C-223 | Versione di interfaccia | 1.4.0, compatibile con chi chiedeva 1.3.0 |
+| C-223 | Versione di interfaccia; nome del permesso e nomi riservati | 1.4.0, compatibile con chi chiedeva 1.3.0; nome e nomi uguali a quelli scritti per esteso nella prova, non letti dal codice |
 | C-224 | Voci automatiche spente | nessun aggancio rimasto, nessuna voce dalle operazioni di C-195..C-203; riaccese, tornano |
 
 ## 11. La tabella dei guasti: quale riga misura che cosa
@@ -271,7 +279,7 @@ rimesso a posto subito dopo.
 | G01 | nessuna voce di pubblicazione | C-195, C-196, C-204, C-205, C-210 |
 | G02 | nessuna voce di creazione | C-196, C-204, C-205 |
 | G03 | le modifiche delle bozze si registrano | C-201 |
-| G04 | nome e date contano come modifica al cambio di stato | C-195, C-198, C-204, C-205, C-210 |
+| G04 | le date fissate da WordPress alla pubblicazione contano come modifica | C-195, C-210 |
 | G05 | la seconda segnalazione della stessa scrittura produce una voce | C-202 |
 | G06 | la cancellazione dei metadati durante l'eliminazione produce una voce | C-200 |
 | G07 | chi agisce si può dichiarare | C-207 |
@@ -303,6 +311,16 @@ rimesso a posto subito dopo.
 | G31 | utente negativo accettato nei filtri | C-216 |
 | G32 | istante scritto nel fuso del sito | C-195 |
 | G33 | eliminazione di una bozza non registrata | C-201 |
+| G36 | filtro con valore nullo ignorato | C-216 |
+| G37 | pagina senza misura accettata | C-216 |
+| G38 | indirizzo svuotato al passaggio in verifica contato come modifica | C-198 |
+| G39 | suffisso del cestino, entrando, contato come modifica | C-198, C-199, C-204, C-205 |
+| G40 | suffisso del cestino, uscendo, contato come modifica | C-199 |
+| G41 | date fissate da WordPress contate come modifica (come G04) | C-195, C-210 |
+| G42 | indirizzo e date esclusi sempre al cambio di stato, come prima della rilettura | C-197 |
+| G43 | cambio di chiave di una riga della data di fine non visto | C-202 |
+| G44 | righe non lette nella cancellazione per chiave | C-202 |
+| G45 | alla cancellazione per chiave si guarda anche il contenuto nominato | **nessuna, voluto**: è un guasto equivalente. Il contenuto nominato, se ha la data di fine, è già fra quelli toccati; se non la ha, prima e dopo sono uguali e la voce non si scrive |
 
 **Due guasti non hanno fatto diventare rossa nessuna riga, alla prima passata**, e le righe
 sono state corrette prima di chiudere. G25: una voce automatica su un tipo non gestito non si
@@ -316,6 +334,29 @@ che le prove annullano: il permesso è rimasto nella banca dati di prova e ha fa
 rosse C-214 e C-215 nei guasti successivi. I guasti da G28 in poi sono stati rifatti su una
 banca dati pulita. La lezione vale per chi rifà questa tabella: un guasto che scrive
 all'installazione va provato per ultimo, o su una banca dati da buttare.
+
+**La rilettura prima del primo giro di revisione.** Prima di mandare l'unità al revisore
+esterno il codice è stato riletto cercando tre forme di difetto già trovate su S5: un
+controllo fatto su una proprietà vicina a quella che conta, un valore atteso dalle prove
+calcolato dal codice che si sta provando, una guardia che tace perché crede che qualcun altro
+abbia già risposto. Ne sono usciti cinque difetti, ciascuno con la prova scritta prima della
+correzione e vista fallire sul codice vecchio.
+
+1. *Proprietà vicina.* I filtri di lettura guardavano se il valore c'era, non se il filtro era
+   stato chiesto: un filtro sul contenuto con valore nullo restituiva le voci di tutti i
+   contenuti (G36). Lo stesso per la pagina chiesta senza la misura della pagina (G37).
+2. *Proprietà vicina.* Al cambio di stato si escludevano indirizzo e date perché lo stato era
+   cambiato, non perché li aveva cambiati WordPress: chi rendeva privato un atto cambiandone
+   anche la data non lasciava traccia della data (G38..G42).
+3. *Proprietà vicina.* La data di fine si seguiva con il contenuto e la chiave che WordPress
+   annuncia, che non sono quelli delle righe toccate in due casi: la cancellazione per chiave
+   su tutti i contenuti e il cambio di chiave di una riga (G43, G44).
+4. *Guardia che crede a un'altra risposta.* La voce `eliminazione` si scriveva prima della
+   cancellazione, e zittiva la cancellazione della data di fine anche quando l'eliminazione
+   poi falliva. Ora si scrive dopo che la riga non c'è più (C-200).
+5. *Valore atteso dal codice in prova.* C-207 provava i nomi riservati leggendoli
+   dall'elenco del codice, e C-223 il nome del permesso dalla costante: un nome sparito
+   dall'elenco sarebbe sparito anche dalla prova. Ora sono scritti per esteso nelle prove.
 
 ## 12. Che cosa l'albo dovrà fare, adesso che questa unità esiste
 
