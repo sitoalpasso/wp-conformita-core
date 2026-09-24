@@ -57,8 +57,17 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 
 		$this->set_permalink_structure( '/%postname%/' );
 
-		$this->registra_sezione_con_tipo( self::SEZIONE, self::TIPO );
-		$this->registra_sezione_con_tipo( self::SEZIONE_DUE, self::TIPO_DUE );
+		/*
+		 * La prima sezione consente l'indicizzazione e la seconda la vieta. Il
+		 * filtro di scadenza non legge la politica di indicizzazione, quindi per
+		 * lui le due sono uguali; la mappa per i motori invece elenca soltanto i
+		 * tipi delle sezioni che consentono l'indicizzazione (unita' S9), e le
+		 * prove sulla scadenza nella mappa, C-14 e C-92, girano sulla prima. Con
+		 * tutte e due vietate quelle prove non troverebbero nella mappa nemmeno
+		 * il contenuto valido.
+		 */
+		$this->registra_sezione_con_tipo( self::SEZIONE, self::TIPO, 'consentita' );
+		$this->registra_sezione_con_tipo( self::SEZIONE_DUE, self::TIPO_DUE, 'vietata' );
 
 		flush_rewrite_rules();
 	}
@@ -78,15 +87,16 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 	/**
 	 * Registra una sezione e un tipo pubblico con archivio.
 	 *
-	 * @param string $sezione Identificativo della sezione.
-	 * @param string $tipo    Identificativo del tipo.
+	 * @param string $sezione        Identificativo della sezione.
+	 * @param string $tipo           Identificativo del tipo.
+	 * @param string $indicizzazione Politica di indicizzazione della sezione.
 	 */
-	private function registra_sezione_con_tipo( $sezione, $tipo ) {
+	private function registra_sezione_con_tipo( $sezione, $tipo, $indicizzazione ) {
 		$this->assertTrue(
 			conformita_core_registra_sezione(
 				$sezione,
 				array(
-					'indicizzazione' => 'vietata',
+					'indicizzazione' => $indicizzazione,
 					'scadenza'       => 'irraggiungibile',
 				)
 			),

@@ -724,8 +724,14 @@ class Conformita_Core_Allegati_Test extends WP_UnitTestCase {
 	 * C-153: la versione dell'interfaccia e le funzioni nuove.
 	 */
 	public function test_c153_contratto_pubblico() {
-		$this->assertSame( '1.3.0', CONFORMITA_CORE_VERSIONE_API );
-		$this->assertSame( '1.3.0', conformita_core_versione_api() );
+		/*
+		 * Le funzioni della consegna esistono dalla 1.3.0. Le unita' successive
+		 * alzano la versione con aggiunte compatibili, quindi qui si verifica
+		 * che la versione non sia scesa sotto quella che le ha introdotte: la
+		 * versione esatta la fissa la prova dell'ultima unita'.
+		 */
+		$this->assertTrue( version_compare( CONFORMITA_CORE_VERSIONE_API, '1.3.0', '>=' ) );
+		$this->assertSame( CONFORMITA_CORE_VERSIONE_API, conformita_core_versione_api() );
 
 		foreach (
 			array(

@@ -2,7 +2,8 @@
 /**
  * I due punti di consegna: indirizzi, catena di controlli, intestazioni.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176,
+ * e C-228 dell'unita' S9 (il divieto di indicizzazione sui file).
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -1116,5 +1117,59 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$arnese = new PasswordHash( 8, true );
 
 		$_COOKIE[ 'wp-postpass_' . COOKIEHASH ] = $arnese->HashPassword( wp_unslash( $password ) );
+	}
+
+	/**
+	 * C-228: il file di un contenuto di una sezione che vieta l'indicizzazione
+	 * esce con `X-Robots-Tag: noindex`; quello di una sezione che la consente no.
+	 *
+	 * Le due consegne vanno a buon fine tutte e due, ed e' la precondizione: un
+	 * rifiuto non ha niente da indicizzare, e una prova che confrontasse due
+	 * rifiuti sarebbe verde qualunque cosa faccia il meccanismo.
+	 */
+	public function test_c228_divieto_di_indicizzazione_sui_file() {
+		$this->assertTrue(
+			conformita_core_registra_sezione(
+				'sezione_consegna_aperta',
+				array(
+					'indicizzazione' => 'consentita',
+					'scadenza'       => 'irraggiungibile',
+				)
+			)
+		);
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'prova_cons_aperta',
+				array(
+					'sezione'      => 'sezione_consegna_aperta',
+					'show_in_rest' => false,
+					'argomenti'    => array( 'public' => true ),
+				)
+			)
+		);
+
+		$chiuso          = $this->atto();
+		$allegato_chiuso = $this->allegato( $chiuso );
+
+		$aperto = self::factory()->post->create(
+			array(
+				'post_type'   => 'prova_cons_aperta',
+				'post_status' => 'publish',
+			)
+		);
+		update_post_meta( $aperto, conformita_core_chiave_fine_pubblicazione(), gmdate( 'Y-m-d', strtotime( '+30 days' ) ) );
+		$allegato_aperto = $this->allegato( $aperto );
+
+		$vietata    = $this->chiedi( $chiuso, $allegato_chiuso );
+		$consentita = $this->chiedi( $aperto, $allegato_aperto );
+
+		$this->assertNotNull( $vietata );
+		$this->assertNotNull( $consentita );
+		$this->assertSame( 200, $vietata['stato'], 'Precondizione: il file della sezione vietata deve essere consegnato.' );
+		$this->assertSame( 200, $consentita['stato'], 'Precondizione: il file della sezione consentita deve essere consegnato.' );
+
+		$this->assertArrayHasKey( 'X-Robots-Tag', $vietata['intestazioni'] );
+		$this->assertStringContainsString( 'noindex', $vietata['intestazioni']['X-Robots-Tag'] );
+		$this->assertArrayNotHasKey( 'X-Robots-Tag', $consentita['intestazioni'], 'Il file di una sezione che consente l\'indicizzazione non deve portare nessun divieto.' );
 	}
 }
