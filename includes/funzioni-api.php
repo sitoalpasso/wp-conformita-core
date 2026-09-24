@@ -459,8 +459,11 @@ if ( ! function_exists( 'conformita_core_voci_registro' ) ) {
 	 * Filtri ammessi: `sezione`, `contenuto`, `azione`, `utente`, `origine`,
 	 * `riferimento`, `dal` e `al` (giorni civili AAAA-MM-GG nel fuso del sito,
 	 * inclusi), `ordine` (`crescente`, che è l'ordine di scrittura, oppure
-	 * `decrescente`), `per_pagina` e `pagina`. Un filtro sconosciuto o
-	 * malformato è un errore, non un filtro ignorato.
+	 * `decrescente`), `per_pagina` e `pagina` (che vale solo insieme a
+	 * `per_pagina`). Un filtro sconosciuto o malformato è un errore, non un
+	 * filtro ignorato, e lo è anche un filtro con valore nullo: chi cerca le
+	 * voci di un contenuto che non ha trovato riceve un errore, non le voci di
+	 * tutti.
 	 *
 	 * La funzione non controlla i permessi: chi la chiama risponde di chi vede
 	 * quello che restituisce.

@@ -523,12 +523,12 @@ KEY riferimento (riferimento)
 
 		list( $dove, $valori ) = $condizioni;
 
-		$ordine = isset( $filtri['ordine'] ) && 'decrescente' === $filtri['ordine'] ? 'DESC' : 'ASC';
+		$ordine = array_key_exists( 'ordine', $filtri ) && 'decrescente' === $filtri['ordine'] ? 'DESC' : 'ASC';
 		$limite = '';
 
-		if ( isset( $filtri['per_pagina'] ) ) {
+		if ( array_key_exists( 'per_pagina', $filtri ) ) {
 			$per_pagina = self::intero_positivo( $filtri['per_pagina'] );
-			$pagina     = isset( $filtri['pagina'] ) ? self::intero_positivo( $filtri['pagina'] ) : 1;
+			$pagina     = array_key_exists( 'pagina', $filtri ) ? self::intero_positivo( $filtri['pagina'] ) : 1;
 			$limite     = $wpdb->prepare( ' LIMIT %d OFFSET %d', $per_pagina, ( $pagina - 1 ) * $per_pagina );
 		}
 
@@ -580,7 +580,12 @@ KEY riferimento (riferimento)
 	 *
 	 * Un filtro sconosciuto o malformato è un errore e non viene ignorato: un
 	 * filtro ignorato restituirebbe tutte le voci, e chi cercava quelle di un
-	 * solo contenuto le leggerebbe come se fossero sue.
+	 * solo contenuto le leggerebbe come se fossero sue. Per questo conta la
+	 * presenza della chiave e non il valore: un filtro dichiarato con valore
+	 * nullo, per esempio il numero di un contenuto che chi chiama non ha
+	 * trovato, è malformato come uno con valore sbagliato. Lo stesso vale per
+	 * la pagina senza la misura della pagina, che da sola non limiterebbe
+	 * niente.
 	 *
 	 * @param mixed $filtri Filtri dichiarati.
 	 * @return array{0: string, 1: array<int, mixed>}|WP_Error
@@ -596,7 +601,7 @@ KEY riferimento (riferimento)
 		$valori     = array();
 
 		foreach ( array( 'sezione', 'azione', 'origine' ) as $campo ) {
-			if ( isset( $filtri[ $campo ] ) ) {
+			if ( array_key_exists( $campo, $filtri ) ) {
 				if ( ! is_string( $filtri[ $campo ] ) || '' === $filtri[ $campo ] ) {
 					return $errore;
 				}
@@ -607,7 +612,7 @@ KEY riferimento (riferimento)
 		}
 
 		foreach ( array( 'contenuto', 'riferimento' ) as $campo ) {
-			if ( isset( $filtri[ $campo ] ) ) {
+			if ( array_key_exists( $campo, $filtri ) ) {
 				$numero = self::intero_positivo( $filtri[ $campo ] );
 
 				if ( ! $numero ) {
@@ -619,7 +624,7 @@ KEY riferimento (riferimento)
 			}
 		}
 
-		if ( isset( $filtri['utente'] ) ) {
+		if ( array_key_exists( 'utente', $filtri ) ) {
 			$utente = $filtri['utente'];
 
 			if ( ! ( ( is_int( $utente ) && $utente >= 0 ) || ( is_string( $utente ) && 1 === preg_match( '/\A[0-9]{1,19}\z/', $utente ) ) ) ) {
@@ -634,7 +639,7 @@ KEY riferimento (riferimento)
 			'dal' => '>=',
 			'al'  => '<',
 		) as $campo => $confronto ) {
-			if ( isset( $filtri[ $campo ] ) ) {
+			if ( array_key_exists( $campo, $filtri ) ) {
 				$giorno = self::giorno( $filtri[ $campo ] );
 
 				if ( null === $giorno ) {
@@ -651,12 +656,16 @@ KEY riferimento (riferimento)
 		}
 
 		foreach ( array( 'per_pagina', 'pagina' ) as $campo ) {
-			if ( isset( $filtri[ $campo ] ) && ! self::intero_positivo( $filtri[ $campo ] ) ) {
+			if ( array_key_exists( $campo, $filtri ) && ! self::intero_positivo( $filtri[ $campo ] ) ) {
 				return $errore;
 			}
 		}
 
-		if ( isset( $filtri['ordine'] ) && ! in_array( $filtri['ordine'], array( 'crescente', 'decrescente' ), true ) ) {
+		if ( array_key_exists( 'pagina', $filtri ) && ! array_key_exists( 'per_pagina', $filtri ) ) {
+			return $errore;
+		}
+
+		if ( array_key_exists( 'ordine', $filtri ) && ! in_array( $filtri['ordine'], array( 'crescente', 'decrescente' ), true ) ) {
 			return $errore;
 		}
 

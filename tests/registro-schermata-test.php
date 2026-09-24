@@ -312,6 +312,14 @@ class Conformita_Core_Registro_Schermata_Test extends WP_UnitTestCase {
 				'pagina'     => 0,
 			),
 			'sezione vuota'           => array( 'sezione' => '' ),
+			'contenuto nullo'         => array( 'contenuto' => null ),
+			'riferimento nullo'       => array( 'riferimento' => null ),
+			'sezione nulla'           => array( 'sezione' => null ),
+			'utente nullo'            => array( 'utente' => null ),
+			'giorno nullo'            => array( 'dal' => null ),
+			'ordine nullo'            => array( 'ordine' => null ),
+			'pagina senza misura'     => array( 'pagina' => 2 ),
+			'misura nulla'            => array( 'per_pagina' => null ),
 			'non un elenco'           => 'sezione',
 		);
 
