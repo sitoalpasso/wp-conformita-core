@@ -98,6 +98,16 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		wp_set_current_user( 0 );
 
 		parent::tear_down();
+
+		/*
+		 * C-222 cambia la struttura della banca dati di prova, e un cambio di
+		 * struttura chiude la transazione che la prova annulla: la versione
+		 * tolta per provare un'installazione fallita resterebbe tolta, e le
+		 * prove che seguono non potrebbero scrivere. Come all'avvio di ogni
+		 * richiesta, si controlla che il registro sia installato.
+		 */
+		wp_cache_flush();
+		Conformita_Core_Registro::assicura_tabella();
 	}
 
 	/**
@@ -2034,7 +2044,46 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 
 		$this->assertFalse( $esito, 'Senza il vincolo sulla chiave l\'installazione non riesce.' );
 		$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'E la versione non si scrive.' );
+
+		/*
+		 * Finche' l'installazione non e' riuscita non si scrive: senza il
+		 * vincolo due voci con la stessa chiave passerebbero tutte e due. Il
+		 * componente riceve l'errore, la voce automatica diventa una mancata.
+		 */
+		$id      = $this->contenuto( 'publish' );
+		$mancate = Conformita_Core_Registro::mancate()['conteggio'];
+		$righe   = count( $this->righe() );
+
+		$rifiutata = conformita_core_registra_voce(
+			array(
+				'sezione' => self::SEZIONE,
+				'azione'  => 'prova_senza_installazione',
+				'chiave'  => 'prova:senza-installazione',
+			)
+		);
+		$this->assertWPError( $rifiutata );
+		$this->assertSame( 'conformita_core_registro_non_installato', $rifiutata->get_error_code() );
+
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_title' => 'Cambiato senza registro installato',
+			)
+		);
+
+		$this->assertSame( $righe, count( $this->righe() ), 'Nessuna riga scritta.' );
+		$this->assertSame( $mancate + 1, Conformita_Core_Registro::mancate()['conteggio'], 'La voce automatica non scritta e\' annotata.' );
+
 		$this->assertTrue( Conformita_Core_Registro::installa(), 'Controllo positivo.' );
+		$this->assertIsInt(
+			conformita_core_registra_voce(
+				array(
+					'sezione' => self::SEZIONE,
+					'azione'  => 'prova_senza_installazione',
+				)
+			),
+			'Installato, si scrive.'
+		);
 
 		/*
 		 * Lo stesso con un indice che si chiama come quello giusto ma non

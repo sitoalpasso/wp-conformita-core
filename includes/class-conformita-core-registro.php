@@ -298,15 +298,17 @@ KEY riferimento (riferimento)
 	 *
 	 * @internal Riservata a `Conformita_Core_Registro_Automatico::avvia()`.
 	 *
-	 * La funzione consegnata accetta, oltre alla voce, la copia del contenuto
-	 * letta prima di un'eliminazione: la voce `eliminazione` si scrive quando
-	 * la riga non c'è più, e il tipo e la sezione si controllano su quella
-	 * copia invece che sulla banca dati. Ai componenti la strada non è
-	 * aperta: per loro il contenuto deve esistere.
+	 * La funzione consegnata accetta, oltre alla voce, una copia del
+	 * contenuto letta prima dell'operazione, e tipo e sezione si controllano
+	 * su quella copia invece che sulla banca dati. Serve in due casi: la voce
+	 * `eliminazione`, che si scrive quando la riga non c'è più, e l'uscita di
+	 * un contenuto che ha cambiato tipo, che va nella sezione del tipo di
+	 * prima. La copia vale solo per il contenuto che la voce nomina. Ai
+	 * componenti la strada non è aperta: per loro vale il contenuto com'è.
 	 *
 	 * @return Closure|null Funzione che riceve la descrizione della voce, e
-	 *                      facoltativamente la copia del contenuto eliminato,
-	 *                      e restituisce il numero o l'errore; nulla dopo la
+	 *                      facoltativamente la copia del contenuto, e
+	 *                      restituisce il numero o l'errore; nulla dopo la
 	 *                      prima chiamata.
 	 */
 	public static function scrittura_automatica() {
@@ -316,8 +318,8 @@ KEY riferimento (riferimento)
 
 		self::$scrittura_consegnata = true;
 
-		return static function ( array $voce, $eliminato = null ) {
-			return self::scrivi( $voce, self::ORIGINE_AUTOMATICA, $eliminato instanceof WP_Post ? $eliminato : null );
+		return static function ( array $voce, $copia = null ) {
+			return self::scrivi( $voce, self::ORIGINE_AUTOMATICA, $copia instanceof WP_Post ? $copia : null );
 		};
 	}
 
@@ -330,18 +332,30 @@ KEY riferimento (riferimento)
 	 *
 	 * @param array<string, mixed> $voce      Descrizione della voce.
 	 * @param string               $origine   Una delle due costanti di origine.
-	 * @param WP_Post|null         $eliminato Copia del contenuto letta prima
-	 *                                        della sua eliminazione, solo per
-	 *                                        le voci automatiche.
+	 * @param WP_Post|null         $copia     Copia del contenuto letta prima
+	 *                                        dell'operazione, solo per le
+	 *                                        voci automatiche.
 	 * @return int|WP_Error
 	 */
-	private static function scrivi( array $voce, $origine, $eliminato = null ) {
+	private static function scrivi( array $voce, $origine, $copia = null ) {
 		global $wpdb;
 
-		$riga = self::valida( $voce, $eliminato );
+		$riga = self::valida( $voce, $copia );
 
 		if ( is_wp_error( $riga ) ) {
 			return $riga;
+		}
+
+		/*
+		 * Si scrive solo in un registro installato: la versione dello schema
+		 * c'è solo se l'installazione ha trovato la tabella con il vincolo
+		 * sulla chiave. Senza il vincolo due scritture con la stessa chiave
+		 * passerebbero tutte e due il controllo che segue. La versione è
+		 * un'opzione caricata con le altre all'avvio: controllarla non costa
+		 * un'interrogazione. L'avvio successivo riprova l'installazione.
+		 */
+		if ( self::VERSIONE_SCHEMA !== get_option( self::OPZIONE_SCHEMA ) ) {
+			return self::errore( 'conformita_core_registro_non_installato', __( 'Registro: il registro non risulta installato, con la sua tabella e il vincolo sulla chiave; la voce non si scrive.', 'conformita-core' ) );
 		}
 
 		$riga['origine'] = $origine;
@@ -438,12 +452,12 @@ KEY riferimento (riferimento)
 	 * Controlla la descrizione di una voce e la porta nella forma della riga.
 	 *
 	 * @param array<string, mixed> $voce      Descrizione della voce.
-	 * @param WP_Post|null         $eliminato Copia del contenuto eliminato, se
-	 *                                        la voce è quella della sua
-	 *                                        eliminazione.
+	 * @param WP_Post|null         $copia Copia del contenuto letta prima
+	 *                                    dell'operazione, se la voce è
+	 *                                    automatica e la porta.
 	 * @return array<string, mixed>|WP_Error
 	 */
-	private static function valida( array $voce, $eliminato = null ) {
+	private static function valida( array $voce, $copia = null ) {
 		$estranee = array_diff( array_keys( $voce ), self::CHIAVI_VOCE );
 
 		if ( array() !== $estranee ) {
@@ -483,8 +497,8 @@ KEY riferimento (riferimento)
 
 		if ( array_key_exists( 'contenuto', $voce ) ) {
 			$contenuto = self::intero_positivo( $voce['contenuto'] );
-			$post      = $eliminato instanceof WP_Post && (int) $eliminato->ID === $contenuto && $contenuto > 0
-				? $eliminato
+			$post      = $copia instanceof WP_Post && (int) $copia->ID === $contenuto && $contenuto > 0
+				? $copia
 				: ( $contenuto ? get_post( $contenuto ) : null );
 
 			if ( ! $post instanceof WP_Post ) {
