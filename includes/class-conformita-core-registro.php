@@ -298,8 +298,15 @@ KEY riferimento (riferimento)
 	 *
 	 * @internal Riservata a `Conformita_Core_Registro_Automatico::avvia()`.
 	 *
-	 * @return Closure|null Funzione che riceve la descrizione della voce e
-	 *                      restituisce il numero o l'errore; nulla dopo la
+	 * La funzione consegnata accetta, oltre alla voce, la copia del contenuto
+	 * letta prima di un'eliminazione: la voce `eliminazione` si scrive quando
+	 * la riga non c'è più, e il tipo e la sezione si controllano su quella
+	 * copia invece che sulla banca dati. Ai componenti la strada non è
+	 * aperta: per loro il contenuto deve esistere.
+	 *
+	 * @return Closure|null Funzione che riceve la descrizione della voce, e
+	 *                      facoltativamente la copia del contenuto eliminato,
+	 *                      e restituisce il numero o l'errore; nulla dopo la
 	 *                      prima chiamata.
 	 */
 	public static function scrittura_automatica() {
@@ -309,8 +316,8 @@ KEY riferimento (riferimento)
 
 		self::$scrittura_consegnata = true;
 
-		return static function ( array $voce ) {
-			return self::scrivi( $voce, self::ORIGINE_AUTOMATICA );
+		return static function ( array $voce, $eliminato = null ) {
+			return self::scrivi( $voce, self::ORIGINE_AUTOMATICA, $eliminato instanceof WP_Post ? $eliminato : null );
 		};
 	}
 
@@ -321,14 +328,17 @@ KEY riferimento (riferimento)
 	 * `scrittura_automatica()`, senza il controllo sui nomi riservati; i
 	 * componenti da `registra()`.
 	 *
-	 * @param array<string, mixed> $voce    Descrizione della voce.
-	 * @param string               $origine Una delle due costanti di origine.
+	 * @param array<string, mixed> $voce      Descrizione della voce.
+	 * @param string               $origine   Una delle due costanti di origine.
+	 * @param WP_Post|null         $eliminato Copia del contenuto letta prima
+	 *                                        della sua eliminazione, solo per
+	 *                                        le voci automatiche.
 	 * @return int|WP_Error
 	 */
-	private static function scrivi( array $voce, $origine ) {
+	private static function scrivi( array $voce, $origine, $eliminato = null ) {
 		global $wpdb;
 
-		$riga = self::valida( $voce );
+		$riga = self::valida( $voce, $eliminato );
 
 		if ( is_wp_error( $riga ) ) {
 			return $riga;
@@ -427,10 +437,13 @@ KEY riferimento (riferimento)
 	/**
 	 * Controlla la descrizione di una voce e la porta nella forma della riga.
 	 *
-	 * @param array<string, mixed> $voce Descrizione della voce.
+	 * @param array<string, mixed> $voce      Descrizione della voce.
+	 * @param WP_Post|null         $eliminato Copia del contenuto eliminato, se
+	 *                                        la voce è quella della sua
+	 *                                        eliminazione.
 	 * @return array<string, mixed>|WP_Error
 	 */
-	private static function valida( array $voce ) {
+	private static function valida( array $voce, $eliminato = null ) {
 		$estranee = array_diff( array_keys( $voce ), self::CHIAVI_VOCE );
 
 		if ( array() !== $estranee ) {
@@ -470,7 +483,9 @@ KEY riferimento (riferimento)
 
 		if ( array_key_exists( 'contenuto', $voce ) ) {
 			$contenuto = self::intero_positivo( $voce['contenuto'] );
-			$post      = $contenuto ? get_post( $contenuto ) : null;
+			$post      = $eliminato instanceof WP_Post && (int) $eliminato->ID === $contenuto && $contenuto > 0
+				? $eliminato
+				: ( $contenuto ? get_post( $contenuto ) : null );
 
 			if ( ! $post instanceof WP_Post ) {
 				return self::errore( 'conformita_core_registro_contenuto_sconosciuto', __( 'Registro: il contenuto indicato non esiste.', 'conformita-core' ) );

@@ -432,6 +432,71 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->assertSame( array( 'campi' => array( 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'] );
 
 		/*
+		 * La stessa richiesta senza la data in UTC, e con la data in UTC
+		 * vuota. Controllo negativo: senza la data in UTC ma con la data
+		 * locale di prima, le date le fissa WordPress.
+		 */
+		$invariata = $this->contenuto( 'pending' );
+		$campi     = get_post( $invariata, ARRAY_A );
+
+		$campi['post_status'] = 'publish';
+		unset( $campi['post_date_gmt'] );
+
+		$this->segna();
+		wp_insert_post( wp_slash( $campi ) );
+		$this->assertNotSame( '0000-00-00 00:00:00', get_post( $invariata )->post_date_gmt, 'Precondizione: WordPress ha fissato la data.' );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove(), 'Data locale di prima, nessuna data in UTC: le date sono di WordPress.' );
+
+		/*
+		 * Un contenuto in verifica da giorni, con la data non fissata,
+		 * pubblicato con la funzione di aggiornamento: WordPress rimette la
+		 * data a oggi, e il cambiamento e' suo.
+		 */
+		$da_giorni = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'pending',
+				'post_title'  => 'In verifica da giorni',
+				'post_date'   => '2020-01-09 10:00:00',
+			)
+		);
+		$this->assertSame( '2020-01-09 10:00:00', get_post( $da_giorni )->post_date, 'Precondizione: data di giorni fa.' );
+		$this->assertSame( '0000-00-00 00:00:00', get_post( $da_giorni )->post_date_gmt, 'Precondizione: non fissata.' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $da_giorni,
+				'post_status' => 'publish',
+			)
+		);
+		$this->assertNotSame( '2020-01-09 10:00:00', get_post( $da_giorni )->post_date, 'Precondizione: WordPress ha rimesso la data a oggi.' );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove(), 'La data rimessa a oggi da WordPress non e\' una modifica.' );
+
+		foreach ( array(
+			'assente' => null,
+			'vuota'   => '',
+		) as $caso => $data_gmt ) {
+			$con_data = $this->contenuto( 'pending' );
+			$campi    = get_post( $con_data, ARRAY_A );
+
+			$campi['post_status'] = 'publish';
+			$campi['post_date']   = '2020-01-08 12:00:00';
+
+			if ( null === $data_gmt ) {
+				unset( $campi['post_date_gmt'] );
+			} else {
+				$campi['post_date_gmt'] = $data_gmt;
+			}
+
+			$this->segna();
+			wp_insert_post( wp_slash( $campi ) );
+			$this->assertSame( '2020-01-08 12:00:00', get_post( $con_data )->post_date, 'Precondizione, data in UTC ' . $caso . ': la data indicata e\' quella salvata.' );
+			$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove(), 'Data in UTC ' . $caso . '.' );
+			$this->assertSame( array( 'campi' => array( 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'], 'Data in UTC ' . $caso . '.' );
+		}
+
+		/*
 		 * L'annuncio di una modifica che non viene da un salvataggio, per
 		 * esempio da un altro componente che lo lancia da se': senza sapere
 		 * cosa e' stato chiesto, ogni campo cambiato e' una modifica.
@@ -447,6 +512,108 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		do_action( 'post_updated', $annunciato, $dopo, $prima );
 		$this->assertSame( array( 'modifica' ), $this->azioni_nuove() );
 		$this->assertSame( array( 'campi' => array( 'post_name' ) ), $this->nuove()[0]['dettagli'] );
+	}
+
+	/**
+	 * C-197, seconda parte: i campi che WordPress cambia con un'istruzione
+	 * diretta, senza passare dal salvataggio del contenuto. Eliminando un
+	 * utente e affidandone i contenuti a un altro, cambia l'autore; eliminando
+	 * un contenuto di un tipo gerarchico, i figli passano al suo padre. Sono
+	 * modifiche, fuori dalla bozza, anche se nessuno ha salvato quei contenuti.
+	 */
+	public function test_c197_modifica_senza_salvataggio() {
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+
+		wp_set_current_user( $this->utente( 'administrator' ) );
+
+		$vecchio = $this->utente( 'author' );
+		$nuovo   = $this->utente( 'editor' );
+		$autori  = array();
+
+		foreach ( array( 'publish', 'pending', 'draft' ) as $stato ) {
+			$autori[ $stato ] = self::factory()->post->create(
+				array(
+					'post_type'   => self::TIPO,
+					'post_status' => $stato,
+					'post_title'  => 'Contenuto di un autore',
+					'post_author' => $vecchio,
+				)
+			);
+		}
+
+		$this->segna();
+		$this->assertTrue( wp_delete_user( $vecchio, $nuovo ) );
+		$this->assertSame( (string) $nuovo, get_post( $autori['publish'] )->post_author, 'Precondizione: l\'autore e\' cambiato.' );
+		$this->assertSame( (string) $nuovo, get_post( $autori['draft'] )->post_author, 'Precondizione: anche sulla bozza.' );
+
+		$this->assertSame(
+			array(
+				array( $autori['publish'], 'modifica', array( 'campi' => array( 'post_author' ) ) ),
+				array( $autori['pending'], 'modifica', array( 'campi' => array( 'post_author' ) ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['contenuto'], $voce['azione'], $voce['dettagli'] );
+				},
+				$this->nuove()
+			),
+			'Autore cambiato: una modifica per il pubblicato e per quello in verifica, nessuna per la bozza.'
+		);
+
+		// Eliminare un utente senza affidare i contenuti a nessuno non cambia autori.
+		$solo = $this->utente( 'author' );
+		$this->segna();
+		$this->assertTrue( wp_delete_user( $solo ) );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Controllo negativo: nessun contenuto, nessuna voce.' );
+
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'prova_gerarchico',
+				array(
+					'sezione'      => self::SEZIONE,
+					'show_in_rest' => false,
+					'argomenti'    => array(
+						'public'       => true,
+						'hierarchical' => true,
+					),
+				)
+			)
+		);
+
+		$crea = function ( $stato, $padre ) {
+			return self::factory()->post->create(
+				array(
+					'post_type'   => 'prova_gerarchico',
+					'post_status' => $stato,
+					'post_title'  => 'Contenuto gerarchico',
+					'post_parent' => $padre,
+				)
+			);
+		};
+
+		$nonno        = $crea( 'publish', 0 );
+		$padre        = $crea( 'publish', $nonno );
+		$figlio       = $crea( 'publish', $padre );
+		$figlio_bozza = $crea( 'draft', $padre );
+
+		$this->segna();
+		wp_delete_post( $padre, true );
+		clean_post_cache( $figlio );
+		$this->assertSame( $nonno, (int) get_post( $figlio )->post_parent, 'Precondizione: il figlio e\' passato al nonno.' );
+
+		$this->assertSame(
+			array(
+				array( $figlio, 'modifica', array( 'campi' => array( 'post_parent' ) ) ),
+				array( $padre, 'eliminazione', array( 'stato' => 'publish' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['contenuto'], $voce['azione'], $voce['dettagli'] );
+				},
+				$this->nuove()
+			),
+			'Il figlio pubblicato cambia padre e lo dice; la bozza no.'
+		);
 	}
 
 	/**
@@ -582,6 +749,47 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->assertFalse( $esito, 'Precondizione: l\'eliminazione e\' fallita.' );
 		$this->assertInstanceOf( WP_Post::class, get_post( $resta ), 'Precondizione: il contenuto c\'e\' ancora.' );
 		$this->assertNotContains( 'eliminazione', $this->azioni_nuove(), 'Nessuna voce per un\'eliminazione non avvenuta.' );
+
+		/*
+		 * Il tentativo fallito non lascia segni: una data di fine impostata
+		 * dopo, sullo stesso contenuto e nella stessa richiesta, si registra.
+		 */
+		$this->segna();
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $resta, '2026-10-30' ) );
+		$this->assertSame( array( 'modifica_fine_pubblicazione' ), $this->azioni_nuove(), 'L\'eliminazione fallita non zittisce le operazioni successive.' );
+
+		/*
+		 * La voce non dipende da una copia del contenuto rimasta in memoria:
+		 * un altro componente che la butta appena prima della cancellazione
+		 * non la fa mancare.
+		 */
+		$senza_copia = $this->contenuto( 'publish' );
+		$butta       = function ( $post_id ) {
+			clean_post_cache( $post_id );
+		};
+
+		$this->segna();
+		add_action( 'delete_post', $butta );
+		wp_delete_post( $senza_copia, true );
+		remove_action( 'delete_post', $butta );
+
+		$this->assertNull( get_post( $senza_copia ), 'Precondizione: il contenuto non esiste piu\'.' );
+		$this->assertSame( array( 'eliminazione' ), $this->azioni_nuove(), 'Una eliminazione, una voce, anche senza copia in memoria.' );
+		$this->assertSame( $senza_copia, $this->nuove()[0]['contenuto'] );
+		$this->assertSame( 0, Conformita_Core_Registro::mancate()['conteggio'], 'E nessuna voce mancata.' );
+
+		// La bozza automatica, che non e' mai diventata un contenuto, si elimina senza voce.
+		$automatica = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'auto-draft',
+			)
+		);
+
+		$this->segna();
+		wp_delete_post( $automatica, true );
+		$this->assertNull( get_post( $automatica ), 'Precondizione: eliminata.' );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Nessuna voce per la bozza automatica.' );
 	}
 
 	/**
@@ -595,6 +803,22 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 
 		if ( 0 === strpos( $sql, 'DELETE FROM `' . $wpdb->posts . '`' ) ) {
 			return 'SELECT * FROM tabella_che_non_esiste';
+		}
+
+		return $sql;
+	}
+
+	/**
+	 * Fa fallire lo spostamento degli allegati di un contenuto eliminato.
+	 *
+	 * @param string $sql Istruzione.
+	 * @return string
+	 */
+	public function rompi_spostamento_allegati( $sql ) {
+		global $wpdb;
+
+		if ( 0 === strpos( $sql, 'UPDATE `' . $wpdb->posts . '` SET `post_parent`' ) && false !== strpos( $sql, "`post_type` = 'attachment'" ) ) {
+			return 'SELECT 1';
 		}
 
 		return $sql;
@@ -897,6 +1121,96 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->segna();
 		$this->assertInstanceOf( WP_Post::class, wp_delete_attachment( $resta, true ) );
 		$this->assertSame( array( 'allegato_eliminato' ), $this->azioni_nuove(), 'Controllo positivo: riuscita, la voce c\'e\'.' );
+
+		/*
+		 * Un'eliminazione dell'allegato fallita, poi l'allegato scollegato,
+		 * poi eliminato davvero: l'eliminazione riuscita non ha piu' un padre,
+		 * e il padre di prima non riceve una seconda voce.
+		 */
+		$ritentato = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'ritentato.pdf',
+				'post_parent'    => $id,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+		$this->assertFalse( wp_delete_attachment( $ritentato, true ), 'Precondizione: il primo tentativo fallisce.' );
+		remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $ritentato,
+				'post_parent' => 0,
+			)
+		);
+		$this->assertSame( array( 'allegato_eliminato' ), $this->azioni_nuove(), 'Precondizione: lo scollegamento ha la sua voce.' );
+
+		$this->segna();
+		$this->assertInstanceOf( WP_Post::class, wp_delete_attachment( $ritentato, true ) );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Un allegato libero eliminato non scrive sul padre di un tentativo passato.' );
+
+		/*
+		 * Eliminando un contenuto, WordPress sposta i suoi allegati sul padre
+		 * del contenuto, con un'istruzione diretta: per il padre e' un allegato
+		 * aggiunto. Lo spostamento avviene prima della cancellazione della
+		 * riga, e resta anche se quella fallisce.
+		 */
+		$nonno = $this->contenuto( 'publish' );
+
+		foreach ( array( 'riuscita', 'fallita', 'senza spostamento' ) as $caso ) {
+			$padre    = self::factory()->post->create(
+				array(
+					'post_type'   => self::TIPO,
+					'post_status' => 'publish',
+					'post_title'  => 'Contenuto con padre',
+					'post_parent' => $nonno,
+				)
+			);
+			$spostato = self::factory()->attachment->create_object(
+				array(
+					'file'           => 'spostato-' . $caso . '.pdf',
+					'post_parent'    => $padre,
+					'post_mime_type' => 'application/pdf',
+				)
+			);
+
+			$this->segna();
+			if ( 'fallita' === $caso ) {
+				add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+			}
+			if ( 'senza spostamento' === $caso ) {
+				add_filter( 'query', array( $this, 'rompi_spostamento_allegati' ) );
+			}
+			$esito = wp_delete_post( $padre, true );
+			remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+			remove_filter( 'query', array( $this, 'rompi_spostamento_allegati' ) );
+
+			clean_post_cache( $spostato );
+			$this->assertSame( 'senza spostamento' === $caso ? $padre : $nonno, (int) get_post( $spostato )->post_parent, 'Precondizione, eliminazione ' . $caso . ': dove sta l\'allegato.' );
+			$this->assertSame( 'fallita' === $caso, false === $esito, 'Precondizione: eliminazione ' . $caso . '.' );
+
+			$attese = array();
+			if ( 'senza spostamento' !== $caso ) {
+				$attese[] = array( $nonno, 'allegato_aggiunto', array( 'allegato' => $spostato ) );
+			}
+			if ( 'fallita' !== $caso ) {
+				$attese[] = array( $padre, 'eliminazione', array( 'stato' => 'publish' ) );
+			}
+
+			$this->assertSame(
+				$attese,
+				array_map(
+					function ( $voce ) {
+						return array( $voce['contenuto'], $voce['azione'], $voce['dettagli'] );
+					},
+					$this->nuove()
+				),
+				'Eliminazione ' . $caso . ': l\'allegato aggiunto al padre si registra.'
+			);
+		}
 	}
 
 	/**

@@ -135,6 +135,30 @@ final class Conformita_Core_Registro_Automatico {
 	private static $allegati_in_eliminazione = array();
 
 	/**
+	 * Contenuti la cui riga WordPress ha provato a cancellare, per
+	 * identificativo, in attesa di sapere se ci è riuscito.
+	 *
+	 * @var array<int, bool>
+	 */
+	private static $riga_in_cancellazione = array();
+
+	/**
+	 * Allegati e figli che WordPress sposterà al padre di un contenuto che
+	 * elimina, letti prima dello spostamento, per contenuto eliminato.
+	 *
+	 * @var array<int, array{padre: int, allegati: array<int, int>, figli: array<int, int>}>
+	 */
+	private static $spostamenti = array();
+
+	/**
+	 * Contenuti gestiti di un utente che si sta eliminando affidandone i
+	 * contenuti a un altro, per utente.
+	 *
+	 * @var array<int, array<int, int>>
+	 */
+	private static $contenuti_affidati = array();
+
+	/**
 	 * Le operazioni che core registra da sé, riservate.
 	 *
 	 * Un componente non le può usare per le proprie voci: una voce
@@ -215,6 +239,9 @@ final class Conformita_Core_Registro_Automatico {
 		self::$in_eliminazione = array();
 
 		self::$allegati_in_eliminazione = array();
+		self::$riga_in_cancellazione    = array();
+		self::$spostamenti              = array();
+		self::$contenuti_affidati       = array();
 	}
 
 	/**
@@ -268,8 +295,26 @@ final class Conformita_Core_Registro_Automatico {
 				'argomenti' => 2,
 			),
 			array(
+				'aggancio'  => 'delete_post',
+				'metodo'    => 'eliminazione_riga',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 2,
+			),
+			array(
 				'aggancio'  => 'deleted_post',
 				'metodo'    => 'eliminazione',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'delete_user',
+				'metodo'    => 'utente_in_eliminazione',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'deleted_user',
+				'metodo'    => 'utente_eliminato',
 				'priorita'  => PHP_INT_MIN,
 				'argomenti' => 2,
 			),
@@ -396,13 +441,14 @@ final class Conformita_Core_Registro_Automatico {
 			return $dati;
 		}
 
-		$data_gmt = isset( $non_ripuliti['post_date_gmt'] ) ? (string) $non_ripuliti['post_date_gmt'] : '';
+		$data_gmt = isset( $non_ripuliti['post_date_gmt'] ) ? (string) $non_ripuliti['post_date_gmt'] : null;
 
 		self::$richieste[ (int) $non_ripuliti['ID'] ] = array(
 			'nome'           => isset( $non_ripuliti['post_name'] ) ? (string) $non_ripuliti['post_name'] : null,
 			'data'           => isset( $non_ripuliti['post_date'] ) ? (string) $non_ripuliti['post_date'] : '',
 			'data_gmt'       => $data_gmt,
-			'data_esplicita' => ! empty( $non_ripuliti['edit_date'] ) || ( '' !== $data_gmt && self::DATA_NON_FISSATA !== $data_gmt ),
+			'data_esplicita' => ! empty( $non_ripuliti['edit_date'] ) || ( null !== $data_gmt && '' !== $data_gmt && self::DATA_NON_FISSATA !== $data_gmt ),
+			'adesso'         => current_time( 'mysql' ),
 			'nome_wordpress' => isset( $dati['post_name'] ) ? (string) $dati['post_name'] : '',
 			'nome_finale'    => null,
 			'date_wordpress' => array(
@@ -512,10 +558,15 @@ final class Conformita_Core_Registro_Automatico {
 	 *   può pubblicarlo.
 	 * - Le due date: WordPress le fissa, o le rimette a oggi, solo quando la
 	 *   data non era ancora fissata, cioè quando quella in UTC era la data
-	 *   nulla. Non chieste vuol dire senza la richiesta esplicita di cambiare
-	 *   data e senza una data in UTC, con la data locale uguale a quella di
-	 *   prima; oppure con la data in UTC vuota, che è il segno con cui WordPress
-	 *   stesso rimette a oggi la data di una bozza.
+	 *   nulla. Chiesta vuol dire con la richiesta esplicita di cambiare data,
+	 *   o con una data in UTC vera, o con una data locale diversa da quella di
+	 *   prima, qualunque sia la data in UTC che l'accompagna: assente, vuota o
+	 *   nulla. Una sola eccezione: la data locale di adesso, accompagnata dalla
+	 *   data in UTC vuota, è la forma con cui la funzione di aggiornamento di
+	 *   WordPress rimette a oggi da sé la data di un contenuto che non l'aveva
+	 *   fissata. Si riconosce entro due secondi, il tempo fra quella funzione
+	 *   e questo filtro; chi indica da sé proprio l'ora di adesso chiede
+	 *   quello che WordPress avrebbe fatto comunque.
 	 *
 	 * Senza la richiesta, per esempio se l'annuncio della modifica arriva da
 	 * un'altra strada, ogni campo cambiato è una modifica.
@@ -543,8 +594,10 @@ final class Conformita_Core_Registro_Automatico {
 		}
 
 		if ( 'post_date' === $campo || 'post_date_gmt' === $campo ) {
-			$chiesta = $richiesta['data_esplicita']
-				|| ( '' !== $richiesta['data_gmt'] && (string) $prima->post_date !== $richiesta['data'] );
+			$data           = $richiesta['data'];
+			$rimessa_a_oggi = '' === $richiesta['data_gmt'] && self::appena_prima( $data, $richiesta['adesso'] );
+			$chiesta        = $richiesta['data_esplicita']
+				|| ( '' !== $data && (string) $prima->post_date !== $data && ! $rimessa_a_oggi );
 
 			return self::DATA_NON_FISSATA === (string) $prima->post_date_gmt
 				&& ! $chiesta
@@ -555,12 +608,40 @@ final class Conformita_Core_Registro_Automatico {
 	}
 
 	/**
-	 * Segna il contenuto che WordPress sta per eliminare.
+	 * La data è al massimo di due secondi prima di adesso.
+	 *
+	 * @param string $data   Data nella forma `AAAA-MM-GG HH:MM:SS`.
+	 * @param string $adesso Adesso, nella stessa forma e nello stesso fuso.
+	 * @return bool
+	 */
+	private static function appena_prima( $data, $adesso ) {
+		$data   = DateTimeImmutable::createFromFormat( '!Y-m-d H:i:s', (string) $data, new DateTimeZone( 'UTC' ) );
+		$adesso = DateTimeImmutable::createFromFormat( '!Y-m-d H:i:s', (string) $adesso, new DateTimeZone( 'UTC' ) );
+
+		if ( ! $data || ! $adesso ) {
+			return false;
+		}
+
+		$scarto = $adesso->getTimestamp() - $data->getTimestamp();
+
+		return $scarto >= 0 && $scarto <= 2;
+	}
+
+	/**
+	 * Segna il contenuto che WordPress sta per eliminare, e legge ciò che
+	 * l'eliminazione sposterà.
 	 *
 	 * WordPress cancella i metadati del contenuto prima della sua riga: il
 	 * segno tiene fuori dal registro la cancellazione della fine
 	 * pubblicazione, che l'eliminazione comprende. La voce si scrive dopo, in
 	 * `eliminazione()`, quando la riga non c'è più.
+	 *
+	 * Prima di cancellare, WordPress sposta anche gli allegati del contenuto,
+	 * e i suoi figli se il tipo è gerarchico, sul padre del contenuto, con
+	 * un'istruzione diretta che nessun aggancio annuncia. Qui si legge chi
+	 * verrà spostato, qualunque sia il tipo del contenuto eliminato: il padre
+	 * che riceve gli allegati può essere un contenuto gestito anche quando il
+	 * contenuto eliminato non lo è.
 	 *
 	 * @param int          $post_id Identificativo del contenuto.
 	 * @param WP_Post|null $post    Contenuto.
@@ -568,11 +649,139 @@ final class Conformita_Core_Registro_Automatico {
 	private static function eliminazione_inizio( $post_id, $post = null ) {
 		$post = $post instanceof WP_Post ? $post : get_post( $post_id );
 
-		if ( ! $post instanceof WP_Post || ! Conformita_Core_Tipi::registrato( $post->post_type ) || in_array( $post->post_status, array( 'new', 'auto-draft' ), true ) ) {
+		if ( ! $post instanceof WP_Post ) {
+			return;
+		}
+
+		self::leggi_spostamenti( $post );
+
+		if ( ! Conformita_Core_Tipi::registrato( $post->post_type ) || in_array( $post->post_status, array( 'new', 'auto-draft' ), true ) ) {
 			return;
 		}
 
 		self::$in_eliminazione[ (int) $post->ID ] = true;
+	}
+
+	/**
+	 * Legge gli allegati e i figli che l'eliminazione sposterà sul padre.
+	 *
+	 * Si leggono dalla banca dati e non dalla memoria: lo spostamento è
+	 * un'istruzione diretta, e la memoria non lo vede.
+	 *
+	 * @param WP_Post $post Contenuto in eliminazione.
+	 */
+	private static function leggi_spostamenti( WP_Post $post ) {
+		global $wpdb;
+
+		$post_id  = (int) $post->ID;
+		$padre    = (int) $post->post_parent;
+		$allegati = array();
+		$figli    = array();
+
+		if ( $padre > 0 ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Lettura dello stato prima di un'istruzione diretta di WordPress.
+			$allegati = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent = %d AND post_type = 'attachment'", $post_id ) );
+		}
+
+		if ( is_post_type_hierarchical( $post->post_type ) && Conformita_Core_Tipi::registrato( $post->post_type ) ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Come sopra.
+			$figli = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent = %d AND post_type = %s", $post_id, $post->post_type ) );
+		}
+
+		unset( self::$spostamenti[ $post_id ] );
+
+		if ( array() === $allegati && array() === $figli ) {
+			return;
+		}
+
+		self::$spostamenti[ $post_id ] = array(
+			'padre'    => $padre,
+			'allegati' => array_map( 'intval', $allegati ),
+			'figli'    => array_map( 'intval', $figli ),
+		);
+	}
+
+	/**
+	 * WordPress sta per cancellare la riga del contenuto: gli spostamenti
+	 * sono avvenuti e i metadati sono già cancellati.
+	 *
+	 * Qui finisce il tratto in cui la cancellazione dei metadati va tenuta
+	 * fuori dal registro: il segno si toglie adesso, e non a eliminazione
+	 * riuscita, così un'eliminazione che fallisce non zittisce ciò che segue
+	 * nella stessa richiesta. Resta solo l'attesa della riga, che serve a
+	 * `eliminazione()`.
+	 *
+	 * Gli spostamenti si registrano qui, prima della cancellazione della
+	 * riga, perché sono già avvenuti e restano anche se la cancellazione
+	 * fallisce. Si confrontano con la banca dati: si registra solo lo
+	 * spostamento avvenuto davvero.
+	 *
+	 * @param int          $post_id Identificativo del contenuto.
+	 * @param WP_Post|null $post    Contenuto.
+	 */
+	private static function eliminazione_riga( $post_id, $post = null ) {
+		unset( $post );
+
+		$post_id = (int) $post_id;
+
+		if ( isset( self::$in_eliminazione[ $post_id ] ) ) {
+			unset( self::$in_eliminazione[ $post_id ], self::$fine_prima[ $post_id ] );
+			self::$riga_in_cancellazione[ $post_id ] = true;
+		}
+
+		if ( ! isset( self::$spostamenti[ $post_id ] ) ) {
+			return;
+		}
+
+		$spostamento = self::$spostamenti[ $post_id ];
+		unset( self::$spostamenti[ $post_id ] );
+
+		$padri = self::padri_attuali( array_merge( $spostamento['allegati'], $spostamento['figli'] ) );
+
+		foreach ( $spostamento['allegati'] as $allegato_id ) {
+			if ( isset( $padri[ $allegato_id ] ) && $padri[ $allegato_id ] === $spostamento['padre'] ) {
+				self::allegato( $allegato_id, $spostamento['padre'], 'allegato_aggiunto' );
+			}
+		}
+
+		foreach ( $spostamento['figli'] as $figlio_id ) {
+			if ( ! isset( $padri[ $figlio_id ] ) || $padri[ $figlio_id ] === $post_id ) {
+				continue;
+			}
+
+			$figlio = get_post( $figlio_id );
+
+			if ( $figlio instanceof WP_Post && ! in_array( $figlio->post_status, self::STATI_IN_LAVORAZIONE, true ) ) {
+				self::scrivi( $figlio, 'modifica', array( 'campi' => array( 'post_parent' ) ) );
+			}
+		}
+	}
+
+	/**
+	 * Il padre attuale di alcuni contenuti, letto dalla banca dati.
+	 *
+	 * @param array<int, int> $ids Identificativi.
+	 * @return array<int, int> Padre per identificativo.
+	 */
+	private static function padri_attuali( array $ids ) {
+		global $wpdb;
+
+		if ( array() === $ids ) {
+			return array();
+		}
+
+		$segnaposto = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Lettura dopo un'istruzione diretta di WordPress; i segnaposto sono uno per numero.
+		$righe = $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent FROM {$wpdb->posts} WHERE ID IN ( {$segnaposto} )", $ids ) );
+
+		$padri = array();
+
+		foreach ( (array) $righe as $riga ) {
+			$padri[ (int) $riga->ID ] = (int) $riga->post_parent;
+		}
+
+		return $padri;
 	}
 
 	/**
@@ -590,7 +799,10 @@ final class Conformita_Core_Registro_Automatico {
 	 * prima: attesta un fatto avvenuto, e se la cancellazione fallisce il
 	 * contenuto c'è ancora. Si scrive solo per i contenuti segnati da
 	 * `eliminazione_inizio()`: WordPress annuncia così anche l'eliminazione
-	 * degli allegati, che hanno le loro voci.
+	 * degli allegati, che hanno le loro voci. Tipo e sezione si controllano
+	 * sulla copia del contenuto che WordPress passa, letta prima della
+	 * cancellazione: la riga non c'è più, e una copia in memoria può non
+	 * esserci.
 	 *
 	 * @param int          $post_id Identificativo del contenuto.
 	 * @param WP_Post|null $post    Contenuto, com'era prima dell'eliminazione.
@@ -605,18 +817,92 @@ final class Conformita_Core_Registro_Automatico {
 			return;
 		}
 
-		if ( ! isset( self::$in_eliminazione[ $post_id ] ) ) {
+		if ( ! isset( self::$riga_in_cancellazione[ $post_id ] ) ) {
 			return;
 		}
 
-		unset( self::$in_eliminazione[ $post_id ], self::$fine_prima[ $post_id ] );
+		unset( self::$riga_in_cancellazione[ $post_id ] );
 
 		if ( ! $post instanceof WP_Post || (int) $post->ID !== $post_id ) {
 			Conformita_Core_Registro::annota_mancata();
 			return;
 		}
 
-		self::scrivi( $post, 'eliminazione', array( 'stato' => (string) $post->post_status ) );
+		self::scrivi( $post, 'eliminazione', array( 'stato' => (string) $post->post_status ), true );
+	}
+
+	/**
+	 * Legge i contenuti gestiti di un utente che si sta eliminando.
+	 *
+	 * Se l'utente affida i suoi contenuti a un altro, WordPress ne cambia
+	 * l'autore con un'istruzione diretta, senza passare dal salvataggio: nessun
+	 * aggancio del contenuto lo annuncia. Se non li affida, i contenuti si
+	 * eliminano uno per uno e hanno le loro voci.
+	 *
+	 * @param int      $utente_id Utente in eliminazione.
+	 * @param int|null $affidati  Utente a cui vanno i contenuti, o nulla.
+	 */
+	private static function utente_in_eliminazione( $utente_id, $affidati = null ) {
+		global $wpdb;
+
+		$utente_id = (int) $utente_id;
+		unset( self::$contenuti_affidati[ $utente_id ] );
+
+		$tipi = Conformita_Core_Tipi::identificativi();
+
+		if ( null === $affidati || array() === $tipi ) {
+			return;
+		}
+
+		$segnaposto = implode( ', ', array_fill( 0, count( $tipi ), '%s' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Lettura prima di un'istruzione diretta di WordPress; i segnaposto sono uno per tipo.
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_author = %d AND post_type IN ( {$segnaposto} )", array_merge( array( $utente_id ), $tipi ) ) );
+
+		if ( array() !== $ids ) {
+			self::$contenuti_affidati[ $utente_id ] = array_map( 'intval', $ids );
+		}
+	}
+
+	/**
+	 * Registra il cambio di autore dei contenuti affidati, se è avvenuto.
+	 *
+	 * L'autore si rilegge dalla banca dati: si registra solo il cambio
+	 * avvenuto davvero, fuori dalla bozza come ogni modifica.
+	 *
+	 * @param int      $utente_id Utente eliminato.
+	 * @param int|null $affidati  Utente a cui vanno i contenuti, o nulla.
+	 */
+	private static function utente_eliminato( $utente_id, $affidati = null ) {
+		global $wpdb;
+
+		unset( $affidati );
+
+		$utente_id = (int) $utente_id;
+
+		if ( ! isset( self::$contenuti_affidati[ $utente_id ] ) ) {
+			return;
+		}
+
+		$ids = self::$contenuti_affidati[ $utente_id ];
+		unset( self::$contenuti_affidati[ $utente_id ] );
+
+		$segnaposto = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Lettura dopo un'istruzione diretta di WordPress; i segnaposto sono uno per numero.
+		$righe = $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_author FROM {$wpdb->posts} WHERE ID IN ( {$segnaposto} )", $ids ) );
+
+		foreach ( (array) $righe as $riga ) {
+			if ( (int) $riga->post_author === $utente_id ) {
+				continue;
+			}
+
+			$post = get_post( (int) $riga->ID );
+
+			if ( $post instanceof WP_Post && ! in_array( $post->post_status, self::STATI_IN_LAVORAZIONE, true ) ) {
+				self::scrivi( $post, 'modifica', array( 'campi' => array( 'post_author' ) ) );
+			}
+		}
 	}
 
 	/**
@@ -636,13 +922,17 @@ final class Conformita_Core_Registro_Automatico {
 	 * WordPress annuncia l'eliminazione di un allegato prima di cancellarne la
 	 * riga. La voce attesta un fatto avvenuto, e se la cancellazione fallisce
 	 * l'allegato c'è ancora: qui si annota solo il padre, e la voce la scrive
-	 * `eliminazione()` quando la riga non c'è più.
+	 * `eliminazione()` quando la riga non c'è più. Ogni tentativo riparte da
+	 * zero: un tentativo fallito prima non lascia il suo padre a questo.
 	 *
 	 * @param int          $allegato_id Identificativo dell'allegato.
 	 * @param WP_Post|null $allegato    Allegato.
 	 */
 	private static function allegato_eliminato( $allegato_id, $allegato = null ) {
 		$allegato = $allegato instanceof WP_Post ? $allegato : get_post( $allegato_id );
+
+		// Un tentativo precedente fallito non deve lasciare il suo padre a questo.
+		unset( self::$allegati_in_eliminazione[ (int) $allegato_id ] );
 
 		if ( $allegato instanceof WP_Post && (int) $allegato->post_parent > 0 ) {
 			self::$allegati_in_eliminazione[ (int) $allegato_id ] = (int) $allegato->post_parent;
@@ -864,11 +1154,14 @@ final class Conformita_Core_Registro_Automatico {
 	 * Se la scrittura fallisce l'operazione è già avvenuta e non si disfa: si
 	 * annota il buco, che la schermata di consultazione mostra.
 	 *
-	 * @param WP_Post              $post     Contenuto.
-	 * @param string               $azione   Operazione.
-	 * @param array<string, mixed> $dettagli Dettagli.
+	 * @param WP_Post              $post      Contenuto.
+	 * @param string               $azione    Operazione.
+	 * @param array<string, mixed> $dettagli  Dettagli.
+	 * @param bool                 $eliminato Il contenuto non c'è più: tipo
+	 *                                        e sezione si controllano sulla
+	 *                                        copia passata.
 	 */
-	private static function scrivi( WP_Post $post, $azione, array $dettagli ) {
+	private static function scrivi( WP_Post $post, $azione, array $dettagli, $eliminato = false ) {
 		if ( ! Conformita_Core_Tipi::registrato( $post->post_type ) ) {
 			return;
 		}
@@ -882,7 +1175,8 @@ final class Conformita_Core_Registro_Automatico {
 					'azione'    => $azione,
 					'contenuto' => (int) $post->ID,
 					'dettagli'  => $dettagli,
-				)
+				),
+				$eliminato ? $post : null
 			)
 			: null;
 
