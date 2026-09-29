@@ -14,7 +14,9 @@ capability di archivio. Quella capability non esiste: è l'unità S10, e l'albo 
 perché dichiara `irraggiungibile`.*
 
 **Stato: approvata e unita in `main`.** Le sezioni operative descrivono ciò che il codice fa
-oggi; i punti 11, 12 e 15 sono note storiche e lo dichiarano in apertura.
+oggi; i punti 11, 12 e 15 sono note storiche e lo dichiarano in apertura. Il punto 16 è
+un'unità successiva: un solo criterio per leggere la chiave della data di fine e per
+riconoscere un tipo gestito.
 
 ---
 
@@ -34,6 +36,12 @@ interrogazione a partire dall'elenco dei tipi registrati, e un componente potreb
 una chiave che scrive anche per altri scopi. Il trattino basso iniziale la tiene fuori
 dall'interfaccia dei campi personalizzati: la scrittura passa dal componente, che ha la
 propria maschera.
+
+**Come si legge: sempre dalla banca dati, con il suo confronto sulla chiave.** Le righe si
+cercano con `meta_key = chiave`, lo stesso confronto del filtro dei percorsi di lettura e del
+registro delle modifiche, e mai dalla memoria dei metadati di WordPress, che le raccoglie
+lettera per lettera. Di norma la banca dati non distingue le maiuscole: una riga con la chiave
+scritta in maiuscolo conta come la chiave vera, per tutti. Vedi il punto 16.
 
 ### 1.2 Che cosa contiene
 
@@ -375,6 +383,8 @@ usa.
 | C-113 | Vicino con data corrotta: mai il vicino, e le date valide restano |
 | C-114 | Più di un valore per la chiave: anomalia, e la scrittura ripara |
 
+Le righe C-248..C-254 sono dell'unità del punto 16 e sono elencate là.
+
 **Righe che NON appartengono a questa unità**: C-91 e C-96, che sono l'unità S10. Il catalogo
 le tiene in una sezione a parte proprio perché non si contino qui.
 
@@ -653,3 +663,131 @@ Il limite di `fields => 'ids'` della riga C-102 **resta aperto**. Estendere a tu
 interrogazioni la condizione scritta a mano chiuderebbe anche quello, ma cambierebbe la forma
 delle condizioni sui metadati, quindi il conteggio dei risultati e l'impaginazione, e
 andrebbe misurata sulle prestazioni. È una unità sua, non una riga di questa.
+
+---
+
+## 16. Un solo criterio per la chiave della data di fine e per il tipo gestito
+
+Unità a parte, aperta dopo il registro delle modifiche, che aveva trovato il difetto leggendo
+la chiave in maiuscolo (scheda del registro, nota in fondo al punto 13). Righe C-248..C-254,
+prove in `tests/criterio-unico-test.php`.
+
+### Il difetto: la stessa domanda fatta in due modi
+
+**La chiave della data di fine.** La scadenza leggeva la data dalla memoria dei metadati di
+WordPress, che raccoglie le righe per chiave lettera per lettera. Il filtro dei percorsi di
+lettura (il primo strato e la navigazione adiacente) e il registro delle modifiche la cercano
+nella banca dati, che di norma non distingue le maiuscole. Tre conseguenze:
+
+- una sola riga, con la chiave in maiuscolo e una data futura: per la scadenza la data non
+  c'era, quindi il contenuto era scaduto; per il primo strato c'era. Con `fields => 'ids'`,
+  dove agisce solo il primo strato, il contenuto usciva; negli altri percorsi no;
+- due righe, una con la chiave vera e una in maiuscolo: per la scadenza una data sola e
+  valida, per la navigazione adiacente due righe, cioè l'anomalia di C-114;
+- la scrittura dall'API: WordPress aggiorna e cancella i metadati passando dalla banca dati,
+  quindi tocca anche la riga in maiuscolo, ma la verifica finale rileggeva dalla memoria. Con
+  due righe dichiarava successo lasciandone due; con la sola riga in maiuscolo dava errore
+  dopo averla aggiornata.
+
+**Il tipo del contenuto.** Core riconosceva un tipo gestito confrontando il nome in PHP,
+lettera per lettera; WordPress cerca i contenuti per tipo con il confronto della banca dati.
+Un contenuto con `PROVA_ATTO` nella riga, al posto di `prova_atto`, è trovato dalla ricerca
+del sito e dalle interrogazioni del tipo gestito, ma il ricontrollo per contenuto lo lasciava
+passare perché "non gestito": un atto scaduto, o con la data corrotta, restava nei risultati
+della ricerca. Il registro non ne scriveva le voci.
+
+**Da dove arriva un tipo in maiuscolo.** Non dal salvataggio ordinario: WordPress riduce il
+tipo con `sanitize_key` prima di salvarlo (filtro `pre_post_type`), e riduce allo stesso modo
+il tipo chiesto a un'interrogazione. Arriva da una scrittura diretta nella banca dati, come
+un'importazione o una migrazione fatta con istruzioni proprie, o da un componente che toglie
+quella riduzione. La scheda del registro diceva che WordPress non normalizza il tipo: è
+corretta anche là.
+
+### La scelta: il criterio della banca dati, per tutti
+
+Il criterio è uno, e non può essere quello di PHP: chi decide che cosa un'interrogazione trova
+è la banca dati, e le interrogazioni di WordPress non si possono riscrivere tutte. È anche il
+criterio più largo, quindi sbaglia trattenendo: un contenuto che la banca dati trova come
+gestito è trattato come gestito ovunque. Il registro lo seguiva già.
+
+**La chiave.** Una sola lettura, `Conformita_Core_Scadenza::righe()`, con il confronto della
+banca dati sulla chiave. La usano la lettura della data, la scrittura (prima e dopo) e il
+registro delle modifiche. I valori serializzati si ricostruiscono come fa WordPress, quindi
+per un dato normale `conformita_core_fine_pubblicazione()` restituisce quello che restituiva
+prima. La lettura non passa più dai filtri di WordPress sui metadati: un componente che fa
+dire a WordPress una data diversa non la fa dire alla scadenza, perché non la farebbe dire al
+filtro.
+
+**Il tipo.** Una sola funzione, `Conformita_Core_Tipi::canonico()`, dice se un nome è di un
+tipo gestito e di quale. Passano da lì `conformita_core_tipo_registrato()` e le letture di
+sezione, politica e capability: ogni meccanismo di core che chiede "è gestito?", compresi
+scadenza, consegna degli allegati, registro e, quando sarà unito, il blocco dei motori di
+ricerca, riceve la stessa risposta e il nome registrato con cui cercare le proprie regole.
+
+- Il nome esatto di un tipo gestito, anche con spazi attorno come prima, è gestito.
+- Il nome esatto di un altro tipo registrato in WordPress non lo è, senza domande: WordPress
+  riduce ogni nome registrato a minuscole, cifre, trattino e trattino basso, core esclude il
+  trattino, e due nomi diversi scritti solo con quei caratteri non sono uguali per nessun
+  confronto della banca dati. Così su un sito sano la domanda non parte mai.
+- Ogni altro nome si chiede alla banca dati, con le regole della colonna del tipo (insieme di
+  caratteri e ordinamento, letti una volta per richiesta), una volta per nome per richiesta.
+  Le risposte ricordate si azzerano a ogni nuova registrazione di un tipo.
+- Se le regole della colonna non si possono leggere, il ripiego ignora maiuscole e spazi in
+  coda. **Limite dichiarato**: nel ripiego una lettera accentata resta diversa, mentre molti
+  ordinamenti la considerano uguale.
+
+Lo stesso criterio riconosce gli allegati nel ricontrollo per contenuto
+(`Conformita_Core_Tipi::uguale()`): un allegato con il tipo in maiuscolo segue il padre
+scaduto come gli altri.
+
+### Che cosa cambia per chi usa core
+
+- `conformita_core_tipo_registrato()` risponde vero anche per un nome che la banca dati
+  riconduce a un tipo gestito, per esempio `PROVA_ATTO`. Le funzioni della scadenza hanno la
+  stessa interfaccia.
+- Il registro scrive le voci anche per un contenuto con il tipo in maiuscolo. Il passaggio da
+  una grafia all'altra è un cambio del tipo scritto nella riga, e il registro lo scrive come
+  `cambio_tipo`, in uscita e in ingresso.
+- **Costo**: la data di fine si legge con una domanda alla banca dati per contenuto, mentre
+  prima veniva dalla memoria che l'interrogazione aveva già riempito. Su un elenco sono tante
+  piccole letture quanti i contenuti della pagina. La mappa per i motori di ricerca non
+  riempiva quella memoria nemmeno prima, quindi lì il numero di letture non cambia.
+
+### Che cosa resta fuori
+
+- Il confronto con `attachment` nella consegna degli allegati e nel blocco dei motori di
+  ricerca resta lettera per lettera: sbaglia rifiutando, cioè un allegato con il tipo in
+  maiuscolo non si consegna. Nel registro, il riconoscimento degli allegati è dell'unità del
+  registro.
+- Una banca dati con insieme di caratteri diverso fra la connessione e la tabella: il
+  confronto qui usa le regole della colonna, WordPress in qualche caso quelle della
+  connessione. WordPress crea tabelle e connessione con le stesse regole.
+
+### Le righe
+
+| Riga | Cosa verifica |
+|---|---|
+| C-248 | Un nome di tipo è gestito se e solo se la ricerca di WordPress per il tipo gestito trova il contenuto con quel nome (maiuscole, maiuscole miste, spazi in coda, lettera accentata; e i nomi diversi: una lettera in meno, il trattino, `post`). Una risposta ricordata non sopravvive a un tipo registrato dopo. Il ripiego senza le regole della colonna |
+| C-249 | Contenuto con il tipo in maiuscolo: fuori dalla ricerca mista se scaduto, fuori dall'interrogazione del tipo se la data è corrotta, anteprima incorporata vuota; il registro scrive l'ingresso e l'uscita dalla grafia in maiuscolo |
+| C-250 | Allegato con il tipo in maiuscolo di un contenuto scaduto: fuori dai risultati |
+| C-251 | Una sola riga della fine con la chiave in maiuscolo, futura e passata: scadenza, primo strato da solo, due strati e navigazione adiacente decidono allo stesso modo |
+| C-252 | Due righe, chiave vera e chiave in maiuscolo: anomalia di C-114 per la scadenza, per le interrogazioni e per il vicino |
+| C-253 | La scrittura dall'API ripara anche la riga in maiuscolo, e dichiara successo solo se ne resta una |
+| C-254 | Un filtro di WordPress che mente sulla data non sposta la scadenza |
+
+Le prove chiedono alla banca dati di prova che cosa trova e pretendono che core risponda allo
+stesso modo; dove hanno senso solo se la banca dati ignora le maiuscole, lo asseriscono, così
+su una banca dati diversa diventano rosse invece di passare senza aver provato niente. Sul
+codice di prima di questa unità tutte e quindici sono rosse.
+
+**Guasti di prova**, ciascuno introdotto a mano e tolto, con le prove che diventano rosse:
+
+| Guasto | Rosse |
+|---|---|
+| G1: nessuna domanda alla banca dati sul tipo | C-248, C-249 |
+| G2: righe della fine lette dalla memoria di WordPress | C-251..C-254, e due prove di C-202 del registro |
+| G3: allegato riconosciuto lettera per lettera | C-250 |
+| G4: risposte ricordate non azzerate alla registrazione | C-248 |
+| G5: sezione e politica cercate senza il nome registrato | C-248, C-249 |
+| G6: ripiego che non ignora gli spazi in coda | C-248 |
+| G7: la scrittura legge le righe dalla memoria prima di riparare | C-253 |

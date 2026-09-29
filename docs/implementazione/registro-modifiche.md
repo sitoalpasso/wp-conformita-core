@@ -656,11 +656,11 @@ confronto fatto in PHP che la banca dati fa in un altro modo. Ne sono usciti qua
   G119, G120).
 - *La richiesta lasciata da un salvataggio rifiutato* (prima e seconda forma). Non si può
   ripulire, perché WordPress non annuncia il fallimento: dichiarata al punto 8.
-- *Il tipo scritto con altre maiuscole* (terza forma). Il tipo si confronta in PHP, lettera
-  per lettera, e la banca dati senza badare alle maiuscole: un contenuto salvato con il tipo
-  in maiuscolo non ha voci, ma le ricerche per tipo lo trovano. WordPress non normalizza il
-  tipo al salvataggio. Riguarda tutti i meccanismi di core che riconoscono un tipo gestito,
-  non solo il registro: vedi la nota in fondo al punto 13.
+- *Il tipo scritto con altre maiuscole* (terza forma). Il tipo si confrontava in PHP,
+  lettera per lettera, e la banca dati senza badare alle maiuscole: un contenuto con il tipo
+  in maiuscolo nella riga non aveva voci, ma le ricerche per tipo lo trovavano. Riguardava
+  tutti i meccanismi di core che riconoscono un tipo gestito: corretto in un'unità a parte,
+  vedi la nota in fondo al punto 13.
 
 Il resto dello stato in memoria è stato riletto con la stessa domanda. I contenuti in
 eliminazione, gli allegati in eliminazione, gli spostamenti e i contenuti affidati sono
@@ -727,7 +727,7 @@ dichiarato al punto 8.
 | Contenuto che diventa allegato, allegato che diventa contenuto, con il salvataggio o con l'istruzione diretta | tipo, padre | `cambio_tipo` e la voce dell'allegato aggiunto o tolto sul padre, uguali sulle due strade | C-197 |
 | Salvataggio dello stesso contenuto dentro un altro salvataggio, anche che rimette com'era un campo | campi, stato | ciascun salvataggio con la sua richiesta e le sue voci; l'esterno giudicato su ciò che ha scritto | C-197 |
 | Salvataggio rifiutato dalla banca dati | niente, ma la richiesta resta | fuori: dichiarato | punto 8 |
-| Tipo salvato con altre maiuscole | tipo | fuori da questa unità: vedi sotto | nessuna |
+| Tipo scritto nella riga con altre maiuscole | tipo | riconosciuto con il criterio della banca dati; il passaggio da una grafia all'altra è un `cambio_tipo` | C-249 |
 | Eliminazione definitiva | metadati, allegati e figli spostati sul padre, riga | `eliminazione` dopo la riga; spostamenti registrati; i metadati sono dentro l'eliminazione | C-197, C-200, C-203 |
 | Eliminazione a metà, rifiutata dalla banca dati | metadati già cancellati | fuori: buco dichiarato | punto 8 |
 | Utente eliminato affidando i contenuti | autore | letto prima e dopo, `modifica` | C-197 |
@@ -742,17 +742,13 @@ dichiarato al punto 8.
 | Pulizie automatiche: bozze automatiche vecchie, cestino svuotato | contenuti eliminati | come l'eliminazione; la bozza automatica mai nata non ha voce | C-200 |
 | Scrittura diretta nella banca dati da un altro plugin | qualunque | fuori: stessi poteri di core | punto 8 |
 
-**Da guardare fuori da questa unità.** Leggendo la chiave in maiuscolo è emerso che core legge
-la data di fine con due criteri: la funzione della scadenza la legge dalla memoria di
-WordPress, che distingue le maiuscole, il filtro dei percorsi di lettura la cerca nella banca
-dati, che non le distingue. Una riga conservata con la chiave in maiuscolo vale per il secondo e
-non per la prima. Il registro segue il criterio della banca dati, che è il più largo; allineare
-i due criteri riguarda la scadenza, non il registro.
-
-Lo stesso vale per il tipo del contenuto. Core riconosce un tipo gestito confrontando il nome in
-PHP, lettera per lettera; la banca dati, nelle ricerche per tipo, non bada alle maiuscole, e
-WordPress salva il tipo come lo riceve. Un contenuto salvato con il tipo scritto in maiuscolo
-non ha voci nel registro, ma una ricerca per il tipo gestito lo trova. Nessuna funzione di
-WordPress lo fa da sé: serve un componente che lo scriva così. La correzione giusta è un solo
-criterio per dire "tipo gestito" in tutto core, scadenza e indicizzazione comprese, e non
-riguarda solo il registro.
+**Corretto in un'unità a parte: un solo criterio, quello della banca dati.** Leggendo la
+chiave in maiuscolo era emerso che core leggeva la data di fine con due criteri, la memoria
+di WordPress per la scadenza e la banca dati per il filtro e per questo registro, e che
+riconosceva un tipo gestito lettera per lettera mentre le ricerche di WordPress lo trovano
+senza badare alle maiuscole. Ora la data di fine si legge in un posto solo,
+`Conformita_Core_Scadenza::righe()`, che questo registro usa, e il tipo si riconosce con il
+criterio della banca dati in `Conformita_Core_Tipi::canonico()`. Una correzione a quanto
+scritto qui prima: WordPress riduce il tipo con `sanitize_key` al salvataggio, quindi un tipo
+in maiuscolo arriva solo da una scrittura diretta nella banca dati o da un componente che
+toglie quella riduzione. Scheda del motore di scadenza, punto 16; righe C-248..C-254.
