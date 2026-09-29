@@ -970,6 +970,44 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-202, terza parte: valori che non sono testi.
+	 *
+	 * Le funzioni dei metadati accettano elenchi e oggetti, che WordPress
+	 * conserva serializzati. Il registro li confronta e li riporta come sono
+	 * conservati: due elenchi diversi sono due valori diversi, e un oggetto
+	 * non interrompe la richiesta.
+	 */
+	public function test_c202_fine_pubblicazione_valori_non_testo() {
+		wp_set_current_user( $this->utente() );
+
+		$id      = $this->contenuto( 'publish' );
+		$chiave  = conformita_core_chiave_fine_pubblicazione();
+		$oggetto = (object) array( 'c' => 1 );
+
+		$this->segna();
+		update_post_meta( $id, $chiave, array( 'a' ) );
+		update_post_meta( $id, $chiave, array( 'b' ) );
+		update_post_meta( $id, $chiave, $oggetto );
+		delete_post_meta( $id, $chiave );
+
+		$this->assertSame(
+			array(
+				array( array(), array( maybe_serialize( array( 'a' ) ) ) ),
+				array( array( maybe_serialize( array( 'a' ) ) ), array( maybe_serialize( array( 'b' ) ) ) ),
+				array( array( maybe_serialize( array( 'b' ) ) ), array( maybe_serialize( $oggetto ) ) ),
+				array( array( maybe_serialize( $oggetto ) ), array() ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+				},
+				$this->nuove()
+			),
+			'Quattro scritture, quattro voci con i valori come sono conservati.'
+		);
+	}
+
+	/**
 	 * C-202, seconda parte: le strade che non nominano il contenuto giusto.
 	 *
 	 * La cancellazione per chiave su tutti i contenuti annuncia la scrittura

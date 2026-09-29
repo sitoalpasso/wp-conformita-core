@@ -1146,13 +1146,28 @@ final class Conformita_Core_Registro_Automatico {
 	/**
 	 * Tutti i valori registrati della fine pubblicazione, letti dalla banca dati.
 	 *
+	 * Si leggono le righe così come sono conservate, nell'ordine in cui sono
+	 * state scritte: un elenco o un oggetto resta nella sua forma serializzata,
+	 * che è un testo e distingue un valore dall'altro. Convertire il valore
+	 * letto da WordPress in testo farebbe di due elenchi diversi la stessa
+	 * parola, e di un oggetto un errore.
+	 *
 	 * @param int $post_id Identificativo del contenuto.
-	 * @return array<int, string>
+	 * @return array<int, string|null>
 	 */
 	private static function valori_fine( $post_id ) {
-		$valori = get_post_meta( $post_id, Conformita_Core_Scadenza::CHIAVE, false );
+		global $wpdb;
 
-		return is_array( $valori ) ? array_values( array_map( 'strval', $valori ) ) : array();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Serve il valore conservato, non quello ricostruito dalla memoria di WordPress.
+		$valori = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id",
+				(int) $post_id,
+				Conformita_Core_Scadenza::CHIAVE
+			)
+		);
+
+		return is_array( $valori ) ? array_values( $valori ) : array();
 	}
 
 	/**
