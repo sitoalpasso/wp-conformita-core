@@ -10,8 +10,8 @@ un proprio ruolo il permesso di consultare il registro. Nessun registro proprio 
 se ci fosse, esisterebbero due verità su chi ha fatto che cosa.
 
 **Stato: costruita, riletta in proprio prima del primo giro di revisione e corretta dopo il
-primo e il secondo giro (punto 11, ultime tre parti), con le righe di collaudo verdi in
-locale.**
+primo, il secondo e il terzo giro (punto 11, ultime quattro parti), con le righe di
+collaudo verdi in locale.**
 Le sezioni sono al passato dove dicono cosa il codice fa.
 
 ---
@@ -38,7 +38,7 @@ se due persone la compiono nello stesso istante.
 
 **Come si prova che funziona, e che la prova è vera.** Ogni comportamento ha una prova
 automatica, e ogni prova è stata fatta fallire di proposito: si è rotto il codice in
-ottantasette modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
+novantanove modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
 11). Per esempio: se il registro si dimentica di scrivere la pubblicazione, cinque prove
 diventano rosse; se la pagina mostra il motivo senza neutralizzarne il codice, diventa rossa
 la prova C-219; se il permesso di lettura viene dato all'amministratore, diventano rosse
@@ -149,9 +149,10 @@ Questi nomi sono riservati: un componente non li può usare per le proprie voci.
 | La scrittura di una voce automatica fallisce | l'operazione è già avvenuta e non si disfa. Si annota il buco, e la schermata lo mostra in testa con il conteggio e le date. Un buco nel registro non si ripara, si può solo sapere che c'è |
 | La scrittura riesce ma la riga non dice quello che si voleva | la rilettura se ne accorge e la funzione restituisce errore. La riga resta, perché il registro non cancella |
 | Due scritture con la stessa chiave nello stesso istante | una riesce, l'altra riceve l'errore con il numero della voce che esiste già. Lo garantisce il vincolo della banca dati, non solo il controllo che lo precede (guasto G12) |
+| I dettagli non si possono codificare senza cambiarli | errore `conformita_core_registro_dettagli_non_fedeli`, e nessuna riga. I numeri decimali si codificano con tutte le cifre, qualunque precisione abbia scelto chi configura PHP; il testo codificato si rilegge prima di scrivere |
 | La tabella non c'è | la scrittura fallisce come sopra; l'opzione della versione non si scrive, o si toglie alla prima scrittura fallita se era scritta, quindi l'avvio successivo riprova a crearla |
 | La tabella c'è ma la chiave non ha il suo vincolo | per esempio una tabella preesistente che dbDelta non riesce ad allineare: non è un registro installato, la versione non si scrive e l'avvio riprova |
-| Un filtro sconosciuto o malformato | errore, mai un filtro ignorato: un filtro ignorato mostrerebbe tutte le voci come se fossero quelle chieste. Un filtro con valore nullo è malformato, e così la pagina senza la misura della pagina. Nella schermata è malformato anche un filtro che non è un testo o che la ripulitura cambierebbe: la pagina lo dice e non mostra voci |
+| Un filtro sconosciuto o malformato | errore, mai un filtro ignorato: un filtro ignorato mostrerebbe tutte le voci come se fossero quelle chieste. Un filtro con valore nullo è malformato, e così la pagina senza la misura della pagina. Nella schermata è malformato anche un filtro che non è un testo o che la ripulitura cambierebbe, e un nome che non è né un filtro né un parametro della schermata: la pagina lo dice e non mostra voci |
 | La banca dati rifiuta la cancellazione della riga di un contenuto | il contenuto c'è ancora e la voce `eliminazione` non si scrive. WordPress però ha già cancellato i metadati, data di fine compresa, e quella cancellazione resta senza voce (punto 8). Il tentativo fallito non lascia segni: ciò che segue nella stessa richiesta si registra normalmente |
 | Un utente eliminato | la voce resta con il suo numero, e la schermata scrive "utente N, non più presente" |
 | Un contenuto eliminato | le sue voci restano; la schermata scrive "N (tipo), non più presente" |
@@ -159,7 +160,7 @@ Questi nomi sono riservati: un componente non li può usare per le proprie voci.
 ## 7. Le prove
 
 Righe C-195..C-224 al punto 10; file e metodi al punto 1. In locale, su WordPress 6.5 con PHP
-8.4, l'intera batteria dà 267 prove verdi, e il controllo di stile è pulito.
+8.4, l'intera batteria dà 273 prove verdi, e il controllo di stile è pulito.
 
 ## 8. Che cosa deliberatamente non fa
 
@@ -252,11 +253,11 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 | C-195 | Un contenuto in verifica viene pubblicato, con il sito in un fuso diverso da UTC | una voce e una sola, `pubblicazione`, con utente, contenuto, tipo, sezione, origine automatica, stati di prima e di dopo, e l'istante dell'orologio di core conservato in UTC |
 | C-196 | Nascita di una bozza, di un contenuto già pubblicato, di una bozza automatica poi salvata | `creazione`; `creazione` e `pubblicazione`; niente per la bozza automatica e `creazione` al suo primo salvataggio |
 | C-197 | Modifica del titolo di un pubblicato e di uno in verifica; salvataggio senza modifiche; modifica di testo e riassunto; un pubblicato reso privato cambiando nello stesso salvataggio indirizzo e data. Seconda parte, da in verifica: pubblicato scegliendo l'indirizzo; programmato indicando la data; pubblicato mentre un altro componente cambia indirizzo e date; senza titolo; con la sola data locale dalla funzione di base, con la data in UTC nulla, assente o vuota, e senza data in UTC con la data locale di prima; in verifica da giorni e pubblicato con la funzione di aggiornamento; un annuncio di modifica lanciato a mano. Terza parte, senza salvataggio: un utente eliminato affidando a un altro un pubblicato, uno in verifica e una bozza; un utente eliminato senza affidare niente; un contenuto gerarchico eliminato, con un figlio pubblicato e uno in bozza | una voce `modifica` con i nomi dei campi; nessuna voce; una voce con i due nomi e nessun valore; `rimozione` e `modifica` con indirizzo e date. Seconda parte: `modifica` con il solo indirizzo; `cambio_stato` e `modifica` con le due date; `modifica` con indirizzo e date; nessuna `modifica` per l'indirizzo generato dopo il salvataggio; `modifica` con le due date in tutti e tre i casi, nessuna senza la data in UTC e con la data di prima; nessuna `modifica` per la data rimessa a oggi; `modifica` con l'indirizzo. Terza parte: `modifica` con l'autore sul pubblicato e su quello in verifica, niente sulla bozza; nessuna voce; `modifica` con il padre sul figlio pubblicato, poi `eliminazione`, niente sulla bozza |
-| C-198 | Un pubblicato va in bozza, in verifica, privato, nel cestino | una voce `rimozione` ciascuno, e nessuna `modifica` accanto |
+| C-198 | Un pubblicato va in bozza, in verifica, privato, nel cestino; un pubblicato e uno in verifica rimessi in bozza automatica da un componente, accanto alla nascita di una bozza automatica | una voce `rimozione` ciascuno, e nessuna `modifica` accanto; `rimozione` e `cambio_stato`, e niente per la nascita |
 | C-199 | Bozza, verifica, bozza, cestino, ripristino; un pubblicato messo nel cestino e ripreso | quattro `cambio_stato` con gli stati giusti; `rimozione` e `cambio_stato`, nessuna `modifica` per il suffisso del cestino |
 | C-200 | Eliminazione definitiva di un pubblicato con data di fine; eliminazione che la banca dati rifiuta, seguita da una data di fine; eliminazione con la copia in memoria buttata appena prima della cancellazione; eliminazione di una bozza automatica | una sola voce `eliminazione` con lo stato; le voci di prima restano tutte; nessuna voce `eliminazione` per il contenuto che c'è ancora, e la data di fine successiva si registra; una sola `eliminazione` e nessuna voce mancata; nessuna voce |
 | C-201 | Le stesse tre operazioni (titolo, data di fine, allegato) su una bozza e su un contenuto in verifica; eliminazione di una bozza che era stata pubblicata | nella bozza nessuna voce, in verifica tre; l'eliminazione della bozza si registra |
-| C-202 | Data di fine scritta, riscritta uguale, cambiata, tolta; poi due righe duplicate aggiornate con una scrittura. Seconda parte: cancellazione per chiave su tutti i contenuti, la stessa nominando un contenuto senza data di fine, una riga della data che cambia chiave e che la riprende | tre voci con prima e dopo, nessuna per la riscrittura uguale; una sola voce per la scrittura su due righe. Una voce per ogni contenuto pubblicato toccato, contate prima di leggerne i valori, e nessuna per la bozza; due righe dello stesso contenuto tolte insieme fanno una voce con tutti e due i valori; la voce va al contenuto toccato, non a quello nominato; una voce per ciascun cambio di chiave |
+| C-202 | Data di fine scritta, riscritta uguale, cambiata, tolta; poi due righe duplicate aggiornate con una scrittura. Seconda parte: cancellazione per chiave su tutti i contenuti, la stessa nominando un contenuto senza data di fine, una riga della data che cambia chiave e che la riprende. Terza parte: due elenchi diversi e un oggetto scritti uno dopo l'altro, poi tolti | tre voci con prima e dopo, nessuna per la riscrittura uguale; una sola voce per la scrittura su due righe. Una voce per ogni contenuto pubblicato toccato, contate prima di leggerne i valori, e nessuna per la bozza; due righe dello stesso contenuto tolte insieme fanno una voce con tutti e due i valori; la voce va al contenuto toccato, non a quello nominato; una voce per ciascun cambio di chiave. Terza parte: quattro voci, con i valori nella forma in cui sono conservati, e nessun errore |
 | C-203 | Allegato aggiunto ed eliminato su un pubblicato; un allegato libero assegnato a un contenuto e poi spostato su un altro; scollegato e ricollegato dalla libreria dei media; eliminazione dell'allegato che la banca dati rifiuta, poi riuscita; eliminazione rifiutata, scollegamento, eliminazione riuscita; un contenuto con padre eliminato con un allegato, con la cancellazione riuscita, rifiutata, e con lo spostamento dell'allegato rifiutato | `allegato_aggiunto` e `allegato_eliminato` sul contenuto padre, con il numero dell'allegato; allo spostamento, tolto dal primo e aggiunto al secondo; lo stesso dalla libreria; nessuna voce finché l'allegato c'è ancora, la voce alla riuscita; la voce dello scollegamento e nessuna all'eliminazione riuscita; `allegato_aggiunto` sul padre che riceve l'allegato anche se la cancellazione fallisce, e nessuna se lo spostamento non avviene |
 | C-204 | Le stesse operazioni su un articolo di WordPress | nessuna voce e nessuna voce mancata annotata; controllo positivo sul tipo gestito |
 | C-205 | Operazione senza utente, poi con un utente con nome ed email | utente zero, poi il numero; le colonne sono quelle del punto 4 e nella riga non c'è nessun dato della persona |
@@ -265,7 +266,7 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 
 | # | Caso | Atteso |
 |---|---|---|
-| C-206 | Voce completa con contenuto, motivazione su due righe, dettagli di ogni tipo ammesso; voce della sola sezione | si rilegge uguale, motivazione ripulita degli spazi ai lati, origine componente, utente e istante di core; nessuna voce automatica accanto |
+| C-206 | Voce completa con contenuto, motivazione su due righe, dettagli di ogni tipo ammesso; voce della sola sezione; decimali con molte cifre, un decimale tondo e testi fatti di cifre, scritti con la precisione di PHP ridotta a tre cifre | si rilegge uguale, motivazione ripulita degli spazi ai lati, origine componente, utente e istante di core; nessuna voce automatica accanto; i numeri si rileggono identici, e i testi restano testi |
 | C-207 | Quarantasette descrizioni sbagliate, una condizione per volta, compresi i nove nomi riservati, un nome con a capo finale, `utente`, `istante` e `origine` dichiarati | ciascuna rifiutata con il suo codice, e la tabella identica; controllo positivo sulla forma corretta |
 | C-208 | Una decisione presa giorni dopo da un'altra persona, che rimanda alla rimozione | la rimozione resta identica; la decisione porta il rimando, la nuova persona e il nuovo istante; si ritrovano in ordine leggendo il contenuto e cercando per rimando |
 | C-209 | Seconda voce con la stessa chiave; chiave che differisce solo per maiuscole | rifiutata con il numero della prima, tabella identica; la chiave in maiuscolo è un'altra chiave; l'indice della chiave è unico, su quella colonna sola e per intero, e una riga ripetuta scritta saltando il codice la rifiuta la banca dati |
@@ -286,7 +287,7 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 |---|---|---|
 | C-214 | Amministratore, redattore e abbonato senza il permesso; poi un utente con il permesso | la voce di menu chiede il permesso dedicato; i tre sono rifiutati; il quarto legge |
 | C-215 | Ruoli dopo l'installazione | nessun ruolo ha il permesso di lettura |
-| C-216 | Ogni filtro da solo, due giorni di confine attorno alla mezzanotte del sito, due filtri insieme; filtri sconosciuti o malformati, compresi quelli con valore nullo e la pagina senza misura; nella schermata, con il gettone valido, un filtro elenco, uno con marcatori, uno con spazi ai lati | ogni filtro mostra le voci giuste e nasconde le altre; una voce delle 22:30 UTC è del giorno dopo a Roma; un filtro sbagliato è un errore e la pagina non mostra tutto; nella schermata l'errore e nessuna voce, e un filtro vuoto vale come assente |
+| C-216 | Ogni filtro da solo, due giorni di confine attorno alla mezzanotte del sito, due filtri insieme; filtri sconosciuti o malformati, compresi quelli con valore nullo e la pagina senza misura; nella schermata, con il gettone valido, un filtro elenco, uno con marcatori, uno con spazi ai lati, un nome sconosciuto da solo e accanto a un filtro giusto, poi lo stesso senza gettone e il numero di pagina con il gettone. Seconda parte: il primo e l'ultimo istante di un giorno, e quelli accanto, dove l'ora legale comincia a mezzanotte e nei giorni di 23 e 25 ore | ogni filtro mostra le voci giuste e nasconde le altre; una voce delle 22:30 UTC è del giorno dopo a Roma; un filtro sbagliato è un errore e la pagina non mostra tutto; nella schermata l'errore e nessuna voce, e un filtro vuoto vale come assente; senza gettone la pagina dice che i filtri non sono applicati, e il numero di pagina non è un errore. Seconda parte: il primo e l'ultimo istante sono del giorno, quelli accanto no, e il primo istante del giorno dopo si trova filtrando dal giorno dopo |
 | C-217 | Filtri senza gettone o con gettone sbagliato | non applicati, e la pagina lo dice; controllo positivo con il gettone valido |
 | C-218 | Due voci a cavallo del cambio d'ora, due fusi del sito | orari giusti in entrambi i casi |
 | C-219 | Motivazione, dettagli e titolo con codice | stampati come testo, e presenti nella pagina nella forma neutralizzata; l'a capo della motivazione diventa un a capo della pagina |
@@ -394,6 +395,18 @@ rimesso a posto subito dopo.
 | G85 | contenuti affidati dall'utente eliminato non letti | C-197 |
 | G86 | cambio di autore di una bozza registrato | C-197 |
 | G87 | voce di eliminazione senza l'attesa della riga | C-200 |
+| G88 | bozza automatica esclusa anche come destinazione | C-198 |
+| G89 | nascita della bozza automatica registrata | C-196, C-198 |
+| G90 | valori della data di fine convertiti in testo | C-202 |
+| G91 | numeri dei dettagli codificati con la precisione di PHP | C-206 |
+| G92 | parte decimale zero persa nella codifica | C-206 |
+| G93 | nessuna rilettura dei dettagli codificati | **nessuna, voluto**: con le due correzioni sopra nessun dettaglio ammesso cambia nella codifica, su un sito in UTF-8. La rilettura resta per i casi che la batteria non può creare: un sito con un'altra codifica dei caratteri, dove WordPress converte i testi prima di codificarli, e un PHP dove la precisione non si può cambiare. Tolte insieme la precisione e la rilettura, C-206 diventa rossa |
+| G94 | testi fatti di cifre codificati come numeri | C-206 |
+| G95 | nomi sconosciuti della schermata ignorati | C-216 |
+| G96 | numero di pagina non ammesso fra i nomi della schermata | C-216 |
+| G97 | nome sconosciuto ignorato quando è l'unico | C-216 |
+| G98 | giorno dopo calcolato dall'orario spostato dal cambio d'ora | C-216 |
+| G99 | giorno dopo calcolato aggiungendo 86400 secondi | C-216 |
 
 **Due guasti non hanno fatto diventare rossa nessuna riga, alla prima passata**, e le righe
 sono state corrette prima di chiudere. G25: una voce automatica su un tipo non gestito non si
@@ -491,6 +504,35 @@ cambia i campi di un contenuto anche senza salvarlo. Oltre a queste due, le stra
 WordPress lette in questo giro sono il collegamento dalla libreria dei media, già coperto, e il
 suffisso del cestino aggiunto al nome di un contenuto già nel cestino, che resta fuori per
 scelta (punto 8).
+
+**Il terzo giro di revisione.** Cinque difetti. Stesso metodo: prova scritta e vista fallire
+sul codice vecchio, poi guasti.
+
+1. *La bozza automatica esclusa come destinazione.* Un contenuto pubblicato che un componente
+   rimetteva in bozza automatica usciva dalla pubblicazione senza voce. Ora l'esclusione vale
+   solo per la bozza automatica appena nata (C-198; G88, G89).
+2. *La data di fine convertita in testo prima del confronto.* WordPress accetta elenchi e
+   oggetti come valori: due elenchi diversi diventavano la stessa parola, e un oggetto
+   interrompeva la richiesta. Ora si confrontano le righe conservate, nella loro forma
+   serializzata (C-202; G90).
+3. *I numeri dei dettagli arrotondati.* La codifica usava la precisione scelta per PHP: con
+   una precisione ridotta un decimale perdeva cifre prima di arrivare alla tabella. Ora si
+   codifica con tutte le cifre, si tiene la parte decimale zero, e il testo codificato si
+   rilegge prima di scrivere (C-206; G91..G94).
+4. *Nomi sconosciuti ignorati dalla schermata.* La schermata controllava solo i filtri che
+   conosce: `contenuti` al posto di `contenuto` mostrava tutto il registro. Ora ogni nome
+   estraneo rende malformata la richiesta (C-216; G95..G97).
+5. *Il limite superiore nei cambi d'ora.* Dove l'ora legale comincia a mezzanotte, l'inizio
+   del giorno è l'una, e aggiungere un giorno a quell'orario portava l'una anche nel giorno
+   dopo, che entrava per un'ora nel filtro. Ora si passa prima alla data dopo e poi si cerca il
+   suo inizio (C-216; G98, G99).
+
+La causa comune dei punti 2 e 3 è una conversione che perde informazione fatta prima del
+controllo: il controllo confrontava valori già cambiati. Le altre conversioni del registro
+sono state rilette con la stessa domanda: i numeri di contenuto, utente e voce passano da un
+controllo che rifiuta ciò che non è un intero, prima di essere convertiti; la motivazione si
+ripulisce degli spazi ai lati per regola dichiarata, e la rilettura dopo la scrittura confronta
+il testo ripulito con la riga (C-211).
 
 ## 12. Che cosa l'albo dovrà fare, adesso che questa unità esiste
 
