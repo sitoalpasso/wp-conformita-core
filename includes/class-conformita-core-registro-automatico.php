@@ -88,13 +88,17 @@ final class Conformita_Core_Registro_Automatico {
 	private static $ascoltatori = array();
 
 	/**
-	 * Cosa ha chiesto il salvataggio in corso e cosa ne ha ricavato WordPress,
-	 * per contenuto.
+	 * Cosa hanno chiesto i salvataggi in corso e cosa ne ha ricavato
+	 * WordPress, per contenuto.
 	 *
 	 * Si legge al filtro dei dati, prima che la banca dati li riceva, e si
 	 * consuma all'annuncio della modifica, che segue nello stesso salvataggio.
+	 * Per ogni contenuto è una pila: un componente può salvare di nuovo lo
+	 * stesso contenuto mentre il primo salvataggio è in corso, e il
+	 * salvataggio interno finisce prima di quello esterno. Ciascuno consuma
+	 * la sua richiesta e non quella dell'altro.
 	 *
-	 * @var array<int, array<string, mixed>>
+	 * @var array<int, array<int, array<string, mixed>>>
 	 */
 	private static $richieste = array();
 
@@ -279,6 +283,18 @@ final class Conformita_Core_Registro_Automatico {
 			),
 			array(
 				'aggancio'  => 'wp_insert_post_data',
+				'metodo'    => 'richiesta_finale',
+				'priorita'  => PHP_INT_MAX,
+				'argomenti' => 4,
+			),
+			array(
+				'aggancio'  => 'wp_insert_attachment_data',
+				'metodo'    => 'richiesta',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 4,
+			),
+			array(
+				'aggancio'  => 'wp_insert_attachment_data',
 				'metodo'    => 'richiesta_finale',
 				'priorita'  => PHP_INT_MAX,
 				'argomenti' => 4,
@@ -475,6 +491,8 @@ final class Conformita_Core_Registro_Automatico {
 	 *
 	 * Serve a `riscritto_da_wordpress()`: un campo cambiato al cambio di stato
 	 * è di WordPress solo se nessuno l'ha chiesto. I dati non si toccano.
+	 * Ascolta sia il filtro dei contenuti sia quello degli allegati: il
+	 * contenuto che diventa un allegato passa dal secondo.
 	 *
 	 * @param array $dati           Dati del contenuto, come WordPress li ha preparati.
 	 * @param array $richiesta      Dati ricevuti, ripuliti.
@@ -491,7 +509,7 @@ final class Conformita_Core_Registro_Automatico {
 
 		$data_gmt = isset( $non_ripuliti['post_date_gmt'] ) ? (string) $non_ripuliti['post_date_gmt'] : null;
 
-		self::$richieste[ (int) $non_ripuliti['ID'] ] = array(
+		self::$richieste[ (int) $non_ripuliti['ID'] ][] = array(
 			'nome'           => isset( $non_ripuliti['post_name'] ) ? (string) $non_ripuliti['post_name'] : null,
 			'data'           => isset( $non_ripuliti['post_date'] ) ? (string) $non_ripuliti['post_date'] : '',
 			'data_gmt'       => $data_gmt,
@@ -499,6 +517,7 @@ final class Conformita_Core_Registro_Automatico {
 			'adesso'         => current_time( 'mysql' ),
 			'nome_wordpress' => isset( $dati['post_name'] ) ? (string) $dati['post_name'] : '',
 			'nome_finale'    => null,
+			'dati_finali'    => array(),
 			'date_wordpress' => array(
 				'post_date'     => isset( $dati['post_date'] ) ? (string) $dati['post_date'] : '',
 				'post_date_gmt' => isset( $dati['post_date_gmt'] ) ? (string) $dati['post_date_gmt'] : '',
@@ -509,11 +528,13 @@ final class Conformita_Core_Registro_Automatico {
 	}
 
 	/**
-	 * Legge il nome nell'indirizzo dopo ogni altro filtro.
+	 * Legge i dati dopo ogni altro filtro, così come vanno nella banca dati.
 	 *
 	 * Se dopo tutti i filtri il nome è ancora vuoto, WordPress lo genera dal
 	 * titolo dopo aver salvato; se un altro componente l'ha cambiato, il
-	 * cambiamento è suo e non di WordPress.
+	 * cambiamento è suo e non di WordPress. I valori dei campi servono a
+	 * `campi_cambiati()`: un campo che questo salvataggio scrive uguale a
+	 * prima, e che dopo è diverso, l'ha cambiato qualcun altro nel frattempo.
 	 *
 	 * @param array $dati          Dati del contenuto.
 	 * @param array $richiesta     Dati ricevuti, ripuliti.
@@ -524,9 +545,22 @@ final class Conformita_Core_Registro_Automatico {
 	private static function richiesta_finale( $dati, $richiesta, $non_ripuliti, $aggiornamento ) {
 		unset( $richiesta );
 
-		if ( $aggiornamento && is_array( $dati ) && is_array( $non_ripuliti ) && isset( $non_ripuliti['ID'], self::$richieste[ (int) $non_ripuliti['ID'] ] ) ) {
-			self::$richieste[ (int) $non_ripuliti['ID'] ]['nome_finale'] = isset( $dati['post_name'] ) ? (string) $dati['post_name'] : '';
+		if ( ! $aggiornamento || ! is_array( $dati ) || ! is_array( $non_ripuliti ) || empty( $non_ripuliti['ID'] ) || empty( self::$richieste[ (int) $non_ripuliti['ID'] ] ) ) {
+			return $dati;
 		}
+
+		$post_id = (int) $non_ripuliti['ID'];
+		$cima    = array_key_last( self::$richieste[ $post_id ] );
+		$finali  = array();
+
+		foreach ( self::CAMPI as $campo ) {
+			if ( isset( $dati[ $campo ] ) && is_scalar( $dati[ $campo ] ) ) {
+				$finali[ $campo ] = (string) wp_unslash( $dati[ $campo ] );
+			}
+		}
+
+		self::$richieste[ $post_id ][ $cima ]['nome_finale'] = isset( $dati['post_name'] ) ? (string) $dati['post_name'] : '';
+		self::$richieste[ $post_id ][ $cima ]['dati_finali'] = $finali;
 
 		return $dati;
 	}
@@ -544,10 +578,37 @@ final class Conformita_Core_Registro_Automatico {
 	 */
 	private static function modifica( $post_id, $dopo, $prima ) {
 		$post_id   = (int) $post_id;
-		$richiesta = self::$richieste[ $post_id ] ?? null;
-		unset( self::$richieste[ $post_id ] );
+		$richiesta = empty( self::$richieste[ $post_id ] ) ? null : array_pop( self::$richieste[ $post_id ] );
+
+		if ( isset( self::$richieste[ $post_id ] ) && array() === self::$richieste[ $post_id ] ) {
+			unset( self::$richieste[ $post_id ] );
+		}
 
 		if ( ! $dopo instanceof WP_Post || ! $prima instanceof WP_Post ) {
+			return;
+		}
+
+		/*
+		 * Il cambio di tipo si guarda per primo, anche quando una delle due
+		 * parti è un allegato: il contenuto che diventa un allegato, o
+		 * l'allegato che diventa un contenuto, cambia tipo e insieme entra in
+		 * un padre o ne esce.
+		 */
+		if ( (string) $prima->post_type !== (string) $dopo->post_type ) {
+			$cambiati = in_array( $prima->post_status, self::STATI_IN_LAVORAZIONE, true )
+				? array()
+				: self::campi_cambiati( $prima, $dopo, $richiesta );
+
+			self::cambio_tipo( $prima, $dopo, $cambiati );
+
+			if ( 'attachment' === $prima->post_type ) {
+				self::allegato( $dopo->ID, (int) $prima->post_parent, 'allegato_eliminato' );
+			}
+
+			if ( 'attachment' === $dopo->post_type ) {
+				self::allegato( $dopo->ID, (int) $dopo->post_parent, 'allegato_aggiunto' );
+			}
+
 			return;
 		}
 
@@ -571,11 +632,6 @@ final class Conformita_Core_Registro_Automatico {
 			? array()
 			: self::campi_cambiati( $prima, $dopo, $richiesta );
 
-		if ( (string) $prima->post_type !== (string) $dopo->post_type ) {
-			self::cambio_tipo( $prima, $dopo, $cambiati );
-			return;
-		}
-
 		if ( array() === $cambiati ) {
 			return;
 		}
@@ -595,9 +651,16 @@ final class Conformita_Core_Registro_Automatico {
 		$cambiati = array();
 
 		foreach ( self::CAMPI as $campo ) {
-			if ( (string) $prima->$campo !== (string) $dopo->$campo && ! self::riscritto_da_wordpress( $campo, $prima, $dopo, $richiesta ) ) {
-				$cambiati[] = $campo;
+			if ( (string) $prima->$campo === (string) $dopo->$campo || self::riscritto_da_wordpress( $campo, $prima, $dopo, $richiesta ) ) {
+				continue;
 			}
+
+			// Il salvataggio l'ha scritto com'era: l'ha cambiato un salvataggio annidato, che ha la sua voce.
+			if ( is_array( $richiesta ) && isset( $richiesta['dati_finali'][ $campo ] ) && (string) $prima->$campo === $richiesta['dati_finali'][ $campo ] ) {
+				continue;
+			}
+
+			$cambiati[] = $campo;
 		}
 
 		return $cambiati;
@@ -646,12 +709,16 @@ final class Conformita_Core_Registro_Automatico {
 	 * La funzione di WordPress che cambia solo il tipo di un contenuto scrive
 	 * nella banca dati senza passare dal salvataggio, e lo annuncia soltanto
 	 * togliendo il contenuto dalla memoria. Questo aggancio riceve la copia
-	 * che la memoria aveva, letta prima di toglierla: se è di un tipo gestito
-	 * e la banca dati dice un altro tipo, il tipo è cambiato. Durante un
-	 * salvataggio il confronto lo fa `modifica()`, che ha le due copie, e qui
-	 * non si fa. Se il contenuto non era in memoria la copia viene dalla
-	 * banca dati, ha già il tipo nuovo e il cambio non si vede (scheda,
-	 * punto 8).
+	 * che la memoria aveva, letta prima di toglierla: se la banca dati dice
+	 * un altro tipo, il tipo è cambiato. Il controllo vale in tutti e due i
+	 * versi, dal tipo gestito verso un altro e da un altro tipo verso quello
+	 * gestito: la copia di un articolo non dice ancora niente, ed è la banca
+	 * dati a dire se è entrato in una sezione. Per questo la lettura si fa su
+	 * ogni contenuto che esce dalla memoria fuori da un salvataggio, purché
+	 * almeno un tipo sia gestito. Durante un salvataggio il confronto lo fa
+	 * `modifica()`, che ha le due copie, e qui non si fa. Se il contenuto non
+	 * era in memoria la copia viene dalla banca dati, ha già il tipo nuovo e
+	 * il cambio non si vede (scheda, punto 8).
 	 *
 	 * @param int          $post_id Identificativo del contenuto.
 	 * @param WP_Post|null $post    Copia che la memoria aveva.
@@ -661,7 +728,7 @@ final class Conformita_Core_Registro_Automatico {
 
 		$post_id = (int) $post_id;
 
-		if ( ! $post instanceof WP_Post || (int) $post->ID !== $post_id || isset( self::$richieste[ $post_id ] ) || ! Conformita_Core_Tipi::registrato( $post->post_type ) ) {
+		if ( ! $post instanceof WP_Post || (int) $post->ID !== $post_id || ! empty( self::$richieste[ $post_id ] ) || array() === Conformita_Core_Tipi::identificativi() ) {
 			return;
 		}
 

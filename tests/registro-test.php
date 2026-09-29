@@ -675,6 +675,63 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-197, sesta parte: un salvataggio annidato nello stesso contenuto.
+	 *
+	 * Un componente che, mentre il contenuto viene pubblicato, lo salva di
+	 * nuovo cambiandone il riassunto. Il salvataggio interno ha la sua voce;
+	 * quello esterno non si prende il riassunto, che non ha cambiato, ne'
+	 * l'indirizzo e le date che WordPress fissa alla pubblicazione.
+	 */
+	public function test_c197_salvataggio_annidato() {
+		wp_set_current_user( $this->utente() );
+
+		$id    = $this->contenuto( 'pending' );
+		$fatto = false;
+
+		$interno = function ( $nuovo, $vecchio, $post ) use ( $id, &$fatto ) {
+			unset( $vecchio );
+
+			if ( $fatto || (int) $post->ID !== $id || 'publish' !== $nuovo ) {
+				return;
+			}
+
+			$fatto = true;
+			wp_update_post(
+				array(
+					'ID'           => $id,
+					'post_excerpt' => 'Aggiunto durante la pubblicazione',
+				)
+			);
+		};
+
+		$this->assertSame( '', get_post( $id )->post_name, 'Precondizione: in verifica il nome nell\'indirizzo non c\'e\' ancora.' );
+
+		add_action( 'transition_post_status', $interno, 10, 3 );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_status' => 'publish',
+			)
+		);
+		remove_action( 'transition_post_status', $interno, 10 );
+
+		$this->assertTrue( $fatto, 'Precondizione: il salvataggio interno e\' avvenuto.' );
+		$this->assertSame(
+			array(
+				array( 'pubblicazione', array() ),
+				array( 'modifica', array( 'post_excerpt' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['dettagli']['campi'] ?? array() );
+				},
+				$this->nuove()
+			)
+		);
+	}
+
+	/**
 	 * C-197, quarta parte: il cambio di tipo.
 	 *
 	 * Un contenuto che cambia tipo esce dalla sezione di prima ed entra, se il
@@ -774,6 +831,13 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->assertSame( 'post', get_post_type( $id ), 'Precondizione: il tipo e\' cambiato.' );
 		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ) ), $sezioni() );
 
+		// La stessa funzione nel verso opposto: un articolo gia' letto che diventa di un tipo gestito.
+		$id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+		$this->assertSame( 'post', get_post( $id )->post_type, 'Precondizione: l\'articolo e\' stato letto.' );
+		$this->segna();
+		set_post_type( $id, self::TIPO );
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'ingresso' ) ), $sezioni() );
+
 		// Controllo negativo: un salvataggio senza cambio di tipo non scrive cambi di tipo.
 		$id = $this->contenuto( 'publish' );
 		$this->segna();
@@ -784,6 +848,90 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			)
 		);
 		$this->assertSame( array( 'modifica' ), $this->azioni_nuove() );
+	}
+
+	/**
+	 * C-197, quinta parte: il contenuto che diventa un allegato, e l'allegato
+	 * che diventa un contenuto.
+	 *
+	 * Oltre al cambio di tipo cambia la relazione con il padre: il contenuto
+	 * diventato allegato e' un allegato aggiunto al suo padre, qualunque
+	 * padre avesse prima; l'allegato diventato contenuto e' un allegato tolto
+	 * al suo.
+	 */
+	public function test_c197_conversione_in_allegato() {
+		wp_set_current_user( $this->utente() );
+
+		$padre = $this->contenuto( 'publish' );
+
+		$voci = function () {
+			return array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['contenuto'], $voce['dettagli']['verso'] ?? $voce['dettagli']['allegato'] ?? null );
+				},
+				$this->nuove()
+			);
+		};
+
+		foreach ( array(
+			'padre invariato' => true,
+			'padre diverso'   => false,
+		) as $caso => $stesso_padre ) {
+			$id = self::factory()->post->create(
+				array(
+					'post_type'   => self::TIPO,
+					'post_status' => 'publish',
+					'post_parent' => $stesso_padre ? $padre : 0,
+				)
+			);
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'          => $id,
+					'post_type'   => 'attachment',
+					'post_parent' => $padre,
+				)
+			);
+
+			$this->assertSame( 'attachment', get_post_type( $id ), "Caso {$caso}: precondizione, e' un allegato." );
+			$this->assertSame(
+				array(
+					array( 'cambio_tipo', $id, 'uscita' ),
+					array( 'allegato_aggiunto', $padre, $id ),
+				),
+				$voci(),
+				"Caso {$caso}."
+			);
+		}
+
+		$allegato = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'convertito.pdf',
+				'post_parent'    => $padre,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $allegato,
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+			)
+		);
+
+		$this->assertSame( self::TIPO, get_post_type( $allegato ), 'Precondizione: e\' un contenuto.' );
+		$this->assertSame(
+			array(
+				array( 'pubblicazione', $allegato, null ),
+				array( 'cambio_tipo', $allegato, 'ingresso' ),
+				array( 'allegato_eliminato', $padre, $allegato ),
+			),
+			$voci(),
+			'Allegato diventato contenuto.'
+		);
 	}
 
 	/**
