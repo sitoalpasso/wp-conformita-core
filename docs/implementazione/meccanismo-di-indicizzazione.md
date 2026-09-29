@@ -6,7 +6,7 @@ C-225..C-230 e C-232..C-247, elencate al punto 11.
 **Nel componente dell'albo pretorio non si implementa niente di tutto questo.** L'albo
 dichiara già la propria politica (`vietata`) quando registra la sua sezione: da questa
 versione quella dichiarazione produce effetti. L'albo, in un'altra unità, dovrà soltanto
-richiedere la versione `1.4.0` dell'interfaccia, perché è la prima che garantisce il
+richiedere la versione `1.5.0` dell'interfaccia, perché è la prima che garantisce il
 divieto.
 
 **Stato: costruita, sei giri di revisione indipendente recepiti (punti 13..16, 18 e 19).** Il punto 17 elenca, selettore per selettore, come la mappa del sito è coperta. Le sezioni sono al passato e dicono quello che il codice fa.
@@ -58,7 +58,7 @@ tabella è al punto 12.
 |---|---|
 | `includes/class-conformita-core-indicizzazione.php` | nuovo: il meccanismo |
 | `includes/class-conformita-core-intestazioni.php` | nuovo: il punto da cui escono le righe di intestazione di core, sostituibile nelle prove (C-239, C-240) |
-| `conformita-core.php` | carica e accende il meccanismo; versione dell'interfaccia da `1.3.0` a `1.4.0` |
+| `conformita-core.php` | carica e accende il meccanismo; versione dell'interfaccia da `1.4.0` a `1.5.0` |
 | `includes/class-conformita-core-sezioni.php` | la registrazione di una sezione rifiuta a meccanismo spento (C-85) |
 | `includes/class-conformita-core-consegna.php` | il file di un contenuto vietato esce con `X-Robots-Tag: noindex` (C-228); le intestazioni escono dal punto comune anche nelle prove (C-240) |
 | `includes/class-conformita-core-mappa-contenuti.php` | nuovo: il fornitore dei contenuti della mappa di WordPress, che scarta le voci svuotate (C-244) |
@@ -67,6 +67,7 @@ tabella è al punto 12.
 | `tests/class-conformita-core-risposta-registrata.php`, `tests/bootstrap.php` | nuovo: raccoglie le righe emesse con le regole di sostituzione di `header()` |
 | `tests/filtro-scadenza-test.php`, `tests/filtro-scadenza-non-vacuita-test.php` | la sezione usata dalle prove sulla scadenza nella mappa diventa `consentita` (punto 7) |
 | `tests/allegati-test.php` | C-153 non fissa più la versione esatta, ma "almeno 1.3.0" (punto 3) |
+| `tests/registro-test.php` | C-223 di S7 non fissa più la versione esatta, ma "almeno 1.4.0" (punto 3) |
 
 ## 2. Requisito servito
 
@@ -80,15 +81,17 @@ quando esisterà, serve la regola opposta, cioè che il meccanismo non ostacoli 
 **Nessuna funzione pubblica nuova.** Il componente dichiara la politica come faceva già, alla
 registrazione della sezione. Cambia che cosa quella dichiarazione produce.
 
-**Versione dell'interfaccia: da 1.3.0 a 1.4.0.** Nessuna firma cambia. La versione sale
-perché nasce una garanzia su cui un componente deve poter contare: con `1.4.0` le pagine di
-una sezione `vietata` portano il divieto. Un albo che richiede `1.4.0` non si avvia su un
+**Versione dell'interfaccia: da 1.4.0 a 1.5.0.** Nessuna firma cambia. La versione sale
+perché nasce una garanzia su cui un componente deve poter contare: con `1.5.0` le pagine di
+una sezione `vietata` portano il divieto. Un albo che richiede `1.5.0` non si avvia su un
 core che non lo garantisce. La prova C-153 di S5 fissava la versione esatta `1.3.0`: adesso
 verifica che non sia scesa sotto `1.3.0`, che è ciò che quella riga voleva dire (le funzioni
 della consegna esistono da lì).
 
-**Coordinamento con S7.** Il registro delle modifiche, su un ramo non ancora unito, porta
-anch'esso la versione a `1.4.0`. Chi arriva in `main` per secondo sale a `1.5.0`.
+**Coordinamento con S7.** Il registro delle modifiche è arrivato in `main` prima, con la
+versione `1.4.0`; questa unità, arrivata per seconda, sale a `1.5.0`. La prova C-223 di S7
+fissava la versione esatta `1.4.0`: adesso verifica che non sia scesa sotto, e la versione
+esatta la fissa C-236.
 
 **Nuovo codice d'errore alla registrazione di una sezione:**
 `conformita_core_indicizzazione_non_avviata`, a meccanismo spento. In esercizio non può
@@ -364,7 +367,7 @@ per lo stesso motivo.
 | C-233 | fatto | Composizione di `X-Robots-Tag` con un valore già scritto da altri: generale senza e con `noindex`, `none`, direttiva con valore, nome in minuscolo, valore rivolto a un motore con `noindex` e con `nofollow`, valori misti (generale poi motore, con e senza `noindex` in coda, direttiva con valore poi motore). Una sola riga generale con il divieto, e il valore che nomina un motore messo da parte intero; sui contenuti consentiti niente cambia |
 | C-234 | fatto | Allegato con un padre che non esiste più, con un contenuto vietato o l'allegato stesso come contenuto globale: nessun divieto preso in prestito; nemmeno con identificativo zero o vuoto |
 | C-235 | fatto | Tolto da fuori un aggancio qualsiasi degli otto: il meccanismo non risulta acceso, la registrazione di una sezione è rifiutata, la riaccensione rimette l'aggancio |
-| C-236 | fatto | Caricare il file di core accende il meccanismo senza altre chiamate; la versione dell'interfaccia è almeno `1.4.0` e coincide con quella della funzione pubblica |
+| C-236 | fatto | Caricare il file di core accende il meccanismo senza altre chiamate; la versione dell'interfaccia è `1.5.0` e coincide con quella della funzione pubblica |
 | C-237 | fatto | Incorporamento di un contenuto vietato: divieto nell'intestazione, di uno consentito: nessuno. Metatag tolto dalla testata: resta l'intestazione |
 | C-238 | fatto | Mappa degli articoli allargata da un componente: tipi aggiunti con filtri accesi e spenti, `any` con filtri spenti, tipo sostituito con quello vietato, allegati con lo stato allargato, allargamento dopo la restrizione. Il contenuto vietato (o il suo allegato) non c'è, l'articolo (o il suo allegato) sì, e a meccanismo spento il vietato c'era; col tipo sostituito la lettura è vuota; fuori dalla mappa la stessa interrogazione allargata non si tocca |
 | C-239 | fatto | Righe `X-Robots-Tag` che escono da una pagina vietata: un divieto generale c'è sempre, anche quando un altro componente sostituisce l'intestazione su `send_headers` con un valore per un motore, misto o `index, follow`; la sua riga resta com'è; una riga mista preparata esce intera. Da una pagina consentita non esce niente di core |
@@ -407,7 +410,7 @@ loro verifica è questa tabella.
 | G17. Padre inesistente: si ricade sul contenuto globale | C-234 |
 | G18. "Acceso" guardando un aggancio solo | C-235 |
 | G19. Accensione tolta dal file di core | C-236 e ogni prova che registra una sezione |
-| G20. Versione riportata a `1.3.0` | C-236 |
+| G20. Versione riportata a `1.4.0` | C-236 |
 | G21. La riaccensione non rimette l'aggancio mancante | C-235 |
 | G22. Mappa allargata non filtrata | C-238 |
 | G23. Contenuti filtrati anche fuori dalla mappa | C-238, e tre prove di S4 sulle interrogazioni |
@@ -605,6 +608,6 @@ divieto attribuito ai selettori provvisori invece che al contenuto scelto.
 ## 20. Cosa manca
 
 - La verifica continua sul commit di punta: da riportare quando arriva.
-- L'albo deve richiedere `1.4.0` (unità A10 del piano, che verifica il divieto sulle pagine
+- L'albo deve richiedere `1.5.0` (unità A10 del piano, che verifica il divieto sulle pagine
   vere dell'albo).
 - Le tre prove del punto 9 vanno aggiunte al collaudo di rilascio.

@@ -1,0 +1,2978 @@
+<?php
+/**
+ * Registro delle modifiche: voci automatiche, voci dei componenti, solo in
+ * aggiunta.
+ *
+ * Righe di collaudo C-195..C-213 e C-222..C-224, che dettagliano C-50 e C-51.
+ * La schermata di consultazione, C-52, ha le sue prove in
+ * `registro-schermata-test.php`.
+ *
+ * **Come si legge il registro nelle prove.** Ogni prova parte contando le voci
+ * che esistono e guarda solo quelle nate dopo: le operazioni di preparazione,
+ * per esempio la creazione di un contenuto, scrivono voci anche loro, e una
+ * prova che contasse tutto misurerebbe la preparazione e non l'operazione.
+ *
+ * @package Conformita_Core
+ */
+
+/**
+ * Prove sul registro delle modifiche.
+ */
+class Conformita_Core_Registro_Test extends WP_UnitTestCase {
+
+	const SEZIONE       = 'sezione_registro';
+	const TIPO          = 'prova_registro';
+	const SEZIONE_ALTRA = 'sezione_altra';
+	const TIPO_ALTRO    = 'prova_altra';
+
+	/**
+	 * Le operazioni che core registra da sé, scritte per esteso.
+	 */
+	const AZIONI_RISERVATE = array(
+		'creazione',
+		'pubblicazione',
+		'rimozione',
+		'cambio_stato',
+		'modifica',
+		'modifica_fine_pubblicazione',
+		'eliminazione',
+		'allegato_aggiunto',
+		'allegato_eliminato',
+		'cambio_tipo',
+	);
+
+	/**
+	 * Numero dell'ultima voce prima dell'operazione provata.
+	 *
+	 * @var int
+	 */
+	private $partenza = 0;
+
+	/**
+	 * Due sezioni, due tipi, orologio fissato.
+	 */
+	public function set_up() {
+		parent::set_up();
+
+		Conformita_Core_Sezioni::azzera();
+		Conformita_Core_Tipi::azzera();
+		foreach ( Conformita_Core_Registro::OPZIONI_MANCATE as $opzione ) {
+			delete_option( $opzione );
+		}
+
+		foreach ( array(
+			self::SEZIONE       => self::TIPO,
+			self::SEZIONE_ALTRA => self::TIPO_ALTRO,
+		) as $sezione => $tipo ) {
+			$this->assertTrue(
+				conformita_core_registra_sezione(
+					$sezione,
+					array(
+						'indicizzazione' => 'vietata',
+						'scadenza'       => 'irraggiungibile',
+					)
+				)
+			);
+
+			$this->assertTrue(
+				conformita_core_registra_tipo(
+					$tipo,
+					array(
+						'sezione'      => $sezione,
+						'show_in_rest' => false,
+						'argomenti'    => array( 'public' => true ),
+					)
+				)
+			);
+		}
+
+		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-10-02 09:15:30', new DateTimeZone( 'UTC' ) ) );
+	}
+
+	/**
+	 * Orologio e agganci rimessi a posto.
+	 */
+	public function tear_down() {
+		update_option( 'timezone_string', '' );
+		Conformita_Core_Scadenza::azzera_orologio();
+		Conformita_Core_Registro_Automatico::avvia();
+		wp_set_current_user( 0 );
+
+		parent::tear_down();
+
+		/*
+		 * C-222 cambia la struttura della banca dati di prova, e un cambio di
+		 * struttura chiude la transazione che la prova annulla: la versione
+		 * tolta per provare un'installazione fallita resterebbe tolta, e le
+		 * prove che seguono non potrebbero scrivere. Come all'avvio di ogni
+		 * richiesta, si controlla che il registro sia installato.
+		 */
+		wp_cache_flush();
+		Conformita_Core_Registro::assicura_tabella();
+	}
+
+	/**
+	 * Segna il punto da cui contare le voci nuove.
+	 */
+	private function segna() {
+		global $wpdb;
+
+		$tabella = Conformita_Core_Registro::tabella();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: si legge la tabella per quello che contiene.
+		$this->partenza = (int) $wpdb->get_var( "SELECT COALESCE( MAX( id ), 0 ) FROM {$tabella}" );
+	}
+
+	/**
+	 * Le voci nate dopo il segno, in ordine di scrittura.
+	 *
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function nuove() {
+		return array_values(
+			array_filter(
+				conformita_core_voci_registro(),
+				function ( $voce ) {
+					return $voce['id'] > $this->partenza;
+				}
+			)
+		);
+	}
+
+	/**
+	 * Le azioni delle voci nate dopo il segno, in ordine.
+	 *
+	 * @return array<int, string>
+	 */
+	private function azioni_nuove() {
+		return array_map(
+			function ( $voce ) {
+				return $voce['azione'];
+			},
+			$this->nuove()
+		);
+	}
+
+	/**
+	 * Tutte le righe della tabella, così come sono.
+	 *
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function righe() {
+		global $wpdb;
+
+		$tabella = Conformita_Core_Registro::tabella();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: fotografia della tabella.
+		return $wpdb->get_results( "SELECT * FROM {$tabella} ORDER BY id", ARRAY_A );
+	}
+
+	/**
+	 * Un contenuto del tipo gestito, nello stato indicato.
+	 *
+	 * @param string $stato Stato.
+	 * @param string $tipo  Tipo.
+	 * @return int
+	 */
+	private function contenuto( $stato = 'publish', $tipo = self::TIPO ) {
+		return self::factory()->post->create(
+			array(
+				'post_type'   => $tipo,
+				'post_status' => $stato,
+				'post_title'  => 'Contenuto di prova',
+			)
+		);
+	}
+
+	/**
+	 * Un utente con un ruolo.
+	 *
+	 * @param string $ruolo Ruolo.
+	 * @return int
+	 */
+	private function utente( $ruolo = 'editor' ) {
+		return self::factory()->user->create( array( 'role' => $ruolo ) );
+	}
+
+	/**
+	 * Come se cominciasse un'altra richiesta: le voci automatiche ripartono
+	 * senza niente in memoria, e i contenuti si rileggono dalla banca dati.
+	 */
+	private function nuova_richiesta() {
+		$classe = new ReflectionClass( 'Conformita_Core_Registro_Automatico' );
+
+		foreach ( $classe->getProperties( ReflectionProperty::IS_STATIC ) as $proprieta ) {
+			$proprieta->setAccessible( true );
+
+			// Gli ascoltatori restano agganciati: e' la memoria della richiesta che riparte vuota.
+			if ( 'ascoltatori' !== $proprieta->getName() && is_array( $proprieta->getValue() ) ) {
+				$proprieta->setValue( null, array() );
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * C-195, seconda parte: la pubblicazione senza salvataggio.
+	 *
+	 * La funzione di WordPress che pubblica un contenuto programmato cambia
+	 * lo stato con un'istruzione diretta, e lo annuncia solo come cambio di
+	 * stato. La voce e' la stessa.
+	 */
+	public function test_c195_pubblicazione_senza_salvataggio() {
+		wp_set_current_user( $this->utente() );
+
+		$id = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'future',
+				'post_title'  => 'Programmato',
+				'post_date'   => '2030-01-01 10:00:00',
+			)
+		);
+		$this->assertSame( 'future', get_post_status( $id ), 'Precondizione: il contenuto e\' programmato.' );
+
+		$this->segna();
+		wp_publish_post( $id );
+
+		$this->assertSame( 'publish', get_post_status( $id ) );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove() );
+		$this->assertSame( 'future', $this->nuove()[0]['dettagli']['stato_precedente'] );
+	}
+
+	/**
+	 * C-195: pubblicare un contenuto gestito scrive una voce, e una sola, con
+	 * chi, che cosa e quando.
+	 */
+	public function test_c195_pubblicazione() {
+		update_option( 'timezone_string', 'Europe/Rome' );
+
+		$utente = $this->utente();
+		wp_set_current_user( $utente );
+
+		$id = $this->contenuto( 'pending' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_status' => 'publish',
+			)
+		);
+
+		$voci = $this->nuove();
+
+		$this->assertCount( 1, $voci, 'Una pubblicazione, una voce: ' . wp_json_encode( $voci ) );
+		$this->assertSame( 'pubblicazione', $voci[0]['azione'] );
+		$this->assertSame( $utente, $voci[0]['utente'] );
+		$this->assertSame( $id, $voci[0]['contenuto'] );
+		$this->assertSame( self::TIPO, $voci[0]['tipo'] );
+		$this->assertSame( self::SEZIONE, $voci[0]['sezione'] );
+		$this->assertSame( Conformita_Core_Registro::ORIGINE_AUTOMATICA, $voci[0]['origine'] );
+		$this->assertSame( '2026-10-02 09:15:30', $voci[0]['istante']->format( 'Y-m-d H:i:s' ), 'L\'istante e\' quello dell\'orologio di core, conservato in UTC anche se il sito ha un altro fuso.' );
+		$this->assertSame( 'UTC', $voci[0]['istante']->getTimezone()->getName() );
+		$this->assertSame(
+			array(
+				'stato_precedente' => 'pending',
+				'stato_nuovo'      => 'publish',
+			),
+			$voci[0]['dettagli']
+		);
+		$this->assertNull( $voci[0]['motivazione'] );
+	}
+
+	/**
+	 * C-196: la nascita di un contenuto si registra una volta, e una nascita
+	 * direttamente pubblicata registra anche la pubblicazione.
+	 */
+	public function test_c196_creazione() {
+		wp_set_current_user( $this->utente() );
+
+		$this->segna();
+		$bozza = $this->contenuto( 'draft' );
+		$this->assertSame( array( 'creazione' ), $this->azioni_nuove(), 'Una bozza nuova: la nascita e basta.' );
+
+		$this->segna();
+		$pubblicato = $this->contenuto( 'publish' );
+		$this->assertSame( array( 'creazione', 'pubblicazione' ), $this->azioni_nuove() );
+
+		$this->segna();
+		$automatica = wp_insert_post(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'auto-draft',
+				'post_title'  => 'Bozza automatica',
+			)
+		);
+		$this->assertSame( array(), $this->azioni_nuove(), 'La bozza automatica dell\'editor non e\' ancora un contenuto.' );
+
+		wp_update_post(
+			array(
+				'ID'          => $automatica,
+				'post_status' => 'draft',
+			)
+		);
+		$this->assertSame( array( 'creazione' ), $this->azioni_nuove(), 'La nascita e\' il primo salvataggio della bozza automatica.' );
+
+		unset( $bozza, $pubblicato );
+	}
+
+	/**
+	 * C-197: la modifica dei campi di un contenuto fuori dalla bozza scrive una
+	 * voce con i nomi dei campi, e un salvataggio senza modifiche non la scrive.
+	 */
+	public function test_c197_modifica() {
+		$utente = $this->utente();
+		wp_set_current_user( $utente );
+
+		foreach ( array( 'publish', 'pending' ) as $stato ) {
+			$id = $this->contenuto( $stato );
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'         => $id,
+					'post_title' => 'Titolo cambiato ' . $stato,
+				)
+			);
+
+			$voci = $this->nuove();
+
+			$this->assertCount( 1, $voci, "Stato {$stato}: una modifica, una voce." );
+			$this->assertSame( 'modifica', $voci[0]['azione'] );
+			$this->assertSame( $utente, $voci[0]['utente'] );
+			$this->assertSame( array( 'campi' => array( 'post_title' ) ), $voci[0]['dettagli'] );
+
+			$this->segna();
+			wp_update_post( get_post( $id, ARRAY_A ) );
+			$this->assertSame( array(), $this->azioni_nuove(), "Stato {$stato}: salvare senza cambiare niente non e' una modifica." );
+		}
+
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'           => $id,
+				'post_content' => 'Testo nuovo',
+				'post_excerpt' => 'Riassunto nuovo',
+			)
+		);
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci );
+		$this->assertSame( array( 'campi' => array( 'post_content', 'post_excerpt' ) ), $voci[0]['dettagli'] );
+		$this->assertStringNotContainsString( 'Testo nuovo', wp_json_encode( $voci[0] ), 'Il registro conserva i nomi dei campi, non i valori.' );
+
+		/*
+		 * Al cambio di stato si tralasciano solo i campi che WordPress riscrive
+		 * da sé. L'indirizzo e la data cambiati da chi agisce, nello stesso
+		 * salvataggio che cambia lo stato, sono una modifica come le altre.
+		 */
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'            => $id,
+				'post_status'   => 'private',
+				'post_name'     => 'indirizzo-scelto',
+				'post_date'     => '2026-09-01 10:00:00',
+				'post_date_gmt' => '2026-09-01 10:00:00',
+			)
+		);
+		$this->assertSame( array( 'rimozione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name', 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'] );
+
+		/*
+		 * Il criterio non e' il valore di prima ma chi ha chiesto il valore di
+		 * dopo. Un contenuto in verifica non ha ancora indirizzo ne' data
+		 * fissata: se chi lo pubblica sceglie lui l'indirizzo, o lo programma
+		 * indicando la data, quella e' una modifica anche se prima il campo era
+		 * vuoto.
+		 */
+		$in_verifica = $this->contenuto( 'pending' );
+		$this->assertSame( '', get_post( $in_verifica )->post_name, 'Precondizione: in verifica senza indirizzo.' );
+		$this->assertSame( '0000-00-00 00:00:00', get_post( $in_verifica )->post_date_gmt, 'Precondizione: data non fissata.' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $in_verifica,
+				'post_status' => 'publish',
+				'post_name'   => 'indirizzo-scelto-alla-pubblicazione',
+			)
+		);
+		$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name' ) ), $this->nuove()[1]['dettagli'], 'L\'indirizzo scelto si registra; la data fissata da WordPress no.' );
+
+		$programmato = $this->contenuto( 'pending' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'            => $programmato,
+				'post_status'   => 'future',
+				'post_date'     => '2030-01-15 10:00:00',
+				'post_date_gmt' => '2030-01-15 09:00:00',
+				'edit_date'     => true,
+			)
+		);
+		$this->assertSame( 'future', get_post_status( $programmato ), 'Precondizione: programmato.' );
+		$this->assertSame( array( 'cambio_stato', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'], 'La data indicata da chi programma si registra.' );
+
+		/*
+		 * Un altro componente che, nello stesso salvataggio, cambia lui
+		 * l'indirizzo e la data: il cambiamento non e' di WordPress, e si
+		 * registra.
+		 */
+		$altri = function ( $dati ) {
+			if ( 'publish' === $dati['post_status'] ) {
+				$dati['post_name']     = 'indirizzo-scelto-da-altri';
+				$dati['post_date']     = '2026-10-05 10:00:00';
+				$dati['post_date_gmt'] = '2026-10-05 08:00:00';
+			}
+			return $dati;
+		};
+
+		$toccato = $this->contenuto( 'pending' );
+		$this->segna();
+		add_filter( 'wp_insert_post_data', $altri );
+		wp_update_post(
+			array(
+				'ID'          => $toccato,
+				'post_status' => 'publish',
+			)
+		);
+		remove_filter( 'wp_insert_post_data', $altri );
+
+		$this->assertSame( 'indirizzo-scelto-da-altri', get_post( $toccato )->post_name, 'Precondizione: l\'altro componente ha agito.' );
+		$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name', 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'], 'Il cambiamento di un altro componente non e\' di WordPress.' );
+
+		/*
+		 * Un contenuto senza titolo: WordPress non ha da dove prendere
+		 * l'indirizzo prima di salvare, e lo genera dopo, dal numero. Anche
+		 * questo e' suo.
+		 */
+		$senza_titolo = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'pending',
+				'post_title'  => '',
+			)
+		);
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $senza_titolo,
+				'post_status' => 'publish',
+			)
+		);
+		$this->assertSame( (string) $senza_titolo, get_post( $senza_titolo )->post_name, 'Precondizione: indirizzo generato dopo il salvataggio.' );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove() );
+
+		/*
+		 * Lo stesso sul contenuto pubblicato: un altro componente svuota il
+		 * nome, e WordPress lo rigenera uguale dopo aver scritto. Il nome non
+		 * e' cambiato; il riassunto si'.
+		 */
+		$pubblicato = $this->contenuto( 'publish' );
+		$nome       = get_post( $pubblicato )->post_name;
+		$svuota     = function ( $dati ) {
+			$dati['post_name'] = '';
+			return $dati;
+		};
+
+		$this->assertNotSame( '', $nome, 'Precondizione: il pubblicato ha un nome.' );
+		add_filter( 'wp_insert_post_data', $svuota );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'           => $pubblicato,
+				'post_excerpt' => 'Riassunto nuovo',
+			)
+		);
+		remove_filter( 'wp_insert_post_data', $svuota );
+
+		$this->assertSame( $nome, get_post( $pubblicato )->post_name, 'Precondizione: WordPress ha rigenerato lo stesso nome.' );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci );
+		$this->assertSame( array( 'post_excerpt' ), $voci[0]['dettagli']['campi'] );
+
+		/*
+		 * Chi salva con la funzione di base, indicando la data locale senza
+		 * quella in UTC e senza la richiesta esplicita: la data e' sua, e
+		 * WordPress ne ricava l'altra. Con la funzione di aggiornamento, invece,
+		 * la stessa richiesta non cambia la data: WordPress la rimette a oggi,
+		 * e quel caso e' coperto sopra.
+		 */
+		$con_data = $this->contenuto( 'pending' );
+		$campi    = get_post( $con_data, ARRAY_A );
+
+		$campi['post_status'] = 'publish';
+		$campi['post_date']   = '2020-01-07 12:00:00';
+
+		$this->segna();
+		wp_insert_post( wp_slash( $campi ) );
+		$this->assertSame( '2020-01-07 12:00:00', get_post( $con_data )->post_date, 'Precondizione: la data indicata e\' quella salvata.' );
+		$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'] );
+
+		/*
+		 * La stessa richiesta senza la data in UTC, e con la data in UTC
+		 * vuota. Controllo negativo: senza la data in UTC ma con la data
+		 * locale di prima, le date le fissa WordPress.
+		 */
+		$invariata = $this->contenuto( 'pending' );
+		$campi     = get_post( $invariata, ARRAY_A );
+
+		$campi['post_status'] = 'publish';
+		unset( $campi['post_date_gmt'] );
+
+		$this->segna();
+		wp_insert_post( wp_slash( $campi ) );
+		$this->assertNotSame( '0000-00-00 00:00:00', get_post( $invariata )->post_date_gmt, 'Precondizione: WordPress ha fissato la data.' );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove(), 'Data locale di prima, nessuna data in UTC: le date sono di WordPress.' );
+
+		/*
+		 * Un contenuto in verifica da giorni, con la data non fissata,
+		 * pubblicato con la funzione di aggiornamento: WordPress rimette la
+		 * data a oggi, e il cambiamento e' suo.
+		 */
+		$da_giorni = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'pending',
+				'post_title'  => 'In verifica da giorni',
+				'post_date'   => '2020-01-09 10:00:00',
+			)
+		);
+		$this->assertSame( '2020-01-09 10:00:00', get_post( $da_giorni )->post_date, 'Precondizione: data di giorni fa.' );
+		$this->assertSame( '0000-00-00 00:00:00', get_post( $da_giorni )->post_date_gmt, 'Precondizione: non fissata.' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $da_giorni,
+				'post_status' => 'publish',
+			)
+		);
+		$this->assertNotSame( '2020-01-09 10:00:00', get_post( $da_giorni )->post_date, 'Precondizione: WordPress ha rimesso la data a oggi.' );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove(), 'La data rimessa a oggi da WordPress non e\' una modifica.' );
+
+		foreach ( array(
+			'assente' => null,
+			'vuota'   => '',
+		) as $caso => $data_gmt ) {
+			$con_data = $this->contenuto( 'pending' );
+			$campi    = get_post( $con_data, ARRAY_A );
+
+			$campi['post_status'] = 'publish';
+			$campi['post_date']   = '2020-01-08 12:00:00';
+
+			if ( null === $data_gmt ) {
+				unset( $campi['post_date_gmt'] );
+			} else {
+				$campi['post_date_gmt'] = $data_gmt;
+			}
+
+			$this->segna();
+			wp_insert_post( wp_slash( $campi ) );
+			$this->assertSame( '2020-01-08 12:00:00', get_post( $con_data )->post_date, 'Precondizione, data in UTC ' . $caso . ': la data indicata e\' quella salvata.' );
+			$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove(), 'Data in UTC ' . $caso . '.' );
+			$this->assertSame( array( 'campi' => array( 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'], 'Data in UTC ' . $caso . '.' );
+		}
+
+		/*
+		 * L'annuncio di una modifica che non viene da un salvataggio, per
+		 * esempio da un altro componente che lo lancia da se': senza sapere
+		 * cosa e' stato chiesto, ogni campo cambiato e' una modifica.
+		 */
+		$annunciato = $this->contenuto( 'pending' );
+		$prima      = get_post( $annunciato );
+		$dopo       = clone $prima;
+
+		$dopo->post_status = 'publish';
+		$dopo->post_name   = 'annunciato-da-altri';
+
+		$this->segna();
+		do_action( 'post_updated', $annunciato, $dopo, $prima );
+		$this->assertSame( array( 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name' ) ), $this->nuove()[0]['dettagli'] );
+	}
+
+	/**
+	 * C-197, seconda parte: i campi che WordPress cambia con un'istruzione
+	 * diretta, senza passare dal salvataggio del contenuto. Eliminando un
+	 * utente e affidandone i contenuti a un altro, cambia l'autore; eliminando
+	 * un contenuto di un tipo gerarchico, i figli passano al suo padre. Sono
+	 * modifiche, fuori dalla bozza, anche se nessuno ha salvato quei contenuti.
+	 */
+	public function test_c197_modifica_senza_salvataggio() {
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+
+		wp_set_current_user( $this->utente( 'administrator' ) );
+
+		$vecchio = $this->utente( 'author' );
+		$nuovo   = $this->utente( 'editor' );
+		$autori  = array();
+
+		foreach ( array( 'publish', 'pending', 'draft' ) as $stato ) {
+			$autori[ $stato ] = self::factory()->post->create(
+				array(
+					'post_type'   => self::TIPO,
+					'post_status' => $stato,
+					'post_title'  => 'Contenuto di un autore',
+					'post_author' => $vecchio,
+				)
+			);
+		}
+
+		$this->segna();
+		$this->assertTrue( wp_delete_user( $vecchio, $nuovo ) );
+		$this->assertSame( (string) $nuovo, get_post( $autori['publish'] )->post_author, 'Precondizione: l\'autore e\' cambiato.' );
+		$this->assertSame( (string) $nuovo, get_post( $autori['draft'] )->post_author, 'Precondizione: anche sulla bozza.' );
+
+		$this->assertSame(
+			array(
+				array( $autori['publish'], 'modifica', array( 'campi' => array( 'post_author' ) ) ),
+				array( $autori['pending'], 'modifica', array( 'campi' => array( 'post_author' ) ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['contenuto'], $voce['azione'], $voce['dettagli'] );
+				},
+				$this->nuove()
+			),
+			'Autore cambiato: una modifica per il pubblicato e per quello in verifica, nessuna per la bozza.'
+		);
+
+		// Eliminare un utente senza affidare i contenuti a nessuno non cambia autori.
+		$solo = $this->utente( 'author' );
+		$this->segna();
+		$this->assertTrue( wp_delete_user( $solo ) );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Controllo negativo: nessun contenuto, nessuna voce.' );
+
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'prova_gerarchico',
+				array(
+					'sezione'      => self::SEZIONE,
+					'show_in_rest' => false,
+					'argomenti'    => array(
+						'public'       => true,
+						'hierarchical' => true,
+					),
+				)
+			)
+		);
+
+		$crea = function ( $stato, $padre ) {
+			return self::factory()->post->create(
+				array(
+					'post_type'   => 'prova_gerarchico',
+					'post_status' => $stato,
+					'post_title'  => 'Contenuto gerarchico',
+					'post_parent' => $padre,
+				)
+			);
+		};
+
+		$nonno        = $crea( 'publish', 0 );
+		$padre        = $crea( 'publish', $nonno );
+		$figlio       = $crea( 'publish', $padre );
+		$figlio_bozza = $crea( 'draft', $padre );
+
+		$this->segna();
+		wp_delete_post( $padre, true );
+		clean_post_cache( $figlio );
+		$this->assertSame( $nonno, (int) get_post( $figlio )->post_parent, 'Precondizione: il figlio e\' passato al nonno.' );
+
+		$this->assertSame(
+			array(
+				array( $figlio, 'modifica', array( 'campi' => array( 'post_parent' ) ) ),
+				array( $padre, 'eliminazione', array( 'stato' => 'publish' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['contenuto'], $voce['azione'], $voce['dettagli'] );
+				},
+				$this->nuove()
+			),
+			'Il figlio pubblicato cambia padre e lo dice; la bozza no.'
+		);
+	}
+
+	/**
+	 * C-197, sesta parte: un salvataggio annidato nello stesso contenuto.
+	 *
+	 * Un componente che, mentre il contenuto viene pubblicato, lo salva di
+	 * nuovo cambiandone il riassunto. Il salvataggio interno ha la sua voce;
+	 * quello esterno non si prende il riassunto, che non ha cambiato, ne'
+	 * l'indirizzo e le date che WordPress fissa alla pubblicazione. Poi un
+	 * componente che rimette il titolo com'era mentre un altro salvataggio lo
+	 * cambia: tutti e due i salvataggi hanno la loro voce.
+	 */
+	public function test_c197_salvataggio_annidato() {
+		wp_set_current_user( $this->utente() );
+
+		$id    = $this->contenuto( 'pending' );
+		$fatto = false;
+
+		$interno = function ( $nuovo, $vecchio, $post ) use ( $id, &$fatto ) {
+			unset( $vecchio );
+
+			if ( $fatto || (int) $post->ID !== $id || 'publish' !== $nuovo ) {
+				return;
+			}
+
+			$fatto = true;
+			wp_update_post(
+				array(
+					'ID'           => $id,
+					'post_excerpt' => 'Aggiunto durante la pubblicazione',
+				)
+			);
+		};
+
+		$this->assertSame( '', get_post( $id )->post_name, 'Precondizione: in verifica il nome nell\'indirizzo non c\'e\' ancora.' );
+
+		add_action( 'transition_post_status', $interno, 10, 3 );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_status' => 'publish',
+			)
+		);
+		remove_action( 'transition_post_status', $interno, 10 );
+
+		$this->assertTrue( $fatto, 'Precondizione: il salvataggio interno e\' avvenuto.' );
+		$this->assertSame(
+			array(
+				array( 'pubblicazione', array() ),
+				array( 'modifica', array( 'post_excerpt' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['dettagli']['campi'] ?? array() );
+				},
+				$this->nuove()
+			)
+		);
+
+		/*
+		 * Il salvataggio interno rimette il titolo com'era: il titolo e'
+		 * cambiato due volte, e le voci sono due, una per salvataggio, nell'ordine
+		 * in cui i salvataggi finiscono.
+		 */
+		$fatto  = false;
+		$titolo = get_post( $id )->post_title;
+
+		$rimette = function ( $nuovo, $vecchio, $post ) use ( $id, $titolo, &$fatto ) {
+			unset( $nuovo, $vecchio );
+
+			if ( $fatto || (int) $post->ID !== $id ) {
+				return;
+			}
+
+			$fatto = true;
+			wp_update_post(
+				array(
+					'ID'         => $id,
+					'post_title' => $titolo,
+				)
+			);
+		};
+
+		add_action( 'transition_post_status', $rimette, 10, 3 );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_title' => 'Titolo cambiato e poi rimesso',
+			)
+		);
+		remove_action( 'transition_post_status', $rimette, 10 );
+
+		$this->assertTrue( $fatto, 'Precondizione: il salvataggio interno e\' avvenuto.' );
+		$this->assertSame( $titolo, get_post( $id )->post_title, 'Precondizione: il titolo e\' tornato com\'era.' );
+		$this->assertSame(
+			array(
+				array( 'modifica', array( 'post_title' ) ),
+				array( 'modifica', array( 'post_title' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['dettagli']['campi'] ?? array() );
+				},
+				$this->nuove()
+			),
+			'Titolo cambiato dal salvataggio esterno e rimesso da quello interno.'
+		);
+	}
+
+	/**
+	 * C-197, quarta parte: il cambio di tipo.
+	 *
+	 * Un contenuto che cambia tipo esce dalla sezione di prima ed entra, se il
+	 * tipo nuovo e' gestito, in quella nuova. Ciascuna delle due ha la sua
+	 * voce, con il tipo di quella parte: la sezione di provenienza non perde
+	 * l'ultimo fatto del contenuto, anche quando il tipo nuovo non e' gestito
+	 * e il resto del salvataggio non ha voci. Le voci portano gli stati e i
+	 * campi cambiati nello stesso salvataggio.
+	 */
+	public function test_c197_cambio_tipo() {
+		wp_set_current_user( $this->utente() );
+
+		$sezioni = function () {
+			return array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['sezione'], $voce['tipo'], $voce['dettagli']['verso'] ?? null );
+				},
+				$this->nuove()
+			);
+		};
+
+		// Fra due tipi gestiti, senza altri cambiamenti.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'        => $id,
+				'post_type' => self::TIPO_ALTRO,
+			)
+		);
+		$this->assertSame( self::TIPO_ALTRO, get_post_type( $id ), 'Precondizione: il tipo e\' cambiato.' );
+		$this->assertSame(
+			array(
+				array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ),
+				array( 'cambio_tipo', self::SEZIONE_ALTRA, self::TIPO_ALTRO, 'ingresso' ),
+			),
+			$sezioni()
+		);
+		$this->assertSame(
+			array(
+				'verso'            => 'uscita',
+				'tipo_precedente'  => self::TIPO,
+				'tipo_nuovo'       => self::TIPO_ALTRO,
+				'stato_precedente' => 'publish',
+				'stato_nuovo'      => 'publish',
+				'campi'            => array(),
+			),
+			$this->nuove()[0]['dettagli']
+		);
+
+		// Da gestito a non gestito, cambiando anche il titolo: la voce resta nella sezione di prima.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_type'  => 'post',
+				'post_title' => 'Titolo nuovo',
+			)
+		);
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ) ), $sezioni() );
+		$this->assertSame( array( 'post_title' ), $this->nuove()[0]['dettagli']['campi'] );
+
+		// Da gestito pubblicato a non gestito in bozza: l'uscita dalla pubblicazione e' nella voce.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_type'   => 'post',
+				'post_status' => 'draft',
+			)
+		);
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ) ), $sezioni() );
+		$this->assertSame( array( 'publish', 'draft' ), array( $this->nuove()[0]['dettagli']['stato_precedente'], $this->nuove()[0]['dettagli']['stato_nuovo'] ) );
+
+		// Da non gestito a gestito.
+		$id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'        => $id,
+				'post_type' => self::TIPO,
+			)
+		);
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'ingresso' ) ), $sezioni() );
+
+		/*
+		 * La funzione di WordPress che cambia solo il tipo scrive nella banca
+		 * dati direttamente, senza salvataggio. Il contenuto letto prima dice
+		 * il tipo di partenza.
+		 */
+		$id = $this->contenuto( 'publish' );
+		$this->assertSame( self::TIPO, get_post( $id )->post_type, 'Precondizione: il contenuto e\' stato letto.' );
+		$this->segna();
+		set_post_type( $id, 'post' );
+		$this->assertSame( 'post', get_post_type( $id ), 'Precondizione: il tipo e\' cambiato.' );
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ) ), $sezioni() );
+
+		// La stessa funzione nel verso opposto: un articolo gia' letto che diventa di un tipo gestito.
+		$id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+		$this->assertSame( 'post', get_post( $id )->post_type, 'Precondizione: l\'articolo e\' stato letto.' );
+		$this->segna();
+		set_post_type( $id, self::TIPO );
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'ingresso' ) ), $sezioni() );
+
+		// Controllo negativo: un salvataggio senza cambio di tipo non scrive cambi di tipo.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_title' => 'Solo il titolo',
+			)
+		);
+		$this->assertSame( array( 'modifica' ), $this->azioni_nuove() );
+	}
+
+	/**
+	 * C-197, quinta parte: il contenuto che diventa un allegato, e l'allegato
+	 * che diventa un contenuto.
+	 *
+	 * Oltre al cambio di tipo cambia la relazione con il padre: il contenuto
+	 * diventato allegato e' un allegato aggiunto al suo padre, qualunque
+	 * padre avesse prima; l'allegato diventato contenuto e' un allegato tolto
+	 * al suo.
+	 */
+	public function test_c197_conversione_in_allegato() {
+		wp_set_current_user( $this->utente() );
+
+		$padre = $this->contenuto( 'publish' );
+
+		$voci = function () {
+			return array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['contenuto'], $voce['dettagli']['verso'] ?? $voce['dettagli']['allegato'] ?? null );
+				},
+				$this->nuove()
+			);
+		};
+
+		foreach ( array(
+			'padre invariato' => true,
+			'padre diverso'   => false,
+		) as $caso => $stesso_padre ) {
+			$id = self::factory()->post->create(
+				array(
+					'post_type'   => self::TIPO,
+					'post_status' => 'publish',
+					'post_parent' => $stesso_padre ? $padre : 0,
+				)
+			);
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'          => $id,
+					'post_type'   => 'attachment',
+					'post_parent' => $padre,
+				)
+			);
+
+			$this->assertSame( 'attachment', get_post_type( $id ), "Caso {$caso}: precondizione, e' un allegato." );
+			$this->assertSame(
+				array(
+					array( 'cambio_tipo', $id, 'uscita' ),
+					array( 'allegato_aggiunto', $padre, $id ),
+				),
+				$voci(),
+				"Caso {$caso}."
+			);
+		}
+
+		$allegato = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'convertito.pdf',
+				'post_parent'    => $padre,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $allegato,
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+			)
+		);
+
+		$this->assertSame( self::TIPO, get_post_type( $allegato ), 'Precondizione: e\' un contenuto.' );
+		$this->assertSame(
+			array(
+				array( 'pubblicazione', $allegato, null ),
+				array( 'cambio_tipo', $allegato, 'ingresso' ),
+				array( 'allegato_eliminato', $padre, $allegato ),
+			),
+			$voci(),
+			'Allegato diventato contenuto.'
+		);
+
+		// Le stesse due conversioni con la funzione che cambia solo il tipo, con la copia in memoria.
+		$id = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+				'post_parent' => $padre,
+			)
+		);
+		$this->assertSame( self::TIPO, get_post( $id )->post_type, 'Precondizione: il contenuto e\' stato letto.' );
+		$this->segna();
+		set_post_type( $id, 'attachment' );
+		$this->assertSame(
+			array(
+				array( 'cambio_tipo', $id, 'uscita' ),
+				array( 'allegato_aggiunto', $padre, $id ),
+			),
+			$voci(),
+			'Contenuto diventato allegato con la funzione diretta.'
+		);
+
+		$allegato = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'diretto.pdf',
+				'post_parent'    => $padre,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+		$this->assertSame( 'attachment', get_post( $allegato )->post_type, 'Precondizione: l\'allegato e\' stato letto.' );
+		$this->segna();
+		set_post_type( $allegato, self::TIPO );
+		$this->assertSame(
+			array(
+				array( 'cambio_tipo', $allegato, 'ingresso' ),
+				array( 'allegato_eliminato', $padre, $allegato ),
+			),
+			$voci(),
+			'Allegato diventato contenuto con la funzione diretta.'
+		);
+	}
+
+	/**
+	 * C-198: l'uscita dallo stato pubblicato, verso qualunque stato, e' una
+	 * rimozione.
+	 */
+	public function test_c198_rimozione() {
+		wp_set_current_user( $this->utente() );
+
+		foreach ( array( 'draft', 'pending', 'private', 'trash' ) as $destinazione ) {
+			$id = $this->contenuto( 'publish' );
+
+			$this->segna();
+
+			if ( 'trash' === $destinazione ) {
+				wp_trash_post( $id );
+			} else {
+				wp_update_post(
+					array(
+						'ID'          => $id,
+						'post_status' => $destinazione,
+					)
+				);
+			}
+
+			$voci = $this->nuove();
+
+			$this->assertCount( 1, $voci, "Verso {$destinazione}: " . wp_json_encode( $voci ) );
+			$this->assertSame( 'rimozione', $voci[0]['azione'] );
+			$this->assertSame( $destinazione, $voci[0]['dettagli']['stato_nuovo'] );
+			$this->assertSame( 'publish', $voci[0]['dettagli']['stato_precedente'] );
+		}
+	}
+
+	/**
+	 * C-198 e C-199: la bozza automatica e' esclusa solo alla nascita. Un
+	 * contenuto gia' esistente che un componente rimette in bozza automatica
+	 * esce comunque dal suo stato: da pubblicato e' una rimozione, da un altro
+	 * stato un cambio di stato.
+	 */
+	public function test_c198_verso_bozza_automatica() {
+		wp_set_current_user( $this->utente() );
+
+		$this->segna();
+		$nascita = $this->contenuto( 'auto-draft' );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Controllo negativo: la nascita della bozza automatica non e\' una voce.' );
+
+		foreach ( array(
+			'publish' => 'rimozione',
+			'pending' => 'cambio_stato',
+		) as $partenza => $azione ) {
+			$id = $this->contenuto( $partenza );
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'          => $id,
+					'post_status' => 'auto-draft',
+				)
+			);
+
+			$this->assertSame( 'auto-draft', get_post_status( $id ), 'Precondizione: il contenuto e\' in bozza automatica.' );
+
+			$voci = $this->nuove();
+
+			$this->assertCount( 1, $voci, "Da {$partenza}: " . wp_json_encode( $voci ) );
+			$this->assertSame( $azione, $voci[0]['azione'] );
+			$this->assertSame( $partenza, $voci[0]['dettagli']['stato_precedente'] );
+			$this->assertSame( 'auto-draft', $voci[0]['dettagli']['stato_nuovo'] );
+		}
+
+		$this->assertSame( 'auto-draft', get_post_status( $nascita ) );
+	}
+
+	/**
+	 * C-198 e C-200: un contenuto che e' tornato in bozza automatica ha una
+	 * storia, e la tiene. Ripubblicato e' una pubblicazione e non una nascita;
+	 * eliminato ha la sua voce di eliminazione. Vale anche quando il passo
+	 * dopo arriva in un'altra richiesta, senza niente in memoria.
+	 */
+	public function test_c198_storia_dopo_bozza_automatica() {
+		wp_set_current_user( $this->utente() );
+
+		foreach ( array( 'stessa richiesta', 'altra richiesta' ) as $caso ) {
+			$ripreso   = $this->contenuto( 'publish' );
+			$eliminato = $this->contenuto( 'publish' );
+
+			foreach ( array( $ripreso, $eliminato ) as $id ) {
+				wp_update_post(
+					array(
+						'ID'          => $id,
+						'post_status' => 'auto-draft',
+					)
+				);
+			}
+
+			if ( 'altra richiesta' === $caso ) {
+				$this->nuova_richiesta();
+			}
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'          => $ripreso,
+					'post_status' => 'publish',
+				)
+			);
+			$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove(), "Caso {$caso}: ripubblicato, nessuna seconda nascita." );
+
+			$this->segna();
+			$this->assertInstanceOf( WP_Post::class, wp_delete_post( $eliminato, true ) );
+			$this->assertSame( array( 'eliminazione' ), $this->azioni_nuove(), "Caso {$caso}: eliminato, la sua voce." );
+			$this->assertSame( 'auto-draft', $this->nuove()[0]['dettagli']['stato'] );
+		}
+
+		// Controllo negativo: la bozza automatica mai nata resta fuori, salvata o eliminata.
+		$mai_nata = $this->contenuto( 'auto-draft' );
+		$salvata  = $this->contenuto( 'auto-draft' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $salvata,
+				'post_status' => 'draft',
+			)
+		);
+		wp_delete_post( $mai_nata, true );
+		$this->assertSame( array( 'creazione' ), $this->azioni_nuove(), 'La prima uscita dalla bozza automatica e\' una nascita, e l\'eliminazione di una mai nata non si registra.' );
+	}
+
+	/**
+	 * C-199: gli altri cambi di stato, compresi quelli che non passano dallo
+	 * stato pubblicato, si registrano come cambi di stato.
+	 */
+	public function test_c199_cambio_stato() {
+		wp_set_current_user( $this->utente() );
+
+		$id = $this->contenuto( 'draft' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_status' => 'pending',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_status' => 'draft',
+			)
+		);
+		wp_trash_post( $id );
+		wp_untrash_post( $id );
+
+		$voci = $this->nuove();
+
+		$this->assertSame( array( 'cambio_stato', 'cambio_stato', 'cambio_stato', 'cambio_stato' ), $this->azioni_nuove() );
+		$this->assertSame(
+			array( 'draft>pending', 'pending>draft', 'draft>trash', 'trash>draft' ),
+			array_map(
+				function ( $voce ) {
+					return $voce['dettagli']['stato_precedente'] . '>' . $voce['dettagli']['stato_nuovo'];
+				},
+				$voci
+			)
+		);
+
+		/*
+		 * Un contenuto pubblicato, messo nel cestino e ripreso: WordPress
+		 * aggiunge e poi toglie il suffisso del cestino al suo indirizzo, e
+		 * nessuna delle due cose è una modifica di chi agisce.
+		 */
+		$ripreso = $this->contenuto( 'publish' );
+		$this->assertNotSame( '', get_post( $ripreso )->post_name, 'Precondizione: il contenuto pubblicato ha un indirizzo.' );
+
+		$this->segna();
+		wp_trash_post( $ripreso );
+		$this->assertStringContainsString( '__trashed', get_post( $ripreso )->post_name, 'Precondizione: nel cestino l\'indirizzo ha il suffisso.' );
+		wp_untrash_post( $ripreso );
+		$this->assertStringNotContainsString( '__trashed', get_post( $ripreso )->post_name, 'Precondizione: fuori dal cestino il suffisso sparisce.' );
+
+		$this->assertSame( array( 'rimozione', 'cambio_stato' ), $this->azioni_nuove() );
+	}
+
+	/**
+	 * C-200, seconda parte: l'utente eliminato senza affidare i suoi
+	 * contenuti. WordPress elimina uno per uno quelli dei tipi che hanno un
+	 * autore, e ciascuno ha la sua voce; quelli degli altri tipi restano come
+	 * sono, e non hanno voci.
+	 */
+	public function test_c200_utente_eliminato_senza_affidamento() {
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+
+		add_post_type_support( self::TIPO, 'author' );
+
+		$autore = $this->utente();
+		wp_set_current_user( $this->utente( 'administrator' ) );
+
+		$eliminato = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+				'post_author' => $autore,
+			)
+		);
+		$rimasto   = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO_ALTRO,
+				'post_status' => 'publish',
+				'post_author' => $autore,
+			)
+		);
+
+		$this->segna();
+		$this->assertTrue( wp_delete_user( $autore ) );
+
+		$this->assertNull( get_post( $eliminato ), 'Precondizione: il contenuto con autore non c\'e\' piu\'.' );
+		$this->assertInstanceOf( WP_Post::class, get_post( $rimasto ), 'Precondizione: l\'altro resta.' );
+		$this->assertSame( array( 'eliminazione' ), $this->azioni_nuove() );
+		$this->assertSame( $eliminato, $this->nuove()[0]['contenuto'] );
+	}
+
+	/**
+	 * C-200: l'eliminazione definitiva scrive una voce, e le voci del contenuto
+	 * sopravvivono al contenuto.
+	 */
+	public function test_c200_eliminazione() {
+		wp_set_current_user( $this->utente() );
+
+		$id = $this->contenuto( 'publish' );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-20' ) );
+
+		$prima = conformita_core_voci_registro( array( 'contenuto' => $id ) );
+		$this->assertNotEmpty( $prima, 'Precondizione: il contenuto ha gia\' delle voci.' );
+
+		$this->segna();
+		wp_delete_post( $id, true );
+
+		$this->assertNull( get_post( $id ), 'Precondizione: il contenuto non esiste piu\'.' );
+		$this->assertSame(
+			array( 'eliminazione' ),
+			$this->azioni_nuove(),
+			'Una eliminazione, una voce: la cancellazione dei metadati che WordPress fa insieme non ne aggiunge altre.'
+		);
+		$this->assertSame( array( 'stato' => 'publish' ), $this->nuove()[0]['dettagli'], 'La voce dice da quale stato e\' stato eliminato.' );
+
+		$dopo = conformita_core_voci_registro( array( 'contenuto' => $id ) );
+		$this->assertSame(
+			wp_list_pluck( $prima, 'id' ),
+			array_slice( wp_list_pluck( $dopo, 'id' ), 0, count( $prima ) ),
+			'Le voci di prima restano tutte.'
+		);
+
+		/*
+		 * La voce attesta un fatto avvenuto: se la banca dati rifiuta la
+		 * cancellazione della riga, il contenuto c'è ancora e la voce non si
+		 * scrive.
+		 */
+		$resta = $this->contenuto( 'publish' );
+
+		$this->segna();
+		add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+		$esito = wp_delete_post( $resta, true );
+		remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+
+		$this->assertFalse( $esito, 'Precondizione: l\'eliminazione e\' fallita.' );
+		$this->assertInstanceOf( WP_Post::class, get_post( $resta ), 'Precondizione: il contenuto c\'e\' ancora.' );
+		$this->assertNotContains( 'eliminazione', $this->azioni_nuove(), 'Nessuna voce per un\'eliminazione non avvenuta.' );
+
+		/*
+		 * Il tentativo fallito non lascia segni: una data di fine impostata
+		 * dopo, sullo stesso contenuto e nella stessa richiesta, si registra.
+		 */
+		$this->segna();
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $resta, '2026-10-30' ) );
+		$this->assertSame( array( 'modifica_fine_pubblicazione' ), $this->azioni_nuove(), 'L\'eliminazione fallita non zittisce le operazioni successive.' );
+
+		/*
+		 * La voce non dipende da una copia del contenuto rimasta in memoria:
+		 * un altro componente che la butta appena prima della cancellazione
+		 * non la fa mancare.
+		 */
+		$senza_copia = $this->contenuto( 'publish' );
+		$butta       = function ( $post_id ) {
+			clean_post_cache( $post_id );
+		};
+
+		$this->segna();
+		add_action( 'delete_post', $butta );
+		wp_delete_post( $senza_copia, true );
+		remove_action( 'delete_post', $butta );
+
+		$this->assertNull( get_post( $senza_copia ), 'Precondizione: il contenuto non esiste piu\'.' );
+		$this->assertSame( array( 'eliminazione' ), $this->azioni_nuove(), 'Una eliminazione, una voce, anche senza copia in memoria.' );
+		$this->assertSame( $senza_copia, $this->nuove()[0]['contenuto'] );
+		$this->assertSame( 0, Conformita_Core_Registro::mancate()['conteggio'], 'E nessuna voce mancata.' );
+
+		// La bozza automatica, che non e' mai diventata un contenuto, si elimina senza voce.
+		$automatica = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'auto-draft',
+			)
+		);
+
+		$this->segna();
+		wp_delete_post( $automatica, true );
+		$this->assertNull( get_post( $automatica ), 'Precondizione: eliminata.' );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Nessuna voce per la bozza automatica.' );
+	}
+
+	/**
+	 * Fa fallire la cancellazione della riga di un contenuto.
+	 *
+	 * @param string $sql Istruzione.
+	 * @return string
+	 */
+	public function rompi_eliminazione( $sql ) {
+		global $wpdb;
+
+		if ( 0 === strpos( $sql, 'DELETE FROM `' . $wpdb->posts . '`' ) ) {
+			return 'SELECT * FROM tabella_che_non_esiste';
+		}
+
+		return $sql;
+	}
+
+	/**
+	 * Fa fallire lo spostamento degli allegati di un contenuto eliminato.
+	 *
+	 * @param string $sql Istruzione.
+	 * @return string
+	 */
+	public function rompi_spostamento_allegati( $sql ) {
+		global $wpdb;
+
+		if ( 0 === strpos( $sql, 'UPDATE `' . $wpdb->posts . '` SET `post_parent`' ) && false !== strpos( $sql, "`post_type` = 'attachment'" ) ) {
+			return 'SELECT 1';
+		}
+
+		return $sql;
+	}
+
+	/**
+	 * C-201: le bozze non si registrano; lo stesso lavoro fuori dalla bozza si.
+	 */
+	public function test_c201_bozze() {
+		wp_set_current_user( $this->utente() );
+
+		$risultati = array();
+
+		foreach ( array( 'draft', 'pending' ) as $stato ) {
+			$id = $this->contenuto( $stato );
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'         => $id,
+					'post_title' => 'Cambio nella ' . $stato,
+				)
+			);
+			conformita_core_imposta_fine_pubblicazione( $id, '2026-11-01' );
+			self::factory()->attachment->create_object(
+				array(
+					'file'           => 'prova-' . $stato . '.pdf',
+					'post_parent'    => $id,
+					'post_mime_type' => 'application/pdf',
+				)
+			);
+
+			$risultati[ $stato ] = $this->azioni_nuove();
+		}
+
+		$this->assertSame( array(), $risultati['draft'], 'Nella bozza nessuna voce.' );
+		$this->assertSame(
+			array( 'modifica', 'modifica_fine_pubblicazione', 'allegato_aggiunto' ),
+			$risultati['pending'],
+			'Controllo positivo: fuori dalla bozza le stesse tre operazioni scrivono tre voci.'
+		);
+
+		/*
+		 * L'eccezione ha un confine: l'eliminazione di una bozza si registra,
+		 * perche' una bozza puo' avere una storia, e i salvataggi automatici
+		 * che giustificano l'eccezione non c'entrano.
+		 */
+		$storia = $this->contenuto( 'publish' );
+		wp_update_post(
+			array(
+				'ID'          => $storia,
+				'post_status' => 'draft',
+			)
+		);
+
+		$this->segna();
+		wp_delete_post( $storia, true );
+		$this->assertSame( array( 'eliminazione' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'stato' => 'draft' ), $this->nuove()[0]['dettagli'] );
+	}
+
+	/**
+	 * C-202: ogni cambio della fine della pubblicazione scrive una voce con il
+	 * valore di prima e quello di dopo, e scrivere lo stesso valore non la scrive.
+	 */
+	public function test_c202_fine_pubblicazione() {
+		wp_set_current_user( $this->utente() );
+
+		$id = $this->contenuto( 'publish' );
+
+		$this->segna();
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-16' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-16' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-01' ) );
+		delete_post_meta( $id, conformita_core_chiave_fine_pubblicazione() );
+
+		$voci = $this->nuove();
+
+		$this->assertSame( array( 'modifica_fine_pubblicazione', 'modifica_fine_pubblicazione', 'modifica_fine_pubblicazione' ), $this->azioni_nuove() );
+		$this->assertSame(
+			array(
+				array( array(), array( '2026-10-16' ) ),
+				array( array( '2026-10-16' ), array( '2026-10-01' ) ),
+				array( array( '2026-10-01' ), array() ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+				},
+				$voci
+			)
+		);
+
+		/*
+		 * Due righe per la stessa chiave aggiornate con una sola scrittura:
+		 * WordPress segnala una scrittura per riga, e il registro deve scrivere
+		 * una voce per l'operazione, non una per riga.
+		 */
+		add_post_meta( $id, conformita_core_chiave_fine_pubblicazione(), '2026-10-05' );
+		add_post_meta( $id, conformita_core_chiave_fine_pubblicazione(), '2026-10-06' );
+
+		$this->segna();
+		update_post_meta( $id, conformita_core_chiave_fine_pubblicazione(), '2026-10-09' );
+
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Una scrittura su due righe, una voce.' );
+		$this->assertSame( array( '2026-10-05', '2026-10-06' ), $voci[0]['dettagli']['valore_precedente'] );
+		$this->assertSame( array( '2026-10-09', '2026-10-09' ), $voci[0]['dettagli']['valore_nuovo'] );
+	}
+
+	/**
+	 * C-202, terza parte: valori che non sono testi.
+	 *
+	 * Le funzioni dei metadati accettano elenchi e oggetti, che WordPress
+	 * conserva serializzati. Il registro li confronta e li riporta come sono
+	 * conservati: due elenchi diversi sono due valori diversi, e un oggetto
+	 * non interrompe la richiesta.
+	 */
+	public function test_c202_fine_pubblicazione_valori_non_testo() {
+		wp_set_current_user( $this->utente() );
+
+		$id      = $this->contenuto( 'publish' );
+		$chiave  = conformita_core_chiave_fine_pubblicazione();
+		$oggetto = (object) array( 'c' => 1 );
+
+		$this->segna();
+		update_post_meta( $id, $chiave, array( 'a' ) );
+		update_post_meta( $id, $chiave, array( 'b' ) );
+		update_post_meta( $id, $chiave, $oggetto );
+		delete_post_meta( $id, $chiave );
+
+		$this->assertSame(
+			array(
+				array( array(), array( maybe_serialize( array( 'a' ) ) ) ),
+				array( array( maybe_serialize( array( 'a' ) ) ), array( maybe_serialize( array( 'b' ) ) ) ),
+				array( array( maybe_serialize( array( 'b' ) ) ), array( maybe_serialize( $oggetto ) ) ),
+				array( array( maybe_serialize( $oggetto ) ), array() ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+				},
+				$this->nuove()
+			),
+			'Quattro scritture, quattro voci con i valori come sono conservati.'
+		);
+	}
+
+	/**
+	 * C-202, seconda parte: le strade che non nominano il contenuto giusto.
+	 *
+	 * La cancellazione per chiave su tutti i contenuti annuncia la scrittura
+	 * senza contenuto, o con quello che ha passato chi la chiede, che non è
+	 * detto sia fra quelli toccati. Il cambio di chiave di una riga annuncia la
+	 * chiave nuova. In tutti e tre i casi la fine della pubblicazione cambia su
+	 * contenuti precisi, e ciascuno deve avere la sua voce.
+	 */
+	public function test_c202_fine_pubblicazione_strade_indirette() {
+		global $wpdb;
+
+		wp_set_current_user( $this->utente() );
+
+		$chiave = conformita_core_chiave_fine_pubblicazione();
+		$primo  = $this->contenuto( 'publish' );
+		$altro  = $this->contenuto( 'publish' );
+		$bozza  = $this->contenuto( 'draft' );
+		$senza  = $this->contenuto( 'publish' );
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $primo, '2026-10-20' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $altro, '2026-10-21' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $bozza, '2026-10-22' ) );
+
+		$this->segna();
+		$this->assertTrue( delete_post_meta_by_key( $chiave ) );
+		$this->assertSame( array(), get_post_meta( $primo, $chiave, false ), 'Precondizione: la fine non c\'e\' piu\'.' );
+
+		$attese = array(
+			$primo => array( array( '2026-10-20' ), array() ),
+			$altro => array( array( '2026-10-21' ), array() ),
+		);
+		$lette  = array();
+
+		$this->assertSame(
+			array( $primo, $altro ),
+			wp_list_pluck( $this->nuove(), 'contenuto' ),
+			'Cancellazione per chiave: due voci in tutto, una per contenuto, nessuna doppia.'
+		);
+
+		foreach ( $this->nuove() as $voce ) {
+			$this->assertSame( 'modifica_fine_pubblicazione', $voce['azione'] );
+			$lette[ $voce['contenuto'] ] = array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+		}
+
+		ksort( $lette );
+		$this->assertSame( $attese, $lette, 'Cancellazione per chiave: una voce per ogni contenuto pubblicato toccato, nessuna per la bozza.' );
+
+		// La stessa cancellazione, chiesta nominando un contenuto che non ha la fine.
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $primo, '2026-10-25' ) );
+		$this->segna();
+		$this->assertTrue( delete_metadata( 'post', $senza, $chiave, '', true ) );
+		$this->assertSame( array( $primo ), wp_list_pluck( $this->nuove(), 'contenuto' ), 'La voce va al contenuto toccato, non a quello nominato.' );
+
+		/*
+		 * Due righe della fine sullo stesso contenuto, scritte saltando la
+		 * funzione di core: la cancellazione per chiave le toglie insieme, e la
+		 * voce e' una sola, con tutti e due i valori.
+		 */
+		add_post_meta( $primo, $chiave, '2026-10-27' );
+		add_post_meta( $primo, $chiave, '2026-10-28' );
+		$this->assertCount( 2, get_post_meta( $primo, $chiave, false ), 'Precondizione: due righe.' );
+
+		$this->segna();
+		$this->assertTrue( delete_post_meta_by_key( $chiave ) );
+		$this->assertSame( array( $primo ), wp_list_pluck( $this->nuove(), 'contenuto' ), 'Due righe tolte insieme, una voce.' );
+		$this->assertSame( array( '2026-10-27', '2026-10-28' ), $this->nuove()[0]['dettagli']['valore_precedente'] );
+
+		// Una riga della fine che cambia chiave: la fine sparisce.
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $primo, '2026-10-26' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: serve il numero della riga.
+		$mid = (int) $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $primo, $chiave ) );
+		$this->assertGreaterThan( 0, $mid, 'Precondizione: la riga della fine esiste.' );
+
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-26', 'chiave_qualunque' ) );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Cambio di chiave verso un\'altra: ' . wp_json_encode( $voci ) );
+		$this->assertSame( $primo, $voci[0]['contenuto'] );
+		$this->assertSame( array( array( '2026-10-26' ), array() ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+
+		// E il contrario: un'altra riga che prende la chiave della fine.
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-27', $chiave ) );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Cambio di chiave verso la fine: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array(), array( '2026-10-27' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+	}
+
+	/**
+	 * C-202, quarta parte: la chiave scritta con altre maiuscole.
+	 *
+	 * La banca dati confronta i nomi dei metadati senza badare alle
+	 * maiuscole: la chiave della fine scritta in maiuscolo tocca le righe
+	 * della fine. Ogni cambiamento effettivo ha la sua voce, con il prima e
+	 * il dopo letti come li legge la banca dati.
+	 */
+	public function test_c202_fine_pubblicazione_chiave_in_maiuscolo() {
+		global $wpdb;
+
+		wp_set_current_user( $this->utente() );
+
+		$chiave    = conformita_core_chiave_fine_pubblicazione();
+		$maiuscola = strtoupper( $chiave );
+		$id        = $this->contenuto( 'publish' );
+		$altro     = $this->contenuto( 'publish' );
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-16' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $altro, '2026-10-17' ) );
+
+		$valori = function ( $voce ) {
+			return array( $voce['contenuto'], $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+		};
+
+		$this->segna();
+		update_post_meta( $id, $maiuscola, '2026-10-20' );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: il valore conservato.
+		$conservato = $wpdb->get_col( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $id, $chiave ) );
+		$this->assertSame( array( '2026-10-20' ), $conservato, 'Precondizione: la banca dati ha aggiornato la riga della fine.' );
+		$this->assertSame( array( array( $id, array( '2026-10-16' ), array( '2026-10-20' ) ) ), array_map( $valori, $this->nuove() ), 'Aggiornamento con la chiave in maiuscolo.' );
+
+		$this->segna();
+		delete_post_meta( $id, $maiuscola );
+		$this->assertSame( array( array( $id, array( '2026-10-20' ), array() ) ), array_map( $valori, $this->nuove() ), 'Cancellazione con la chiave in maiuscolo.' );
+
+		$this->segna();
+		add_post_meta( $id, $maiuscola, '2026-10-22' );
+		$this->assertSame( array( array( $id, array(), array( '2026-10-22' ) ) ), array_map( $valori, $this->nuove() ), 'Aggiunta con la chiave in maiuscolo.' );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: serve il numero della riga.
+		$mid = (int) $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $id, $chiave ) );
+		$this->assertGreaterThan( 0, $mid, 'Precondizione: la riga aggiunta si trova con la chiave.' );
+
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-23', $maiuscola ) );
+		$this->assertSame( array( array( $id, array( '2026-10-22' ), array( '2026-10-23' ) ) ), array_map( $valori, $this->nuove() ), 'Riga cambiata per numero, con la chiave in maiuscolo.' );
+
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-23', 'chiave_qualunque' ) );
+		$this->assertSame( array( array( $id, array( '2026-10-23' ), array() ) ), array_map( $valori, $this->nuove() ), 'Riga che lascia la chiave.' );
+
+		$this->segna();
+		$this->assertTrue( delete_metadata( 'post', 0, $maiuscola, '', true ) );
+		$this->assertSame( array( array( $altro, array( '2026-10-17' ), array() ) ), array_map( $valori, $this->nuove() ), 'Cancellazione per chiave in maiuscolo su tutti i contenuti.' );
+
+		// E il contrario: una riga conservata con la chiave in maiuscolo, cancellata per chiave su tutti i contenuti con la chiave giusta.
+		add_post_meta( $altro, $maiuscola, '2026-10-24' );
+		$this->segna();
+		$this->assertTrue( delete_metadata( 'post', 0, $chiave, '', true ) );
+		$this->assertSame( array( array( $altro, array( '2026-10-24' ), array() ) ), array_map( $valori, $this->nuove() ), 'Riga in maiuscolo cancellata per chiave su tutti i contenuti.' );
+
+		// Controllo negativo: un altro metadato del contenuto non e' la fine.
+		$this->segna();
+		update_post_meta( $id, 'un_altro_dato', 'qualunque' );
+		delete_post_meta( $id, 'un_altro_dato' );
+		$this->assertSame( array(), $this->azioni_nuove() );
+	}
+
+	/**
+	 * C-202, quinta parte: scritture annidate.
+	 *
+	 * Un componente che, mentre la fine cambia, aggiorna un suo metadato dello
+	 * stesso contenuto, o che cambia la fine mentre aggiorna un suo metadato:
+	 * in tutti e due i casi la fine cambia una volta, e la voce e' una, con
+	 * il prima e il dopo esatti. Se invece riscrive la fine dentro la
+	 * scrittura della fine, la fine cambia due volte, e le voci sono due.
+	 * Una scrittura annidata che WordPress annuncia e poi non compie non
+	 * toglie la voce a quella esterna.
+	 */
+	public function test_c202_fine_pubblicazione_scritture_annidate() {
+		wp_set_current_user( $this->utente() );
+
+		$chiave = conformita_core_chiave_fine_pubblicazione();
+		$id     = $this->contenuto( 'publish' );
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-16' ) );
+		update_post_meta( $id, 'dato_ausiliario', 'iniziale' );
+
+		$in_corso = false;
+		$dentro   = function ( $meta_id, $post_id, $meta_key ) use ( $id, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || $chiave !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			update_post_meta( $id, 'dato_ausiliario', 'durante la fine' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $dentro, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, $chiave, '2026-10-20' );
+		remove_action( 'update_post_meta', $dentro, 10 );
+
+		$this->assertSame( 'durante la fine', get_post_meta( $id, 'dato_ausiliario', true ), 'Precondizione: la scrittura annidata e\' avvenuta.' );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Metadato aggiornato dentro la scrittura della fine: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array( '2026-10-16' ), array( '2026-10-20' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+
+		$fuori = function ( $meta_id, $post_id, $meta_key ) use ( $id, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || 'dato_ausiliario' !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			update_post_meta( $id, $chiave, '2026-10-25' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $fuori, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, 'dato_ausiliario', 'con la fine dentro' );
+		remove_action( 'update_post_meta', $fuori, 10 );
+
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Fine cambiata dentro la scrittura di un altro metadato: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array( '2026-10-20' ), array( '2026-10-25' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+
+		// La stessa riga riscritta dentro la sua stessa scrittura: due cambi, due voci, in ordine.
+		$stessa = function ( $meta_id, $post_id, $meta_key ) use ( $id, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || $chiave !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			update_post_meta( $id, $chiave, '2026-10-28' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $stessa, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, $chiave, '2026-10-30' );
+		remove_action( 'update_post_meta', $stessa, 10 );
+
+		$this->assertSame( array( '2026-10-30' ), get_post_meta( $id, $chiave, false ), 'Precondizione: vince la scrittura esterna.' );
+		$this->assertSame(
+			array(
+				array( array( '2026-10-25' ), array( '2026-10-28' ) ),
+				array( array( '2026-10-28' ), array( '2026-10-30' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+				},
+				$this->nuove()
+			),
+			'Riga riscritta dentro la sua scrittura.'
+		);
+
+		/*
+		 * Una scrittura che WordPress annuncia e poi non fa, dentro la
+		 * scrittura della fine: due righe uguali riscritte con lo stesso
+		 * valore, su un altro contenuto. L'annuncio di dopo non arriva, e la
+		 * lettura di quella scrittura non deve prendere il posto di quella
+		 * della fine.
+		 */
+		$altro = $this->contenuto( 'publish' );
+		add_post_meta( $altro, 'dato_doppio', 'uguale' );
+		add_post_meta( $altro, 'dato_doppio', 'uguale' );
+
+		$mancata = function ( $meta_id, $post_id, $meta_key ) use ( $id, $altro, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || $chiave !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			$this->assertFalse( update_post_meta( $altro, 'dato_doppio', 'uguale' ), 'Precondizione: la scrittura annidata non avviene.' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $mancata, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, $chiave, '2026-11-02' );
+		remove_action( 'update_post_meta', $mancata, 10 );
+
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Scrittura mancata dentro la scrittura della fine: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array( '2026-10-30' ), array( '2026-11-02' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+	}
+
+	/**
+	 * C-203: un allegato aggiunto o eliminato scrive una voce sul contenuto a
+	 * cui appartiene.
+	 */
+	public function test_c203_allegati() {
+		wp_set_current_user( $this->utente() );
+
+		$id = $this->contenuto( 'publish' );
+
+		$this->segna();
+		$allegato = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'documento.pdf',
+				'post_parent'    => $id,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+		wp_delete_attachment( $allegato, true );
+
+		$voci = $this->nuove();
+
+		$this->assertSame( array( 'allegato_aggiunto', 'allegato_eliminato' ), $this->azioni_nuove() );
+
+		foreach ( $voci as $voce ) {
+			$this->assertSame( $id, $voce['contenuto'], 'La voce sta sul contenuto padre.' );
+			$this->assertSame( array( 'allegato' => $allegato ), $voce['dettagli'] );
+		}
+
+		/*
+		 * Un allegato gia' esistente che cambia padre: con il salvataggio di
+		 * WordPress, e con il collegamento della libreria dei media, che scrive
+		 * sulla banca dati direttamente e lo annuncia con un aggancio suo.
+		 */
+		$altro  = $this->contenuto( 'publish' );
+		$libero = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'libero.pdf',
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $libero,
+				'post_parent' => $id,
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'          => $libero,
+				'post_parent' => $altro,
+			)
+		);
+		$this->assertSame(
+			array( array( 'allegato_aggiunto', $id ), array( 'allegato_eliminato', $id ), array( 'allegato_aggiunto', $altro ) ),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['contenuto'] );
+				},
+				$this->nuove()
+			),
+			'Il padre cambiato col salvataggio: tolto da uno, aggiunto all\'altro.'
+		);
+
+		$this->segna();
+		do_action( 'wp_media_attach_action', 'detach', $libero, $altro );
+		do_action( 'wp_media_attach_action', 'attach', $libero, $id );
+		$this->assertSame(
+			array( array( 'allegato_eliminato', $altro ), array( 'allegato_aggiunto', $id ) ),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['contenuto'] );
+				},
+				$this->nuove()
+			),
+			'Il collegamento dalla libreria dei media.'
+		);
+
+		/*
+		 * La voce attesta un fatto avvenuto: se la banca dati rifiuta la
+		 * cancellazione della riga dell'allegato, l'allegato c'e' ancora.
+		 */
+		$resta = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'resta.pdf',
+				'post_parent'    => $id,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		$this->segna();
+		add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+		$esito = wp_delete_attachment( $resta, true );
+		remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+
+		$this->assertFalse( $esito, 'Precondizione: l\'eliminazione e\' fallita.' );
+		$this->assertInstanceOf( WP_Post::class, get_post( $resta ), 'Precondizione: l\'allegato c\'e\' ancora.' );
+		$this->assertNotContains( 'allegato_eliminato', $this->azioni_nuove(), 'Nessuna voce per un\'eliminazione non avvenuta.' );
+
+		$this->segna();
+		$this->assertInstanceOf( WP_Post::class, wp_delete_attachment( $resta, true ) );
+		$this->assertSame( array( 'allegato_eliminato' ), $this->azioni_nuove(), 'Controllo positivo: riuscita, la voce c\'e\'.' );
+
+		/*
+		 * Un'eliminazione dell'allegato fallita, poi l'allegato scollegato,
+		 * poi eliminato davvero: l'eliminazione riuscita non ha piu' un padre,
+		 * e il padre di prima non riceve una seconda voce.
+		 */
+		$ritentato = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'ritentato.pdf',
+				'post_parent'    => $id,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+		$this->assertFalse( wp_delete_attachment( $ritentato, true ), 'Precondizione: il primo tentativo fallisce.' );
+		remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $ritentato,
+				'post_parent' => 0,
+			)
+		);
+		$this->assertSame( array( 'allegato_eliminato' ), $this->azioni_nuove(), 'Precondizione: lo scollegamento ha la sua voce.' );
+
+		$this->segna();
+		$this->assertInstanceOf( WP_Post::class, wp_delete_attachment( $ritentato, true ) );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Un allegato libero eliminato non scrive sul padre di un tentativo passato.' );
+
+		/*
+		 * Eliminando un contenuto, WordPress sposta i suoi allegati sul padre
+		 * del contenuto, con un'istruzione diretta: per il padre e' un allegato
+		 * aggiunto. Lo spostamento avviene prima della cancellazione della
+		 * riga, e resta anche se quella fallisce.
+		 */
+		$nonno = $this->contenuto( 'publish' );
+
+		foreach ( array( 'riuscita', 'fallita', 'senza spostamento' ) as $caso ) {
+			$padre    = self::factory()->post->create(
+				array(
+					'post_type'   => self::TIPO,
+					'post_status' => 'publish',
+					'post_title'  => 'Contenuto con padre',
+					'post_parent' => $nonno,
+				)
+			);
+			$spostato = self::factory()->attachment->create_object(
+				array(
+					'file'           => 'spostato-' . $caso . '.pdf',
+					'post_parent'    => $padre,
+					'post_mime_type' => 'application/pdf',
+				)
+			);
+
+			$this->segna();
+			if ( 'fallita' === $caso ) {
+				add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+			}
+			if ( 'senza spostamento' === $caso ) {
+				add_filter( 'query', array( $this, 'rompi_spostamento_allegati' ) );
+			}
+			$esito = wp_delete_post( $padre, true );
+			remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+			remove_filter( 'query', array( $this, 'rompi_spostamento_allegati' ) );
+
+			clean_post_cache( $spostato );
+			$this->assertSame( 'senza spostamento' === $caso ? $padre : $nonno, (int) get_post( $spostato )->post_parent, 'Precondizione, eliminazione ' . $caso . ': dove sta l\'allegato.' );
+			$this->assertSame( 'fallita' === $caso, false === $esito, 'Precondizione: eliminazione ' . $caso . '.' );
+
+			$attese = array();
+			if ( 'senza spostamento' !== $caso ) {
+				$attese[] = array( $nonno, 'allegato_aggiunto', array( 'allegato' => $spostato ) );
+			}
+			if ( 'fallita' !== $caso ) {
+				$attese[] = array( $padre, 'eliminazione', array( 'stato' => 'publish' ) );
+			}
+
+			$this->assertSame(
+				$attese,
+				array_map(
+					function ( $voce ) {
+						return array( $voce['contenuto'], $voce['azione'], $voce['dettagli'] );
+					},
+					$this->nuove()
+				),
+				'Eliminazione ' . $caso . ': l\'allegato aggiunto al padre si registra.'
+			);
+		}
+	}
+
+	/**
+	 * C-204: le stesse operazioni su un tipo che core non governa non scrivono
+	 * niente.
+	 */
+	public function test_c204_tipi_non_gestiti() {
+		wp_set_current_user( $this->utente() );
+
+		$this->segna();
+		$articolo = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+		wp_update_post(
+			array(
+				'ID'         => $articolo,
+				'post_title' => 'Cambiato',
+			)
+		);
+		update_post_meta( $articolo, conformita_core_chiave_fine_pubblicazione(), '2026-10-10' );
+		self::factory()->attachment->create_object(
+			array(
+				'file'        => 'articolo.pdf',
+				'post_parent' => $articolo,
+			)
+		);
+		wp_trash_post( $articolo );
+		wp_delete_post( $articolo, true );
+
+		$this->assertSame( array(), $this->azioni_nuove() );
+		$this->assertSame( 0, Conformita_Core_Registro::mancate()['conteggio'], 'Un tipo non gestito non e\' una voce mancata: non doveva esserci.' );
+
+		$gestito = $this->contenuto( 'publish' );
+		wp_trash_post( $gestito );
+		$this->assertSame( array( 'creazione', 'pubblicazione', 'rimozione' ), $this->azioni_nuove(), 'Controllo positivo sul tipo gestito.' );
+	}
+
+	/**
+	 * C-205: chi ha agito e' il numero dell'utente della richiesta, zero se non
+	 * c'e' nessun utente, e nella voce non c'e' nessun altro dato della persona.
+	 */
+	public function test_c205_chi() {
+		$utente = self::factory()->user->create(
+			array(
+				'role'         => 'editor',
+				'user_login'   => 'maria_rossi_prova',
+				'user_email'   => 'maria.rossi@example.org',
+				'display_name' => 'Maria Rossi Prova',
+			)
+		);
+
+		wp_set_current_user( 0 );
+		$this->segna();
+		$id = $this->contenuto( 'publish' );
+		$this->assertSame( array( 0, 0 ), wp_list_pluck( $this->nuove(), 'utente' ), 'Senza utente, per esempio il compito pianificato: zero.' );
+
+		wp_set_current_user( $utente );
+		$this->segna();
+		wp_trash_post( $id );
+		$this->assertSame( array( $utente ), wp_list_pluck( $this->nuove(), 'utente' ) );
+
+		$righe = $this->righe();
+		$riga  = end( $righe );
+
+		$this->assertSame(
+			array( 'id', 'istante', 'utente', 'sezione', 'contenuto', 'tipo', 'azione', 'origine', 'motivazione', 'dettagli', 'riferimento', 'chiave' ),
+			array_keys( $riga ),
+			'Le colonne sono queste e nessun\'altra.'
+		);
+
+		$testo = wp_json_encode( $riga );
+
+		foreach ( array( 'maria', 'rossi', 'example.org' ) as $dato ) {
+			$this->assertStringNotContainsStringIgnoringCase( $dato, $testo );
+		}
+	}
+
+	/**
+	 * C-206: una voce scritta da un componente si rilegge uguale, con l'utente
+	 * della richiesta, l'istante di core e l'origine del componente.
+	 */
+	public function test_c206_voce_del_componente() {
+		$utente = $this->utente();
+		wp_set_current_user( $utente );
+
+		$id = $this->contenuto( 'publish' );
+
+		$this->segna();
+		$voce = conformita_core_registra_voce(
+			array(
+				'sezione'     => self::SEZIONE,
+				'azione'      => 'rimozione_anticipata',
+				'contenuto'   => $id,
+				'motivazione' => "  Dati personali pubblicati per errore.\nSeconda riga.  ",
+				'dettagli'    => array(
+					'causa'          => 'dati_non_diffondibili',
+					'fine_prevista'  => '2026-10-16',
+					'fine_effettiva' => '2026-10-01',
+					'giorni'         => 15,
+					'confermata'     => true,
+					'nota'           => null,
+					'stati'          => array( 'publish', 'defisso' ),
+				),
+			)
+		);
+
+		$this->assertIsInt( $voce );
+		$this->assertCount( 1, $this->nuove(), 'Una chiamata, una voce: nessuna voce automatica accanto.' );
+
+		$letta = conformita_core_voce_registro( $voce );
+
+		$this->assertSame( $voce, $letta['id'] );
+		$this->assertSame( 'rimozione_anticipata', $letta['azione'] );
+		$this->assertSame( Conformita_Core_Registro::ORIGINE_COMPONENTE, $letta['origine'] );
+		$this->assertSame( $utente, $letta['utente'] );
+		$this->assertSame( $id, $letta['contenuto'] );
+		$this->assertSame( self::TIPO, $letta['tipo'] );
+		$this->assertSame( "Dati personali pubblicati per errore.\nSeconda riga.", $letta['motivazione'] );
+		$this->assertSame( '2026-10-02 09:15:30', $letta['istante']->format( 'Y-m-d H:i:s' ) );
+		$this->assertSame(
+			array(
+				'causa'          => 'dati_non_diffondibili',
+				'fine_prevista'  => '2026-10-16',
+				'fine_effettiva' => '2026-10-01',
+				'giorni'         => 15,
+				'confermata'     => true,
+				'nota'           => null,
+				'stati'          => array( 'publish', 'defisso' ),
+			),
+			$letta['dettagli']
+		);
+		$this->assertNull( $letta['riferimento'] );
+		$this->assertNull( $letta['chiave'] );
+
+		$sezione = conformita_core_registra_voce(
+			array(
+				'sezione' => self::SEZIONE,
+				'azione'  => 'numerazione_dichiarata',
+			)
+		);
+		$this->assertIsInt( $sezione, 'Una voce puo\' riguardare la sezione e nessun contenuto.' );
+		$this->assertNull( conformita_core_voce_registro( $sezione )['contenuto'] );
+	}
+
+	/**
+	 * C-206, seconda parte: i numeri dei dettagli si rileggono uguali, qualunque
+	 * sia la precisione che PHP usa per scriverli, e un testo fatto di cifre
+	 * resta un testo.
+	 */
+	public function test_c206_dettagli_numerici() {
+		wp_set_current_user( $this->utente() );
+
+		$dettagli = array(
+			'decimale'       => 123.456789012345,
+			'somma'          => 0.1 + 0.2,
+			'piccolo'        => 1.0e-7,
+			'tondo'          => 2.0,
+			'intero'         => 7,
+			'testo_numerico' => '123',
+			'testo_decimale' => '1.50',
+			'elenco'         => array( 0.5, '0.5', 5 ),
+		);
+
+		$precisione = ini_get( 'serialize_precision' );
+
+		try {
+			// phpcs:ignore WordPress.PHP.IniSet.Risky -- prova: la precisione ridotta e' la condizione da provare, e si rimette subito.
+			ini_set( 'serialize_precision', '3' );
+
+			$this->assertNotSame( 123.456789012345, json_decode( wp_json_encode( 123.456789012345 ) ), 'Precondizione: con questa precisione la codifica semplice perde cifre.' );
+
+			$voce = conformita_core_registra_voce(
+				array(
+					'sezione'  => self::SEZIONE,
+					'azione'   => 'prova_numeri',
+					'dettagli' => $dettagli,
+				)
+			);
+		} finally {
+			// phpcs:ignore WordPress.PHP.IniSet.Risky -- come sopra.
+			ini_set( 'serialize_precision', $precisione );
+		}
+
+		$this->assertIsInt( $voce, wp_json_encode( $voce ) );
+		$this->assertSame( $dettagli, conformita_core_voce_registro( $voce )['dettagli'] );
+	}
+
+	/**
+	 * Descrizioni sbagliate, ciascuna con il codice d'errore atteso.
+	 *
+	 * @return array<string, array{0: mixed, 1: string}>
+	 */
+	private function descrizioni_sbagliate() {
+		$gestito  = $this->contenuto( 'publish' );
+		$altro    = $this->contenuto( 'publish', self::TIPO_ALTRO );
+		$post     = self::factory()->post->create();
+		$fratello = $this->contenuto( 'publish' );
+
+		$di_altro   = conformita_core_registra_voce(
+			array(
+				'sezione'   => self::SEZIONE,
+				'azione'    => 'prima',
+				'contenuto' => $fratello,
+			)
+		);
+		$di_sezione = conformita_core_registra_voce(
+			array(
+				'sezione' => self::SEZIONE_ALTRA,
+				'azione'  => 'prima',
+			)
+		);
+
+		$base = array(
+			'sezione'   => self::SEZIONE,
+			'azione'    => 'prova',
+			'contenuto' => $gestito,
+		);
+
+		$casi = array(
+			'non un elenco'                     => array( 'testo', 'conformita_core_registro_voce_non_valida' ),
+			'senza sezione'                     => array( array( 'azione' => 'prova' ), 'conformita_core_registro_sezione_sconosciuta' ),
+			'sezione non registrata'            => array( array_merge( $base, array( 'sezione' => 'mai_registrata' ) ), 'conformita_core_registro_sezione_sconosciuta' ),
+			'sezione non testo'                 => array( array_merge( $base, array( 'sezione' => array( self::SEZIONE ) ) ), 'conformita_core_registro_sezione_sconosciuta' ),
+			'senza azione'                      => array( array( 'sezione' => self::SEZIONE ), 'conformita_core_registro_azione_non_valida' ),
+			'azione vuota'                      => array( array_merge( $base, array( 'azione' => '' ) ), 'conformita_core_registro_azione_non_valida' ),
+			'azione maiuscola'                  => array( array_merge( $base, array( 'azione' => 'Prova' ) ), 'conformita_core_registro_azione_non_valida' ),
+			'azione con trattino'               => array( array_merge( $base, array( 'azione' => 'rimando-in-bozza' ) ), 'conformita_core_registro_azione_non_valida' ),
+			'azione con a capo finale'          => array( array_merge( $base, array( 'azione' => "prova\n" ) ), 'conformita_core_registro_azione_non_valida' ),
+			'azione lunga 65'                   => array( array_merge( $base, array( 'azione' => str_repeat( 'a', 65 ) ) ), 'conformita_core_registro_azione_non_valida' ),
+			'contenuto inesistente'             => array( array_merge( $base, array( 'contenuto' => 999999 ) ), 'conformita_core_registro_contenuto_sconosciuto' ),
+			'contenuto zero'                    => array( array_merge( $base, array( 'contenuto' => 0 ) ), 'conformita_core_registro_contenuto_sconosciuto' ),
+			'contenuto non numero'              => array( array_merge( $base, array( 'contenuto' => '12abc' ) ), 'conformita_core_registro_contenuto_sconosciuto' ),
+			'contenuto non gestito'             => array( array_merge( $base, array( 'contenuto' => $post ) ), 'conformita_core_registro_contenuto_estraneo' ),
+			'contenuto di un\'altra sezione'    => array( array_merge( $base, array( 'contenuto' => $altro ) ), 'conformita_core_registro_contenuto_estraneo' ),
+			'motivazione vuota'                 => array( array_merge( $base, array( 'motivazione' => '' ) ), 'conformita_core_registro_motivazione_vuota' ),
+			'motivazione di soli spazi'         => array( array_merge( $base, array( 'motivazione' => " \n\t " ) ), 'conformita_core_registro_motivazione_vuota' ),
+			'motivazione non testo'             => array( array_merge( $base, array( 'motivazione' => 12 ) ), 'conformita_core_registro_motivazione_vuota' ),
+			'motivazione non UTF-8'             => array( array_merge( $base, array( 'motivazione' => "caf\xe9" ) ), 'conformita_core_registro_motivazione_vuota' ),
+			'dettagli non elenco'               => array( array_merge( $base, array( 'dettagli' => 'testo' ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'dettagli con nome numerico'        => array( array_merge( $base, array( 'dettagli' => array( 'uno' ) ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'dettagli con nome maiuscolo'       => array( array_merge( $base, array( 'dettagli' => array( 'Causa' => 'x' ) ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'dettagli annidati'                 => array( array_merge( $base, array( 'dettagli' => array( 'a' => array( array( 'b' ) ) ) ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'dettagli con elenco a chiavi'      => array( array_merge( $base, array( 'dettagli' => array( 'a' => array( 'x' => 'y' ) ) ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'dettagli con oggetto'              => array( array_merge( $base, array( 'dettagli' => array( 'a' => new stdClass() ) ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'dettagli con infinito'             => array( array_merge( $base, array( 'dettagli' => array( 'a' => INF ) ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'dettagli non UTF-8'                => array( array_merge( $base, array( 'dettagli' => array( 'a' => "caf\xe9" ) ) ), 'conformita_core_registro_dettagli_non_validi' ),
+			'riferimento inesistente'           => array( array_merge( $base, array( 'riferimento' => 99999999 ) ), 'conformita_core_registro_riferimento_sconosciuto' ),
+			'riferimento di un altro contenuto' => array( array_merge( $base, array( 'riferimento' => $di_altro ) ), 'conformita_core_registro_riferimento_estraneo' ),
+			'riferimento di un\'altra sezione'  => array(
+				array(
+					'sezione'     => self::SEZIONE,
+					'azione'      => 'prova',
+					'riferimento' => $di_sezione,
+				),
+				'conformita_core_registro_riferimento_estraneo',
+			),
+			'chiave con spazio'                 => array( array_merge( $base, array( 'chiave' => 'una chiave' ) ), 'conformita_core_registro_chiave_non_valida' ),
+			'chiave vuota'                      => array( array_merge( $base, array( 'chiave' => '' ) ), 'conformita_core_registro_chiave_non_valida' ),
+			'chiave lunga 192'                  => array( array_merge( $base, array( 'chiave' => str_repeat( 'k', 192 ) ) ), 'conformita_core_registro_chiave_non_valida' ),
+			'chiave non testo'                  => array( array_merge( $base, array( 'chiave' => 7 ) ), 'conformita_core_registro_chiave_non_valida' ),
+			'chiave sconosciuta motivo'         => array( array_merge( $base, array( 'motivo' => 'errore' ) ), 'conformita_core_registro_chiave_sconosciuta' ),
+			'chi dichiarato'                    => array( array_merge( $base, array( 'utente' => 1 ) ), 'conformita_core_registro_chiave_sconosciuta' ),
+			'quando dichiarato'                 => array( array_merge( $base, array( 'istante' => '2020-01-01 00:00:00' ) ), 'conformita_core_registro_chiave_sconosciuta' ),
+			'origine dichiarata'                => array( array_merge( $base, array( 'origine' => 'automatica' ) ), 'conformita_core_registro_chiave_sconosciuta' ),
+		);
+
+		/*
+		 * L'elenco è scritto qui e non letto dal codice: se un nome sparisse
+		 * dall'elenco dei riservati, una prova che lo leggesse da lì
+		 * smetterebbe di provarlo senza accorgersene.
+		 */
+		foreach ( self::AZIONI_RISERVATE as $riservata ) {
+			$casi[ 'azione riservata ' . $riservata ] = array( array_merge( $base, array( 'azione' => $riservata ) ), 'conformita_core_registro_azione_riservata' );
+		}
+
+		return $casi;
+	}
+
+	/**
+	 * C-207: ogni descrizione sbagliata e' rifiutata con il suo errore, e la
+	 * tabella non cambia.
+	 */
+	public function test_c207_rifiuti() {
+		wp_set_current_user( $this->utente() );
+
+		$casi = $this->descrizioni_sbagliate();
+
+		$valida = conformita_core_registra_voce(
+			array(
+				'sezione'     => self::SEZIONE,
+				'azione'      => 'prova',
+				'motivazione' => 'Controllo positivo',
+			)
+		);
+		$this->assertIsInt( $valida, 'Controllo positivo: la stessa forma, corretta, riesce.' );
+
+		$fotografia = $this->righe();
+
+		foreach ( $casi as $nome => $caso ) {
+			$esito = conformita_core_registra_voce( $caso[0] );
+
+			$this->assertWPError( $esito, "Caso {$nome}: doveva essere rifiutato." );
+			$this->assertSame( $caso[1], $esito->get_error_code(), "Caso {$nome}: codice d'errore." );
+		}
+
+		$this->assertSame( $fotografia, $this->righe(), 'Nessun rifiuto ha lasciato traccia nella tabella.' );
+	}
+
+	/**
+	 * C-208: una voce successiva rimanda a una precedente senza toccarla, e si
+	 * ritrovano insieme leggendo il contenuto.
+	 */
+	public function test_c208_riferimento() {
+		$primo = $this->utente();
+		wp_set_current_user( $primo );
+
+		$id = $this->contenuto( 'publish' );
+
+		$rimozione = conformita_core_registra_voce(
+			array(
+				'sezione'     => self::SEZIONE,
+				'azione'      => 'rimozione_anticipata',
+				'contenuto'   => $id,
+				'motivazione' => 'Causa dell\'elenco',
+			)
+		);
+		$originale = $this->righe();
+
+		$secondo = $this->utente();
+		wp_set_current_user( $secondo );
+		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-10-06 14:00:00', new DateTimeZone( 'UTC' ) ) );
+
+		$risposta = conformita_core_registra_voce(
+			array(
+				'sezione'     => self::SEZIONE,
+				'azione'      => 'effetto_sul_periodo',
+				'contenuto'   => $id,
+				'riferimento' => $rimozione,
+				'dettagli'    => array( 'effetto' => 'vale_per_il_periodo_trascorso' ),
+			)
+		);
+
+		$this->assertIsInt( $risposta );
+		$this->assertSame( $originale, array_slice( $this->righe(), 0, count( $originale ) ), 'La voce di prima resta com\'era.' );
+
+		$letta = conformita_core_voce_registro( $risposta );
+		$this->assertSame( $rimozione, $letta['riferimento'] );
+		$this->assertSame( $secondo, $letta['utente'], 'Chi risponde dopo e\' chi ha risposto, non chi aveva rimosso.' );
+		$this->assertSame( '2026-10-06 14:00:00', $letta['istante']->format( 'Y-m-d H:i:s' ) );
+
+		$del_contenuto = wp_list_pluck( conformita_core_voci_registro( array( 'contenuto' => $id ) ), 'id' );
+		$this->assertSame( array( $rimozione, $risposta ), array_slice( $del_contenuto, -2 ), 'In ordine di scrittura, la risposta dopo la rimozione.' );
+		$this->assertSame( array( $risposta ), wp_list_pluck( conformita_core_voci_registro( array( 'riferimento' => $rimozione ) ), 'id' ) );
+	}
+
+	/**
+	 * C-209: una chiave di unicita' gia' usata ferma la seconda voce, e il
+	 * vincolo sta nella banca dati, non solo nel controllo che la precede.
+	 */
+	public function test_c209_chiave_unica() {
+		wp_set_current_user( $this->utente() );
+
+		$id = $this->contenuto( 'publish' );
+
+		$prima = conformita_core_registra_voce(
+			array(
+				'sezione'   => self::SEZIONE,
+				'azione'    => 'effetto_sul_periodo',
+				'contenuto' => $id,
+				'dettagli'  => array( 'effetto' => 'va_rifatta' ),
+				'chiave'    => 'effetto_sul_periodo:' . $id,
+			)
+		);
+		$this->assertIsInt( $prima );
+
+		$fotografia = $this->righe();
+
+		$seconda = conformita_core_registra_voce(
+			array(
+				'sezione'   => self::SEZIONE,
+				'azione'    => 'effetto_sul_periodo',
+				'contenuto' => $id,
+				'dettagli'  => array( 'effetto' => 'vale_per_il_periodo_trascorso' ),
+				'chiave'    => 'effetto_sul_periodo:' . $id,
+			)
+		);
+
+		$this->assertWPError( $seconda );
+		$this->assertSame( 'conformita_core_registro_chiave_esistente', $seconda->get_error_code() );
+		$this->assertSame( array( 'voce' => $prima ), $seconda->get_error_data() );
+		$this->assertSame( $fotografia, $this->righe(), 'La prima resta com\'era e non se ne aggiunge un\'altra.' );
+
+		$maiuscola = conformita_core_registra_voce(
+			array(
+				'sezione'   => self::SEZIONE,
+				'azione'    => 'effetto_sul_periodo',
+				'contenuto' => $id,
+				'chiave'    => 'EFFETTO_SUL_PERIODO:' . $id,
+			)
+		);
+		$this->assertIsInt( $maiuscola, 'La chiave si confronta byte per byte: maiuscole e minuscole sono chiavi diverse.' );
+
+		global $wpdb;
+		$tabella = Conformita_Core_Registro::tabella();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: struttura della tabella.
+		$indici = $wpdb->get_results( "SHOW INDEX FROM {$tabella} WHERE Key_name = 'chiave'", ARRAY_A );
+		$this->assertCount( 1, $indici, 'L\'indice della chiave ha una colonna sola.' );
+		$this->assertSame( 'chiave', $indici[0]['Column_name'] );
+		$this->assertNull( $indici[0]['Sub_part'], 'L\'indice copre la chiave intera, non un suo inizio.' );
+		$this->assertSame( '0', (string) $indici[0]['Non_unique'], 'Due scritture contemporanee le ferma il vincolo di unicita\' della banca dati.' );
+
+		/*
+		 * La stessa cosa provata dal lato del fatto: una seconda riga con la
+		 * stessa chiave, scritta saltando il controllo del codice, la rifiuta
+		 * la banca dati.
+		 */
+		$errori = $wpdb->suppress_errors( true );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: si scavalca il codice per provare il vincolo.
+		$doppia = $wpdb->insert(
+			$tabella,
+			array(
+				'istante' => '2026-10-02 09:15:30',
+				'sezione' => self::SEZIONE,
+				'azione'  => 'effetto_sul_periodo',
+				'origine' => 'componente',
+				'chiave'  => 'effetto_sul_periodo:' . $id,
+			)
+		);
+		$wpdb->suppress_errors( $errori );
+		$this->assertFalse( $doppia, 'La banca dati rifiuta da sola la chiave ripetuta.' );
+	}
+
+	/**
+	 * Rompe la prossima scrittura nel registro.
+	 *
+	 * @param string $sql Istruzione.
+	 * @return string
+	 */
+	public function rompi_inserimento( $sql ) {
+		if ( 0 === strpos( $sql, 'INSERT INTO `' . Conformita_Core_Registro::tabella() . '`' ) ) {
+			return 'INSERT INTO tabella_che_non_esiste_mai VALUES (1)';
+		}
+
+		return $sql;
+	}
+
+	/**
+	 * C-210: se la scrittura fallisce, il componente riceve un errore, e una
+	 * voce automatica mancata resta annotata.
+	 */
+	public function test_c210_scrittura_fallita() {
+		wp_set_current_user( $this->utente() );
+
+		$id = $this->contenuto( 'pending' );
+
+		$fotografia = $this->righe();
+		$this->assertSame( 0, Conformita_Core_Registro::mancate()['conteggio'], 'Precondizione: nessuna voce mancata.' );
+
+		add_filter( 'query', array( $this, 'rompi_inserimento' ) );
+
+		$esito = conformita_core_registra_voce(
+			array(
+				'sezione' => self::SEZIONE,
+				'azione'  => 'prova',
+			)
+		);
+
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_status' => 'publish',
+			)
+		);
+
+		remove_filter( 'query', array( $this, 'rompi_inserimento' ) );
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_registro_non_scritto', $esito->get_error_code() );
+		$this->assertSame( 'publish', get_post_status( $id ), 'L\'operazione e\' avvenuta: il registro non la disfa.' );
+		$this->assertSame( $fotografia, $this->righe(), 'Nessuna voce scritta.' );
+
+		$mancate = Conformita_Core_Registro::mancate();
+		$this->assertSame( 1, $mancate['conteggio'], 'La pubblicazione senza voce e\' annotata.' );
+		$this->assertSame( '2026-10-02 09:15:30', $mancate['prima'] );
+		$this->assertSame( '2026-10-02 09:15:30', $mancate['ultima'] );
+
+		/*
+		 * Due richieste che annotano insieme. Qui la seconda si simula: un'altra
+		 * richiesta ha gia' portato il conteggio da 1 a 3 nella banca dati, e
+		 * questa ne ha ancora in memoria il valore vecchio. Un conteggio letto
+		 * e poi riscritto perderebbe le due annotazioni dell'altra.
+		 */
+		global $wpdb;
+		$this->assertSame( 1, Conformita_Core_Registro::mancate()['conteggio'], 'Precondizione: il valore vecchio e\' in memoria.' );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: l'altra richiesta scrive nella banca dati, non nella memoria di questa.
+		$wpdb->update( $wpdb->options, array( 'option_value' => '3' ), array( 'option_name' => Conformita_Core_Registro::OPZIONE_MANCATE ) );
+
+		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-10-02 09:20:00', new DateTimeZone( 'UTC' ) ) );
+		Conformita_Core_Registro::annota_mancata();
+
+		$mancate = Conformita_Core_Registro::mancate();
+		$this->assertSame( 4, $mancate['conteggio'], 'Le annotazioni dell\'altra richiesta restano contate.' );
+		$this->assertSame( '2026-10-02 09:15:30', $mancate['prima'], 'La prima resta la prima.' );
+		$this->assertSame( '2026-10-02 09:20:00', $mancate['ultima'] );
+
+		// Un'annotazione con un istante precedente, arrivata per ultima, non sposta l'ultima indietro.
+		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-10-02 09:18:00', new DateTimeZone( 'UTC' ) ) );
+		Conformita_Core_Registro::annota_mancata();
+		$this->assertSame( '2026-10-02 09:20:00', Conformita_Core_Registro::mancate()['ultima'] );
+	}
+
+	/**
+	 * Cambia il testo della motivazione mentre si scrive.
+	 *
+	 * @param string $sql Istruzione.
+	 * @return string
+	 */
+	public function altera_inserimento( $sql ) {
+		if ( 0 === strpos( $sql, 'INSERT INTO `' . Conformita_Core_Registro::tabella() . '`' ) ) {
+			return str_replace( 'Motivo dichiarato', 'Motivo diverso', $sql );
+		}
+
+		return $sql;
+	}
+
+	/**
+	 * C-211: una scrittura che riesce ma scrive altro da quanto dichiarato
+	 * restituisce errore, non il numero della voce.
+	 */
+	public function test_c211_rilettura() {
+		wp_set_current_user( $this->utente() );
+
+		add_filter( 'query', array( $this, 'altera_inserimento' ) );
+
+		$esito = conformita_core_registra_voce(
+			array(
+				'sezione'     => self::SEZIONE,
+				'azione'      => 'prova',
+				'motivazione' => 'Motivo dichiarato',
+			)
+		);
+
+		remove_filter( 'query', array( $this, 'altera_inserimento' ) );
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_registro_non_conforme', $esito->get_error_code() );
+
+		$controllo = conformita_core_registra_voce(
+			array(
+				'sezione'     => self::SEZIONE,
+				'azione'      => 'prova',
+				'motivazione' => 'Motivo dichiarato',
+			)
+		);
+		$this->assertIsInt( $controllo, 'Controllo positivo: senza alterazione la stessa voce riesce.' );
+	}
+
+	/**
+	 * C-212: nel codice non c'e' nessuna strada per modificare o cancellare una
+	 * voce.
+	 */
+	public function test_c212_nessuna_strada_per_modificare() {
+		$cartella = dirname( __DIR__ ) . '/includes';
+		$tabella  = Conformita_Core_Registro::TABELLA;
+		$propri   = array(
+			'class-conformita-core-registro.php',
+			'class-conformita-core-registro-automatico.php',
+			'class-conformita-core-registro-schermata.php',
+		);
+
+		$trovati = array();
+
+		foreach ( glob( $cartella . '/*.php' ) as $file ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- prova statica: si legge il sorgente.
+			$sorgente = file_get_contents( $file );
+			$nome     = basename( $file );
+
+			if ( in_array( $nome, $propri, true ) ) {
+				if ( preg_match( '/->\s*(update|delete|replace)\s*\(|\b(UPDATE|DELETE|REPLACE|TRUNCATE|DROP|ALTER|RENAME)\b/', $sorgente, $corrispondenza ) ) {
+					$trovati[] = $nome . ': ' . $corrispondenza[0];
+				}
+			} elseif ( false !== strpos( $sorgente, $tabella ) || false !== strpos( $sorgente, 'Conformita_Core_Registro::tabella' ) ) {
+				$trovati[] = $nome . ': nomina la tabella del registro';
+			}
+		}
+
+		$this->assertSame( array(), $trovati, 'Solo le classi del registro toccano la tabella, e nessuna la modifica.' );
+
+		$funzioni = array_filter(
+			get_defined_functions()['user'],
+			function ( $funzione ) {
+				return 0 === strpos( $funzione, 'conformita_core_' ) && preg_match( '/(registro|voce)/', $funzione );
+			}
+		);
+		sort( $funzioni );
+
+		$this->assertSame(
+			array( 'conformita_core_capacita_registro', 'conformita_core_registra_voce', 'conformita_core_voce_registro', 'conformita_core_voci_registro' ),
+			array_values( $funzioni ),
+			'Le funzioni pubbliche del registro sono queste quattro: una aggiunge, due leggono, una nomina il permesso.'
+		);
+
+		$metodi = get_class_methods( 'Conformita_Core_Registro' );
+		$this->assertSame( array(), preg_grep( '/(modific|cancell|elimin|aggiorn|rimuov|sostitu)/i', $metodi ) );
+
+		/*
+		 * Nessun metodo pubblico scrive una voce di origine automatica, ne' la
+		 * spegne. Un componente che chiamasse direttamente l'ascoltatore di un
+		 * aggancio, o la scrittura interna con l'origine automatica,
+		 * attesterebbe un fatto mai avvenuto; uno che potesse spegnere le voci
+		 * automatiche lavorerebbe senza lasciare traccia. Gli elenchi sono
+		 * scritti qui per esteso.
+		 */
+		$pubblici = array();
+
+		foreach ( array( 'Conformita_Core_Registro', 'Conformita_Core_Registro_Automatico' ) as $classe ) {
+			foreach ( ( new ReflectionClass( $classe ) )->getMethods( ReflectionMethod::IS_PUBLIC ) as $metodo ) {
+				$pubblici[] = $classe . '::' . $metodo->getName();
+			}
+		}
+		sort( $pubblici );
+
+		$this->assertSame(
+			array(
+				'Conformita_Core_Registro::annota_mancata',
+				'Conformita_Core_Registro::assicura_tabella',
+				'Conformita_Core_Registro::conta',
+				'Conformita_Core_Registro::installa',
+				'Conformita_Core_Registro::mancate',
+				'Conformita_Core_Registro::registra',
+				'Conformita_Core_Registro::scrittura_automatica',
+				'Conformita_Core_Registro::tabella',
+				'Conformita_Core_Registro::tabella_presente',
+				'Conformita_Core_Registro::utc',
+				'Conformita_Core_Registro::voce',
+				'Conformita_Core_Registro::voci',
+				'Conformita_Core_Registro_Automatico::agganci',
+				'Conformita_Core_Registro_Automatico::avvia',
+				'Conformita_Core_Registro_Automatico::avviato',
+				'Conformita_Core_Registro_Automatico::azioni',
+			),
+			$pubblici
+		);
+
+		$this->assertNull( Conformita_Core_Registro::scrittura_automatica(), 'La scrittura automatica si consegna una volta sola, a core, all\'avvio.' );
+	}
+
+	/**
+	 * C-213: nessuna superficie esterna scrive o legge il registro.
+	 */
+	public function test_c213_nessuna_superficie_esterna() {
+		global $wp_filter;
+
+		$agganci = array_filter(
+			array_keys( $wp_filter ),
+			function ( $nome ) {
+				return ( 0 === strpos( $nome, 'admin_post' ) || 0 === strpos( $nome, 'wp_ajax' ) ) && false !== strpos( $nome, 'registro' );
+			}
+		);
+		$this->assertSame( array(), array_values( $agganci ), 'Nessuna azione di amministrazione o chiamata asincrona sul registro.' );
+
+		$rotte = array_filter(
+			array_keys( rest_get_server()->get_routes() ),
+			function ( $rotta ) {
+				return false !== strpos( $rotta, 'registro' );
+			}
+		);
+		$this->assertSame( array(), array_values( $rotte ), 'Il registro non e\' esposto all\'interfaccia per programmi.' );
+	}
+
+	/**
+	 * C-222: la tabella esiste con la versione dello schema, il controllo
+	 * all'avvio non la ricrea ogni volta, e la versione non si scrive se la
+	 * tabella non c'e'.
+	 */
+	public function test_c222_installazione() {
+		global $wpdb;
+
+		$this->assertTrue( Conformita_Core_Registro::tabella_presente() );
+		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ) );
+
+		$istruzioni = array();
+		$conta      = function ( $sql ) use ( &$istruzioni ) {
+			$istruzioni[] = $sql;
+			return $sql;
+		};
+
+		add_filter( 'query', $conta );
+		Conformita_Core_Registro::assicura_tabella();
+		remove_filter( 'query', $conta );
+
+		$this->assertSame( array(), $istruzioni, 'Con la versione giusta il controllo all\'avvio non tocca la banca dati.' );
+
+		delete_option( Conformita_Core_Registro::OPZIONE_SCHEMA );
+
+		$nascondi = function ( $sql ) {
+			if ( 0 === strpos( $sql, 'SHOW TABLES LIKE' ) ) {
+				return "SHOW TABLES LIKE 'nessuna_tabella_si_chiama_cosi'";
+			}
+			return $sql;
+		};
+
+		add_filter( 'query', $nascondi );
+		$esito = Conformita_Core_Registro::installa();
+		remove_filter( 'query', $nascondi );
+
+		$this->assertFalse( $esito );
+		$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'Senza tabella la versione non si scrive, e il prossimo avvio riprova.' );
+
+		$istruzioni = array();
+		add_filter( 'query', $conta );
+		$this->assertTrue( Conformita_Core_Registro::installa(), 'Controllo positivo.' );
+		remove_filter( 'query', $conta );
+
+		$this->assertSame(
+			array(),
+			preg_grep( '/^\s*(ALTER|CREATE|DROP)\b/i', $istruzioni ),
+			'Su una tabella gia\' allineata l\'installazione non cambia la struttura: ripeterla a ogni aggiornamento non costa niente.'
+		);
+		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ) );
+
+		/*
+		 * Una tabella che c'e' ma non ha il vincolo di unicita' sulla chiave,
+		 * per esempio preesistente e non aggiornabile per mancanza di permessi,
+		 * non e' un registro installato: due scritture contemporanee potrebbero
+		 * portare la stessa chiave.
+		 */
+		delete_option( Conformita_Core_Registro::OPZIONE_SCHEMA );
+
+		$senza_vincolo = function ( $sql ) {
+			global $wpdb;
+
+			if ( 0 === strpos( $sql, 'SHOW INDEX FROM' ) && false !== strpos( $sql, Conformita_Core_Registro::tabella() ) ) {
+				return str_replace( Conformita_Core_Registro::tabella(), $wpdb->posts, $sql );
+			}
+			return $sql;
+		};
+
+		// dbDelta, ingannato allo stesso modo, prova ad aggiungere indici che ci sono gia': i suoi errori non interessano qui.
+		$errori = $wpdb->suppress_errors( true );
+		add_filter( 'query', $senza_vincolo );
+		$esito = Conformita_Core_Registro::installa();
+		remove_filter( 'query', $senza_vincolo );
+		$wpdb->suppress_errors( $errori );
+
+		$this->assertFalse( $esito, 'Senza il vincolo sulla chiave l\'installazione non riesce.' );
+		$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'E la versione non si scrive.' );
+
+		/*
+		 * Finche' l'installazione non e' riuscita non si scrive: senza il
+		 * vincolo due voci con la stessa chiave passerebbero tutte e due. Il
+		 * componente riceve l'errore, la voce automatica diventa una mancata.
+		 */
+		$id      = $this->contenuto( 'publish' );
+		$mancate = Conformita_Core_Registro::mancate()['conteggio'];
+		$righe   = count( $this->righe() );
+
+		$rifiutata = conformita_core_registra_voce(
+			array(
+				'sezione' => self::SEZIONE,
+				'azione'  => 'prova_senza_installazione',
+				'chiave'  => 'prova:senza-installazione',
+			)
+		);
+		$this->assertWPError( $rifiutata );
+		$this->assertSame( 'conformita_core_registro_non_installato', $rifiutata->get_error_code() );
+
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_title' => 'Cambiato senza registro installato',
+			)
+		);
+
+		$this->assertSame( $righe, count( $this->righe() ), 'Nessuna riga scritta.' );
+		$this->assertSame( $mancate + 1, Conformita_Core_Registro::mancate()['conteggio'], 'La voce automatica non scritta e\' annotata.' );
+
+		$this->assertTrue( Conformita_Core_Registro::installa(), 'Controllo positivo.' );
+		$this->assertIsInt(
+			conformita_core_registra_voce(
+				array(
+					'sezione' => self::SEZIONE,
+					'azione'  => 'prova_senza_installazione',
+				)
+			),
+			'Installato, si scrive.'
+		);
+
+		/*
+		 * Lo stesso con un indice che si chiama come quello giusto ma non
+		 * vincola la chiave intera e da sola. La forma si legge da una tabella
+		 * di prova con quell'indice.
+		 */
+		$finta = $wpdb->prefix . 'prova_indice_chiave';
+
+		foreach ( array(
+			'solo l\'inizio della chiave'     => 'UNIQUE KEY chiave (chiave(10))',
+			'la chiave con un\'altra colonna' => 'UNIQUE KEY chiave (chiave,id)',
+			'senza unicita\''                 => 'KEY chiave (chiave)',
+		) as $caso => $indice ) {
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: tabella di prova con un indice sbagliato.
+			$wpdb->query( "DROP TABLE IF EXISTS {$finta}" );
+			$wpdb->query( "CREATE TABLE {$finta} (id bigint(20) unsigned NOT NULL, chiave varbinary(191) DEFAULT NULL, PRIMARY KEY  (id), {$indice})" );
+			$this->assertNotEmpty( $wpdb->get_results( "SHOW INDEX FROM {$finta} WHERE Key_name = 'chiave'" ), 'Precondizione: la tabella di prova ha l\'indice ' . $caso . '.' );
+			// phpcs:enable
+
+			$verso_finta = function ( $sql ) use ( $finta ) {
+				if ( 0 === strpos( $sql, 'SHOW INDEX FROM' ) && false !== strpos( $sql, Conformita_Core_Registro::tabella() ) ) {
+					return str_replace( Conformita_Core_Registro::tabella(), $finta, $sql );
+				}
+				return $sql;
+			};
+
+			delete_option( Conformita_Core_Registro::OPZIONE_SCHEMA );
+			$errori = $wpdb->suppress_errors( true );
+			add_filter( 'query', $verso_finta );
+			$esito = Conformita_Core_Registro::installa();
+			remove_filter( 'query', $verso_finta );
+			$wpdb->suppress_errors( $errori );
+
+			$this->assertFalse( $esito, 'Indice con ' . $caso . ': l\'installazione non riesce.' );
+			$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'Indice con ' . $caso . ': la versione non si scrive.' );
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: si toglie la tabella di prova.
+		$wpdb->query( "DROP TABLE IF EXISTS {$finta}" );
+		$this->assertTrue( Conformita_Core_Registro::installa(), 'Controllo positivo sulla tabella vera.' );
+
+		/*
+		 * Una versione scritta e una tabella sparita, per esempio dopo un
+		 * ripristino parziale: la prima scrittura che fallisce se ne accorge e
+		 * toglie la versione, cosi' l'avvio successivo reinstalla. Una
+		 * scrittura che fallisce con la tabella al suo posto non la tocca.
+		 */
+		add_filter( 'query', array( $this, 'rompi_inserimento' ) );
+		$this->assertWPError(
+			conformita_core_registra_voce(
+				array(
+					'sezione' => self::SEZIONE,
+					'azione'  => 'prova',
+				)
+			)
+		);
+		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'Tabella presente: la versione resta.' );
+
+		add_filter( 'query', $nascondi );
+		$this->assertWPError(
+			conformita_core_registra_voce(
+				array(
+					'sezione' => self::SEZIONE,
+					'azione'  => 'prova',
+				)
+			)
+		);
+		remove_filter( 'query', $nascondi );
+		remove_filter( 'query', array( $this, 'rompi_inserimento' ) );
+
+		$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'Tabella sparita: la versione si toglie.' );
+		Conformita_Core_Registro::assicura_tabella();
+		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'E l\'avvio successivo reinstalla.' );
+	}
+
+	/**
+	 * C-223: la versione dell'interfaccia sale a 1.4.0 e le quattro funzioni
+	 * nuove esistono. Le unita' successive alzano la versione con aggiunte
+	 * compatibili: qui si verifica che non sia scesa sotto 1.4.0, la versione
+	 * esatta la fissa la prova dell'ultima unita'.
+	 */
+	public function test_c223_contratto_pubblico() {
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.4.0', '>=' ) );
+		$this->assertTrue( conformita_core_api_compatibile( '1.3.0', conformita_core_versione_api() ), 'Chi chiedeva 1.3.0 resta compatibile.' );
+		$this->assertSame( 'conformita_core_leggere_registro', conformita_core_capacita_registro(), 'Il nome della capability e\' parte del contratto: si scrive per esteso.' );
+		$this->assertSame( self::AZIONI_RISERVATE, Conformita_Core_Registro_Automatico::azioni(), 'I nomi riservati sono parte del contratto.' );
+	}
+
+	/**
+	 * Gli ascoltatori che il registro ha agganciato a un aggancio.
+	 *
+	 * Sono chiusure nate dentro la classe delle voci automatiche: si
+	 * riconoscono dalla classe a cui appartengono.
+	 *
+	 * @param string $nome Nome dell'aggancio.
+	 * @return array<int, mixed>
+	 */
+	private function ascoltatori_del_registro( $nome ) {
+		global $wp_filter;
+
+		$trovati = array();
+
+		if ( ! isset( $wp_filter[ $nome ] ) ) {
+			return $trovati;
+		}
+
+		foreach ( $wp_filter[ $nome ]->callbacks as $ascoltatori ) {
+			foreach ( $ascoltatori as $ascoltatore ) {
+				$funzione = $ascoltatore['function'];
+
+				if ( $funzione instanceof Closure ) {
+					$classe = ( new ReflectionFunction( $funzione ) )->getClosureScopeClass();
+
+					if ( $classe && 'Conformita_Core_Registro_Automatico' === $classe->getName() ) {
+						$trovati[] = $funzione;
+					}
+				} elseif ( is_array( $funzione ) && 'Conformita_Core_Registro_Automatico' === $funzione[0] ) {
+					$trovati[] = $funzione;
+				}
+			}
+		}
+
+		return $trovati;
+	}
+
+	/**
+	 * C-224: a voci automatiche spente le operazioni delle righe C-195..C-203
+	 * non scrivono niente. Se scrivessero lo stesso, quelle righe starebbero
+	 * misurando altro.
+	 */
+	public function test_c224_non_vacuita_voci_automatiche() {
+		wp_set_current_user( $this->utente() );
+
+		$id = $this->contenuto( 'pending' );
+
+		$spegni = new ReflectionMethod( 'Conformita_Core_Registro_Automatico', 'spegni' );
+		$spegni->setAccessible( true );
+		$spegni->invoke( null );
+		$this->assertFalse( Conformita_Core_Registro_Automatico::avviato() );
+
+		foreach ( Conformita_Core_Registro_Automatico::agganci() as $aggancio ) {
+			$this->assertSame(
+				array(),
+				$this->ascoltatori_del_registro( $aggancio['aggancio'] ),
+				'Spento vuol dire spento: ' . $aggancio['aggancio']
+			);
+		}
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_status' => 'publish',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_title' => 'Cambiato',
+			)
+		);
+		conformita_core_imposta_fine_pubblicazione( $id, '2026-10-30' );
+		wp_trash_post( $id );
+
+		$this->assertSame( array(), $this->azioni_nuove() );
+
+		Conformita_Core_Registro_Automatico::avvia();
+
+		wp_untrash_post( $id );
+		$this->assertNotSame( array(), $this->azioni_nuove(), 'Riaccese, le voci tornano.' );
+	}
+}

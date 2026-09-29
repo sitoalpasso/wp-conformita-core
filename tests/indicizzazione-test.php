@@ -864,7 +864,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 
 		$this->assertTrue( Conformita_Core_Indicizzazione::avviato(), 'Caricare il file di core accende il meccanismo.' );
 
-		$this->assertTrue( version_compare( CONFORMITA_CORE_VERSIONE_API, '1.4.0', '>=' ), 'La versione dell\'interfaccia che garantisce il divieto e\' la 1.4.0.' );
+		$this->assertSame( '1.5.0', CONFORMITA_CORE_VERSIONE_API, 'La versione dell\'interfaccia che garantisce il divieto e\' la 1.5.0.' );
 		$this->assertSame( CONFORMITA_CORE_VERSIONE_API, conformita_core_versione_api() );
 	}
 
