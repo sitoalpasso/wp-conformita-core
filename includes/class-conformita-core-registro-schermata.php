@@ -113,27 +113,53 @@ final class Conformita_Core_Registro_Schermata {
 	 * e un indirizzo con i filtri costruito da altri non deve poter far credere
 	 * a chi lo apre di vedere una selezione che nessuno ha chiesto.
 	 *
-	 * @return array{filtri: array<string, string>, rifiutati: bool}
+	 * Con il gettone valido, un filtro che non è un testo semplice, o che la
+	 * ripulitura cambierebbe, rende malformata la richiesta intera: la
+	 * schermata lo dice e non mostra voci. Ignorarlo, o ripulirlo in un valore
+	 * diverso da quello scritto, mostrerebbe un elenco più largo o diverso da
+	 * quello chiesto, con l'aria di essere quello giusto. Come nella funzione
+	 * per i componenti, un filtro vuoto è un filtro assente.
+	 *
+	 * @return array{filtri: array<string, string>, rifiutati: bool, malformati: bool}
 	 */
 	public static function filtri_richiesti() {
-		$presenti = array();
+		$presenti   = array();
+		$malformati = false;
 
 		foreach ( self::FILTRI as $nome ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Il gettone si verifica subito sotto, prima di usare qualunque filtro.
-			if ( isset( $_GET[ $nome ] ) && is_string( $_GET[ $nome ] ) ) {
-				// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Come sopra.
-				$valore = sanitize_text_field( wp_unslash( $_GET[ $nome ] ) );
-
-				if ( '' !== $valore ) {
-					$presenti[ $nome ] = $valore;
-				}
+			if ( ! isset( $_GET[ $nome ] ) ) {
+				continue;
 			}
+
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Come sopra.
+			if ( ! is_string( $_GET[ $nome ] ) ) {
+				$malformati = true;
+				continue;
+			}
+
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Come sopra; il valore si confronta con la sua ripulitura e si usa solo se coincidono.
+			$scritto = wp_unslash( $_GET[ $nome ] );
+
+			if ( '' === $scritto ) {
+				continue;
+			}
+
+			$valore = sanitize_text_field( $scritto );
+
+			if ( $valore !== $scritto ) {
+				$malformati = true;
+				continue;
+			}
+
+			$presenti[ $nome ] = $valore;
 		}
 
-		if ( array() === $presenti ) {
+		if ( array() === $presenti && ! $malformati ) {
 			return array(
-				'filtri'    => array(),
-				'rifiutati' => false,
+				'filtri'     => array(),
+				'rifiutati'  => false,
+				'malformati' => false,
 			);
 		}
 
@@ -143,14 +169,24 @@ final class Conformita_Core_Registro_Schermata {
 
 		if ( ! wp_verify_nonce( $gettone, self::AZIONE_FILTRI ) ) {
 			return array(
-				'filtri'    => array(),
-				'rifiutati' => true,
+				'filtri'     => array(),
+				'rifiutati'  => true,
+				'malformati' => false,
+			);
+		}
+
+		if ( $malformati ) {
+			return array(
+				'filtri'     => array(),
+				'rifiutati'  => false,
+				'malformati' => true,
 			);
 		}
 
 		return array(
-			'filtri'    => $presenti,
-			'rifiutati' => false,
+			'filtri'     => $presenti,
+			'rifiutati'  => false,
+			'malformati' => false,
 		);
 	}
 
@@ -187,7 +223,9 @@ final class Conformita_Core_Registro_Schermata {
 		$voci           = array();
 		$totale         = 0;
 
-		$totale = Conformita_Core_Registro::conta( $interrogazione );
+		$totale = $richiesta['malformati']
+			? new WP_Error( 'conformita_core_registro_filtro_non_valido', '' )
+			: Conformita_Core_Registro::conta( $interrogazione );
 
 		if ( is_wp_error( $totale ) ) {
 			$errore = true;

@@ -341,6 +341,40 @@ class Conformita_Core_Registro_Schermata_Test extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( 'Uno dei filtri non è valido', $pagina );
 		$this->assertStringNotContainsString( 'VOCE-QUALUNQUE', $pagina, 'Un filtro sbagliato non mostra tutto.' );
+
+		/*
+		 * Lo stesso per i valori che la pulizia dei testi trasformerebbe: un
+		 * elenco al posto di un testo, un valore che ripulito resta vuoto, un
+		 * valore che ripulito diventa un altro. Nessuno dei tre e' quello che
+		 * chi ha scritto l'indirizzo ha chiesto.
+		 */
+		$gettone = wp_create_nonce( Conformita_Core_Registro_Schermata::AZIONE_FILTRI );
+
+		foreach ( array(
+			'elenco'             => array( '123' ),
+			'vuoto dopo pulizia' => '<b></b>',
+			'altro dopo pulizia' => '<b>123</b>',
+			'spazi ai lati'      => ' 123 ',
+		) as $nome => $valore ) {
+			$pagina = $this->schermata(
+				array(
+					'contenuto' => $valore,
+					Conformita_Core_Registro_Schermata::CAMPO_GETTONE => $gettone,
+				)
+			);
+
+			$this->assertStringContainsString( 'Uno dei filtri non è valido', $pagina, "Caso {$nome}." );
+			$this->assertStringNotContainsString( 'VOCE-QUALUNQUE', $pagina, "Caso {$nome}: la pagina non mostra tutto." );
+		}
+
+		$pagina = $this->schermata(
+			array(
+				'contenuto' => '',
+				Conformita_Core_Registro_Schermata::CAMPO_GETTONE => $gettone,
+			)
+		);
+		$this->assertStringNotContainsString( 'Uno dei filtri non è valido', $pagina, 'Un campo lasciato vuoto nel modulo non e\' un filtro.' );
+		$this->assertStringContainsString( 'VOCE-QUALUNQUE', $pagina );
 	}
 
 	/**
@@ -411,9 +445,20 @@ class Conformita_Core_Registro_Schermata_Test extends WP_UnitTestCase {
 		$id      = self::factory()->post->create(
 			array(
 				'post_type'  => self::TIPO,
-				'post_title' => '<img src=x onerror=alert(2)>',
+				'post_title' => 'Titolo qualunque',
 			)
 		);
+
+		/*
+		 * Il titolo si sostituisce con un filtro invece di salvarlo: salvando,
+		 * WordPress potrebbe ripulirlo, e la prova misurerebbe la sua pulizia
+		 * invece della schermata.
+		 */
+		$titolo = function ( $testo, $post_id = 0 ) use ( $id ) {
+			return (int) $post_id === $id ? '<img src=x onerror=alert(2)>' : $testo;
+		};
+		add_filter( 'the_title', $titolo, 10, 2 );
+		$this->assertSame( '<img src=x onerror=alert(2)>', get_the_title( $id ), 'Precondizione: il titolo pericoloso arriva alla schermata.' );
 
 		$this->voce(
 			"<script>alert(1)</script>\nSeconda riga",
@@ -431,7 +476,11 @@ class Conformita_Core_Registro_Schermata_Test extends WP_UnitTestCase {
 		$this->assertStringContainsString( '&lt;script&gt;alert(1)&lt;/script&gt;', $pagina );
 		$this->assertStringContainsString( '&lt;/script&gt;<br />', $pagina, 'L\'a capo della motivazione diventa un a capo della pagina.' );
 		$this->assertStringNotContainsString( '<b onclick', $pagina );
+		$this->assertStringContainsString( 'nota: &lt;b onclick=&quot;alert(3)&quot;&gt;x&lt;/b&gt;', $pagina, 'I dettagli si vedono, come testo.' );
 		$this->assertStringNotContainsString( '<img src=x', $pagina );
+		$this->assertStringContainsString( '&lt;img src=x onerror=alert(2)&gt;', $pagina, 'Il titolo si vede, come testo.' );
+
+		remove_filter( 'the_title', $titolo, 10 );
 	}
 
 	/**
