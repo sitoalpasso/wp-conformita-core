@@ -1,7 +1,7 @@
 # Meccanismo di indicizzazione: scheda di lavorazione
 
 **Repository: `wp-conformita-core`.** Unità S9 del piano, righe di collaudo C-80..C-85 e
-C-225..C-230 e C-232..C-241, elencate al punto 11.
+C-225..C-230 e C-232..C-244, elencate al punto 11.
 
 **Nel componente dell'albo pretorio non si implementa niente di tutto questo.** L'albo
 dichiara già la propria politica (`vietata`) quando registra la sua sezione: da questa
@@ -9,8 +9,8 @@ versione quella dichiarazione produce effetti. L'albo, in un'altra unità, dovr�
 richiedere la versione `1.4.0` dell'interfaccia, perché è la prima che garantisce il
 divieto.
 
-**Stato: costruita, tre giri di revisione indipendente recepiti (punti 13, 14 e 15), in
-attesa del quarto.** Le sezioni sono al passato e dicono quello che il codice fa.
+**Stato: costruita, quattro giri di revisione indipendente recepiti (punti 13..16), in attesa
+del quinto.** Il punto 17 elenca, selettore per selettore, come la mappa del sito è coperta. Le sezioni sono al passato e dicono quello che il codice fa.
 
 ---
 
@@ -35,7 +35,8 @@ pagina iniziale, porta l'avviso se fra quello che mostra c'è un atto. Sulla bus
 generale viaggia sempre anche su una riga tutta sua, così un altro plugin che riscrive la
 busta non riesce a cancellarlo. La mappa del sito perde per intero i tipi di contenuto delle
 sezioni vietate, e nessun'altra parte della mappa può elencare un atto, nemmeno se un plugin
-prova a leggerli con i filtri spenti. Non si usa `robots.txt`, di proposito: un
+prova a leggerli con i filtri spenti: l'ultimo controllo guarda ogni voce che sta per
+entrare nella mappa, qualunque sia la strada da cui è arrivata. Non si usa `robots.txt`, di proposito: un
 indirizzo escluso lì non viene visitato, quindi il motore non legge mai l'avviso, e se
 qualcuno lo collega da fuori l'indirizzo può finire nell'indice lo stesso.
 
@@ -43,7 +44,7 @@ qualcuno lo collega da fuori l'indirizzo può finire nell'indice lo stesso.
 due sezioni finte con politiche opposte e controllano sempre le due insieme: la pagina
 vietata deve avere l'avviso, quella consentita non deve averlo, e le pagine normali del sito
 nemmeno. Per dimostrare che le prove non sono di cartone, il codice è stato rotto di
-proposito in trentotto modi diversi (avviso tolto dalla pagina, avviso messo dappertutto,
+proposito in quarantasei modi diversi (avviso tolto dalla pagina, avviso messo dappertutto,
 mappa non filtrata, feed dimenticati, allegati che non risalgono all'atto, `robots.txt`
 toccato, spegnimento a metà, riga dell'avviso mandata in modo da cancellare le altre, avviso
 saltato mentre si manda il file, e altri): ogni volta almeno una prova è diventata rossa.
@@ -61,7 +62,8 @@ tabella è al punto 12.
 | `conformita-core.php` | carica e accende il meccanismo; versione dell'interfaccia da `1.3.0` a `1.4.0` |
 | `includes/class-conformita-core-sezioni.php` | la registrazione di una sezione rifiuta a meccanismo spento (C-85) |
 | `includes/class-conformita-core-consegna.php` | il file di un contenuto vietato esce con `X-Robots-Tag: noindex` (C-228); le intestazioni escono dal punto comune anche nelle prove (C-240) |
-| `tests/indicizzazione-test.php` | nuovo: C-80..C-85, C-225..C-227, C-229..C-239, C-241 |
+| `includes/class-conformita-core-mappa-contenuti.php` | nuovo: il fornitore dei contenuti della mappa di WordPress, che scarta le voci svuotate (C-244) |
+| `tests/indicizzazione-test.php` | nuovo: C-80..C-85, C-225..C-227, C-229..C-239, C-241..C-244 |
 | `tests/consegna-test.php` | C-228, C-240 |
 | `tests/class-conformita-core-risposta-registrata.php`, `tests/bootstrap.php` | nuovo: raccoglie le righe emesse con le regole di sostituzione di `header()` |
 | `tests/filtro-scadenza-test.php`, `tests/filtro-scadenza-non-vacuita-test.php` | la sezione usata dalle prove sulla scadenza nella mappa diventa `consentita` (punto 7) |
@@ -96,7 +98,7 @@ accadere, perché il meccanismo si accende al caricamento del file di core.
 ## 4. Come funziona
 
 Si accende al caricamento del file di core, subito dopo il motore di scadenza e per la
-stessa ragione: non dipende dall'ordine in cui WordPress carica i plugin (C-236). Sei
+stessa ragione: non dipende dall'ordine in cui WordPress carica i plugin (C-236). Otto
 agganci, in un elenco solo letto dall'accensione, dallo spegnimento e dalla domanda "è
 acceso?" (C-230):
 
@@ -108,6 +110,8 @@ acceso?" (C-230):
 | `wp_sitemaps_post_types` | toglie dalla mappa del sito i tipi delle sezioni vietate (C-82) |
 | `pre_get_posts` | mentre si costruisce la mappa, toglie i tipi vietati dalle interrogazioni che la leggono, anche con i filtri spenti (C-238) |
 | `the_posts` | mentre si costruisce la mappa, toglie i contenuti vietati da quello che le interrogazioni restituiscono: seconda difesa (C-238) |
+| `wp_sitemaps_posts_entry` | svuota la voce della mappa di un contenuto vietato, qualunque interrogazione l'abbia portato: ultima difesa (C-244) |
+| `wp_sitemaps_add_provider` | mette al posto del fornitore dei contenuti della mappa di WordPress la sua versione che scarta le voci svuotate (C-244) |
 
 **"È acceso" guarda gli agganci, non una variabile.** Se un altro componente ne toglie uno,
 il meccanismo non risulta acceso e la registrazione di una sezione è rifiutata; riaccenderlo
@@ -171,9 +175,23 @@ ricercabili; gli allegati, escludendo quelli appesi a un contenuto vietato; e l'
 vuoto, che non restituisce niente invece di diventare "gli articoli". Per gli allegati si
 corregge il vincolo sul padre che WordPress applica davvero, perché ne applica uno solo: un
 padre singolo vietato svuota la lettura, un elenco di padri ammessi perde quelli vietati (e
-se resta vuoto la lettura è vuota), e soltanto senza i due si aggiunge l'esclusione (C-241). I contenuti vietati
-restituiti comunque si tolgono ancora su `the_posts`. Tutto soltanto mentre la mappa si
-costruisce e sulle interrogazioni secondarie (C-238).
+se resta vuoto la lettura è vuota), e soltanto senza i due si aggiunge l'esclusione (C-241);
+nell'elenco dei padri lo zero resta, perché vuol dire "allegati senza contenuto" (C-243). Un
+contenuto scelto per identificativo (`p`, `page_id`, `attachment_id`) si guarda direttamente:
+se è vietato, la lettura si svuota (C-242). Svuotare vuol dire chiedere un tipo che non
+esiste, dopo aver tolto i selettori che WordPress fa prevalere: `post__in` con zero da solo
+non basta, perché `p` vince su di lui. I contenuti vietati restituiti comunque si tolgono
+ancora su `the_posts`. Tutto soltanto mentre la mappa si costruisce e sulle interrogazioni
+secondarie (C-238).
+
+**L'ultima difesa della mappa** non guarda come la lettura è chiesta, ma che cosa sta per
+diventare un indirizzo: WordPress passa ogni contenuto letto da `wp_sitemaps_posts_entry`,
+anche con i filtri spenti, e lì la voce di un contenuto vietato si svuota. Il fornitore dei
+contenuti della mappa, sostituito da core con una sua versione identica tranne che per questo,
+scarta le voci vuote. Se un altro componente ha già sostituito il fornitore, core non lo tocca
+e nella mappa resta una voce senza indirizzo, che non porta nessun motore da nessuna parte
+(C-244). Le difese sull'interrogazione restano: tengono giusti il numero delle pagine della
+mappa e l'ordine, e ciascuna ha le sue prove, misurate con l'ultima difesa spenta.
 
 ## 5. Dati letti e scritti
 
@@ -252,10 +270,10 @@ solo per le sezioni che nella mappa ci sono. Le tre prove ora girano su una sezi
   togliere il divieto** (punto 4). La prova sul sito vero lo scopre. Sulla busta il caso è più
   stretto: la riga propria esce per ultima, quindi la può togliere solo chi chiama `header()`
   dopo di lei, cioè un aggancio di `send_headers` alla stessa priorità o codice che gira dopo.
-- **Non raggiunge la mappa scritta a mano.** Un componente che compone da sé l'elenco degli
-  indirizzi di una pagina della mappa (`wp_sitemaps_posts_pre_url_list`) non passa da nessuna
-  interrogazione. Neppure un aggancio di `pre_get_posts` registrato dopo di lui, se in più
-  spegne i filtri.
+- **Non raggiunge la mappa scritta al posto di WordPress.** Un componente che compone da sé
+  l'elenco degli indirizzi di una pagina della mappa (`wp_sitemaps_posts_pre_url_list`), che
+  sostituisce il fornitore dei contenuti, o che riscrive la voce dopo l'ultima difesa, alla
+  stessa priorità, sta scrivendo lui la mappa. Il punto 17 li elenca.
 - **Non copre le tassonomie.** Core non ne registra; quelle dell'albo sono già non pubbliche,
   quindi senza pagine e fuori dalla mappa.
 - **I risultati della ricerca interna** li copre già WordPress, che mette `noindex` su ogni
@@ -298,6 +316,8 @@ Tre prove, da aggiungere al collaudo di rilascio.
 | Un altro componente ha già scritto `X-Robots-Tag` per un motore specifico, anche mescolato a direttive generali | la riga generale porta `noindex`, quella altrui esce intera a parte (C-233) |
 | Un altro componente sostituisce `X-Robots-Tag` su `send_headers` | la sua riga resta, e accanto esce la riga generale `noindex` propria (C-239) |
 | Un componente allarga la mappa di un altro tipo ai tipi vietati, anche con i filtri spenti | i tipi vietati escono dall'interrogazione; con i filtri accesi c'è anche la seconda difesa (C-238) |
+| Un componente personalizza la lettura della mappa in un modo che le difese sull'interrogazione non prevedono | l'ultima difesa svuota la voce e il fornitore la scarta (C-244) |
+| Un altro componente ha sostituito il fornitore dei contenuti della mappa | la voce del contenuto vietato resta senza indirizzo (C-244) |
 | Un allegato punta a un contenuto che non esiste più | nessun divieto preso in prestito da altri contenuti (C-234) |
 | Un plugin SEO sostituisce mappa e metatag | resta la busta; la mappa si controlla a mano (punto 9) |
 | Un tipo vietato e uno consentito nello stesso elenco | vince il divieto sull'elenco; le pagine consentite restano indicizzabili una per una |
@@ -307,7 +327,7 @@ Tre prove, da aggiungere al collaudo di rilascio.
 C-80..C-85 sono le righe del catalogo scritte quando l'unità è stata pianificata. C-225..C-230
 le ha fatte emergere il lavoro, cercando ogni strada da cui un motore arriva ai contenuti di
 una sezione; C-232..C-238 il primo giro di revisione (punto 13), C-239 e C-240 il secondo
-(punto 14), C-241 il terzo (punto 15). Numerazione continuata dopo
+(punto 14), C-241 il terzo (punto 15), C-242..C-244 il quarto (punto 16). Numerazione continuata dopo
 C-224, l'ultima del registro delle modifiche, per non sovrapporsi a un ramo ancora aperto. C-231 non è di questa unità: è della correzione della guardia di dipendenza, rinumerata lì
 per lo stesso motivo.
 
@@ -324,17 +344,20 @@ per lo stesso motivo.
 | C-227 | fatto | Pagina di un allegato: divieto se il contenuto a cui appartiene è vietato; nessun divieto per l'allegato di un contenuto consentito, di un articolo, o senza contenuto |
 | C-228 | fatto | File consegnato dal punto di consegna: `X-Robots-Tag: noindex` se il contenuto è vietato, nessuna intestazione se è consentito; le due consegne riescono tutte e due |
 | C-229 | fatto | `robots.txt` identico a meccanismo acceso e spento, senza il tipo vietato |
-| C-230 | fatto | Acceso, i sei agganci rispondono alla loro priorità; spento, nessuno risponde e il divieto sparisce; riacceso, torna |
+| C-230 | fatto | Acceso, gli otto agganci rispondono alla loro priorità; spento, nessuno risponde e il divieto sparisce; riacceso, torna |
 | C-232 | fatto | Pagina iniziale ed elenco per autore allargati da un componente ai tipi vietati, feed di tutti i tipi: divieto, dopo aver verificato che il contenuto vietato sia davvero mostrato; gli stessi elenchi senza contenuti vietati: nessun divieto |
 | C-233 | fatto | Composizione di `X-Robots-Tag` con un valore già scritto da altri: generale senza e con `noindex`, `none`, direttiva con valore, nome in minuscolo, valore rivolto a un motore con `noindex` e con `nofollow`, valori misti (generale poi motore, con e senza `noindex` in coda, direttiva con valore poi motore). Una sola riga generale con il divieto, e il valore che nomina un motore messo da parte intero; sui contenuti consentiti niente cambia |
 | C-234 | fatto | Allegato con un padre che non esiste più, con un contenuto vietato o l'allegato stesso come contenuto globale: nessun divieto preso in prestito; nemmeno con identificativo zero o vuoto |
-| C-235 | fatto | Tolto da fuori un aggancio qualsiasi dei sei: il meccanismo non risulta acceso, la registrazione di una sezione è rifiutata, la riaccensione rimette l'aggancio |
+| C-235 | fatto | Tolto da fuori un aggancio qualsiasi degli otto: il meccanismo non risulta acceso, la registrazione di una sezione è rifiutata, la riaccensione rimette l'aggancio |
 | C-236 | fatto | Caricare il file di core accende il meccanismo senza altre chiamate; la versione dell'interfaccia è almeno `1.4.0` e coincide con quella della funzione pubblica |
 | C-237 | fatto | Incorporamento di un contenuto vietato: divieto nell'intestazione, di uno consentito: nessuno. Metatag tolto dalla testata: resta l'intestazione |
 | C-238 | fatto | Mappa degli articoli allargata da un componente: tipi aggiunti con filtri accesi e spenti, `any` con filtri spenti, tipo sostituito con quello vietato, allegati con lo stato allargato, allargamento dopo la restrizione. Il contenuto vietato (o il suo allegato) non c'è, l'articolo (o il suo allegato) sì, e a meccanismo spento il vietato c'era; col tipo sostituito la lettura è vuota; fuori dalla mappa la stessa interrogazione allargata non si tocca |
 | C-239 | fatto | Righe `X-Robots-Tag` che escono da una pagina vietata: un divieto generale c'è sempre, anche quando un altro componente sostituisce l'intestazione su `send_headers` con un valore per un motore, misto o `index, follow`; la sua riga resta com'è; una riga mista preparata esce intera. Da una pagina consentita non esce niente di core |
 | C-240 | fatto | Righe che escono con il file consegnato: `noindex` dal punto pubblico e dal punto amministrativo per il contenuto vietato, nessuna riga per il consentito; le intestazioni del file escono davvero |
 | C-241 | fatto | Mappa che legge allegati con i filtri spenti, scegliendoli per contenuto padre: padri misti e inclusione accanto a un'esclusione, resta solo l'allegato dell'articolo; solo padri vietati o padre singolo vietato, lettura vuota; padre singolo consentito, l'allegato resta. A meccanismo spento l'allegato del vietato c'era |
+| C-242 | fatto | Mappa letta scegliendo un contenuto per identificativo, con i filtri spenti: `p` e `page_id` sul tipo vietato, `p` fra tipi misti, allegato del vietato per `attachment_id`, per `p` con il padre, per `page_id`, per nome. A meccanismo spento il contenuto scelto c'era, acceso la lettura è vuota; un articolo scelto per identificativo resta |
+| C-243 | fatto | Allegati senza contenuto inclusi con il padre zero: con `[0, vietato]` resta solo l'orfano, con `[0, vietato, articolo]` restano l'orfano e l'allegato dell'articolo, con il padre singolo zero resta l'orfano |
+| C-244 | fatto | Ultima difesa: il fornitore della mappa è quello di core; con le difese sull'interrogazione scavalcate (allargamento dopo la restrizione con i filtri spenti) il vietato arriva alle voci ma non nella mappa, nessuna voce vuota, l'articolo resta; le voci dei contenuti consentiti e gli altri fornitori non si toccano |
 
 "Fatto" vuol dire verde nella suite locale (WordPress 6.5, PHP 8.4). Diventa definitivo con
 la verifica continua verde sul commit di punta.
@@ -350,15 +373,15 @@ loro verifica è questa tabella.
 | G1. Metatag senza divieto | C-80, C-81, C-83, C-84, C-225, C-227, C-230 |
 | G2. Intestazione senza divieto | C-80, C-81, C-83, C-84, C-225, C-226, C-227, C-230 |
 | G3. Politica ignorata, divieto su ogni tipo gestito | C-81, C-82, C-83, C-225, C-226, C-227, C-228, e le tre di S4 sulla mappa |
-| G4. Divieto anche sui contenuti fuori dalle sezioni | C-84, C-226, C-227, C-232, C-238, C-241 |
+| G4. Divieto anche sui contenuti fuori dalle sezioni | C-84, C-226, C-227, C-232, C-238, C-241, C-242, C-243 |
 | G5. Mappa non filtrata | C-82, C-83 |
 | G6. Registrazione senza guardia | C-85 |
 | G7. Elenchi del tipo dimenticati | C-225 |
 | G8. Feed dimenticati | C-226 |
-| G9. L'allegato non risale al contenuto | C-227, C-228, C-240 |
+| G9. L'allegato non risale al contenuto | C-227, C-228, C-240, C-242 |
 | G10. File consegnati senza divieto | C-228, C-240 |
 | G11. Esclusione aggiunta a `robots.txt` | C-229, C-230 |
-| G12. Spegnimento che toglie un aggancio solo | C-82, C-230, C-238, C-241 |
+| G12. Spegnimento che toglie un aggancio solo | C-82, C-230, C-238, C-241..C-244 |
 | G13. Feed misto: vince il consentito | C-226, C-232 |
 | G14. Elenchi misti: i contenuti mostrati non si guardano | C-232 |
 | G15. Direttiva per un motore presa per generale | C-233, C-239 |
@@ -374,25 +397,34 @@ loro verifica è questa tabella.
 | G25. Riga generale propria mandata in sostituzione | C-239 (emissione) |
 | G26. Righe per un motore mandate in sostituzione | C-239 (emissione) |
 | G27. Riga mista letta solo nella prima parte | C-233 (composizione), C-239 (emissione) |
-| G28. Restrizione della mappa su `pre_get_posts` assente | C-238, C-241 |
+| G28. Restrizione della mappa su `pre_get_posts` assente | C-238, C-241, C-242, C-243 |
 | G29. `any` non gestito | C-238 |
-| G30. Allegati dei contenuti vietati non esclusi | C-238, C-241 |
+| G30. Allegati dei contenuti vietati non esclusi | C-238, C-241, C-242, C-243 |
 | G31. Elenco dei tipi svuotato e lasciato aperto | C-238 |
 | G32. `X-Robots-Tag` saltata mentre si mandano le intestazioni del file | C-240 (emissione) |
 | G33. Divieto sui file tolto soltanto dal punto amministrativo | C-240 (emissione) |
 | G34. Riga propria emessa solo se `wp_headers` ha messo qualcosa da parte | C-239 (emissione) |
 | G35. Restrizione della mappa anche fuori dalla mappa | C-238, tre prove di S4 sulle interrogazioni e cinque di S5 |
-| G36. Inclusione dei padri ignorata: solo l'esclusione, che WordPress scarta | C-241 |
+| G36. Inclusione dei padri ignorata: solo l'esclusione, che WordPress scarta | C-241, C-243 |
 | G37. Padre singolo ignorato | C-241 |
 | G38. Inclusione rimasta vuota lasciata aperta | C-241 |
+| G39. Selettori per identificativo ignorati | C-242 |
+| G40. Lettura svuotata con il solo `post__in` | C-242 |
+| G41. Zero tolto dall'elenco dei padri | C-243 |
+| G42. Ultima difesa sulle voci assente | C-244 |
+| G43. Voci vuote lasciate nella mappa | C-244 |
+| G44. Fornitore della mappa non sostituito | C-244 |
+| G45. Allegato scelto per nome ignorato | C-242 |
+| G46. Ultima difesa che svuota anche le voci consentite | C-82, C-84, C-244, e tre prove di S4 sulla mappa |
 
 Composizione ed emissione sono coperte da prove diverse, ed è voluto: C-233 guarda come si
 compone la riga preparata, C-239 e C-240 guardano le righe che escono. G25, G26, G32 e G33
 lasciano intatta la risposta preparata, e infatti nessuna prova sulla composizione le
 prende: le prendono solo le prove sull'emissione, che il secondo giro ha chiesto per questo.
 
-Dopo le correzioni del terzo giro tutte le righe, G1..G38, sono state rieseguite di nuovo,
-tutte rosse. Dopo le correzioni del secondo giro tutte le righe, G1..G35, erano state rieseguite sul codice
+Dopo le correzioni del quarto giro tutte le righe, G1..G46, sono state rieseguite, tutte
+rosse. Dopo le correzioni del terzo giro le righe G1..G38 erano state rieseguite, tutte
+rosse. Dopo le correzioni del secondo giro tutte le righe, G1..G35, erano state rieseguite sul codice
 nuovo: tutte rosse dove indicato. G31 all'inizio è rimasta verde, perché il caso scelto (la
 mappa chiesta per il tipo vietato) si fermava già al filtro dei tipi della mappa; il caso
 giusto è la mappa di un altro tipo sostituito con quello vietato, che ora c'è.
@@ -452,10 +484,59 @@ faceva passare l'allegato di un atto: WordPress applica un solo vincolo sul padr
 l'inclusione vince sull'esclusione aggiunta dalla restrizione. Ora si corregge il vincolo
 applicato davvero, compreso il padre singolo, che vince su entrambi. C-241, guasti G36..G38.
 
-## 16. Cosa manca
+## 16. Il quarto giro di revisione indipendente
+
+Sul commit `eefa5ed`, due rilievi, tutti e due sulla restrizione della mappa.
+
+1. **Lettura svuotata scavalcabile.** La restrizione chiedeva "niente" con `post__in` a zero,
+   ma WordPress fa vincere `p` (e `page_id`, `attachment_id`) su `post__in`. Ora un contenuto
+   scelto per identificativo si guarda direttamente, e svuotare vuol dire togliere i selettori
+   che prevalgono e chiedere un tipo che non esiste. C-242.
+2. **Allegati senza contenuto persi.** Nell'elenco dei padri lo zero veniva scartato insieme
+   ai padri vietati. Ora resta. C-243.
+
+Quattro giri di fila hanno trovato un modo nuovo di personalizzare la lettura della mappa. La
+causa comune è che le difese guardavano come la lettura è chiesta, e i modi di chiederla sono
+molti. Per questo c'è ora un'ultima difesa che guarda che cosa ne esce: C-244, descritta al
+punto 4. Il punto 17 rifà il giro di tutti i selettori.
+
+## 17. La mappa del sito, selettore per selettore
+
+I modi in cui un componente può personalizzare la lettura dei contenuti della mappa di
+WordPress, e che cosa li copre. "Ultima difesa" vuol dire che, anche se la difesa
+sull'interrogazione mancasse, la voce del contenuto vietato si svuota e non diventa un
+indirizzo (C-244).
+
+| Selettore | Che cosa fa in WordPress | Come è coperto | Prove |
+|---|---|---|---|
+| `post_type` con tipi vietati | legge quei tipi | i tipi vietati si tolgono; se non resta niente la lettura si svuota | C-238 |
+| `post_type` = `any`, o vuoto con una tassonomia | legge tutti i tipi ricercabili | si scrive l'elenco esplicito e si tolgono i vietati | C-238 |
+| `p` | sceglie un contenuto e vince su `post__in` | se il contenuto scelto è vietato (anche un allegato di un vietato) la lettura si svuota | C-242 |
+| `page_id` | sceglie un contenuto e riscrive anche i vincoli sul padre | come `p` | C-242 |
+| `attachment_id` (e `subpost_id`, che WordPress converte) | sceglie un allegato e vince su `p` | come `p` | C-242 |
+| `attachment` (per nome) | con il tipo vuoto, WordPress cerca un allegato | si applica l'esclusione degli allegati dei vietati | C-242 |
+| `name`, `pagename` | scelgono per nome o percorso; un percorso che porta a un allegato fa cambiare tipo a WordPress | esclusione degli allegati dei vietati; il cambio di tipo lo copre l'ultima difesa | C-244 |
+| `post__in` | restringe | nessun rischio proprio; quando la lettura si svuota viene riscritto | C-242 |
+| `post_parent` | un padre solo, vince sugli altri vincoli sul padre | se è un vietato la lettura si svuota | C-241 |
+| `post_parent__in` | elenco dei padri, vince sull'esclusione | si tolgono i vietati, lo zero resta; se non resta niente la lettura si svuota | C-241, C-243 |
+| `post_parent__not_in` | esclusione dei padri | si aggiungono i vietati, solo senza i due vincoli sopra | C-238, C-241 |
+| `post_status` allargato | fa entrare gli allegati | gli allegati dei vietati si escludono | C-238, C-241 |
+| `suppress_filters` | spegne `the_posts` e i filtri sul testo della lettura | non spegne `pre_get_posts` né la voce della mappa | C-238, C-241..C-244 |
+| un aggancio di `pre_get_posts` dopo la restrizione, o i filtri sul testo della lettura | cambiano la lettura dopo la restrizione | `the_posts` se i filtri sono accesi, e comunque l'ultima difesa | C-238, C-244 |
+| `wp_sitemaps_posts_pre_url_list` | il componente scrive da sé l'elenco degli indirizzi | **non coperto**: la mappa la scrive il componente | punto 8 |
+| un altro fornitore dei contenuti al posto di quello di WordPress | il componente costruisce la mappa | l'ultima difesa svuota ancora le voci, ma non le toglie | C-244 |
+| un filtro sulla voce dopo l'ultima difesa, alla stessa priorità | riscrive la voce | **non coperto**, stesso limite della priorità massima (punto 4) | punto 8 |
+
+**Conclusione.** Nella mappa di WordPress un contenuto vietato non diventa un indirizzo,
+qualunque lettura lo porti. Restano fuori soltanto i casi in cui un componente scrive la mappa
+al posto di WordPress, e per questi vale la prova sul sito vero del punto 9 (terza prova),
+insieme al divieto sulla pagina, che il motore rispetta anche se trova l'indirizzo in una
+mappa.
+
+## 18. Cosa manca
 
 - La verifica continua sul commit di punta: da riportare quando arriva.
-- Il quarto giro di revisione indipendente.
+- Il quinto giro di revisione indipendente.
 - L'albo deve richiedere `1.4.0` (unità A10 del piano, che verifica il divieto sulle pagine
   vere dell'albo).
 - Le tre prove del punto 9 vanno aggiunte al collaudo di rilascio.
