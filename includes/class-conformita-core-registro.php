@@ -152,11 +152,14 @@ final class Conformita_Core_Registro {
 	/**
 	 * Crea la tabella, e registra la versione solo se la tabella c'è davvero.
 	 *
-	 * La versione si scrive dopo aver riletto l'elenco delle tabelle: scriverla
-	 * sulla fiducia farebbe credere installato un registro che non esiste, e il
-	 * controllo all'avvio non riproverebbe più.
+	 * La versione si scrive dopo aver riletto l'elenco delle tabelle e il
+	 * vincolo di unicità sulla chiave: scriverla sulla fiducia farebbe credere
+	 * installato un registro che non esiste, o che non ferma due voci con la
+	 * stessa chiave, e il controllo all'avvio non riproverebbe più. Una tabella
+	 * già presente con una forma diversa, che dbDelta non riesce ad allineare,
+	 * per esempio per mancanza di permessi, non è un registro installato.
 	 *
-	 * @return bool Vero se al termine la tabella esiste.
+	 * @return bool Vero se al termine la tabella esiste con il suo vincolo.
 	 */
 	public static function installa() {
 		global $wpdb;
@@ -196,13 +199,37 @@ KEY riferimento (riferimento)
 ) {$collate};"
 		);
 
-		if ( ! self::tabella_presente() ) {
+		if ( ! self::tabella_presente() || ! self::vincolo_chiave_presente() ) {
+			delete_option( self::OPZIONE_SCHEMA );
 			return false;
 		}
 
 		update_option( self::OPZIONE_SCHEMA, self::VERSIONE_SCHEMA, true );
 
 		return true;
+	}
+
+	/**
+	 * La chiave ha il suo vincolo di unicità, per intero e da sola.
+	 *
+	 * Un indice che copre solo l'inizio della chiave, o la chiave insieme a
+	 * un'altra colonna, non ferma due voci con la stessa chiave.
+	 *
+	 * @return bool
+	 */
+	private static function vincolo_chiave_presente() {
+		global $wpdb;
+
+		$tabella = self::tabella();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Verifica di struttura sulla tabella propria; il nome viene dal prefisso di WordPress.
+		$indici = $wpdb->get_results( "SHOW INDEX FROM `{$tabella}` WHERE Key_name = 'chiave'", ARRAY_A );
+
+		return is_array( $indici )
+			&& 1 === count( $indici )
+			&& 'chiave' === $indici[0]['Column_name']
+			&& null === $indici[0]['Sub_part']
+			&& '0' === (string) $indici[0]['Non_unique'];
 	}
 
 	/**
@@ -305,6 +332,17 @@ KEY riferimento (riferimento)
 				if ( null !== $esistente ) {
 					return self::errore_chiave( $esistente );
 				}
+			}
+
+			/*
+			 * La versione scritta dice che la tabella c'è, e l'avvio non la
+			 * ricontrolla. Se la scrittura fallisce perché la tabella è
+			 * sparita, per esempio dopo un ripristino parziale, la versione si
+			 * toglie: l'avvio successivo reinstalla. Con la tabella al suo
+			 * posto il guasto è di un altro genere e la versione resta.
+			 */
+			if ( ! self::tabella_presente() ) {
+				delete_option( self::OPZIONE_SCHEMA );
 			}
 
 			return self::errore( 'conformita_core_registro_non_scritto', __( 'Registro: la voce non è stata scritta nella banca dati.', 'conformita-core' ) );

@@ -1088,9 +1088,31 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		global $wpdb;
 		$tabella = Conformita_Core_Registro::tabella();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: struttura della tabella.
-		$indici = $wpdb->get_results( "SHOW INDEX FROM {$tabella} WHERE Column_name = 'chiave'", ARRAY_A );
-		$this->assertCount( 1, $indici );
+		$indici = $wpdb->get_results( "SHOW INDEX FROM {$tabella} WHERE Key_name = 'chiave'", ARRAY_A );
+		$this->assertCount( 1, $indici, 'L\'indice della chiave ha una colonna sola.' );
+		$this->assertSame( 'chiave', $indici[0]['Column_name'] );
+		$this->assertNull( $indici[0]['Sub_part'], 'L\'indice copre la chiave intera, non un suo inizio.' );
 		$this->assertSame( '0', (string) $indici[0]['Non_unique'], 'Due scritture contemporanee le ferma il vincolo di unicita\' della banca dati.' );
+
+		/*
+		 * La stessa cosa provata dal lato del fatto: una seconda riga con la
+		 * stessa chiave, scritta saltando il controllo del codice, la rifiuta
+		 * la banca dati.
+		 */
+		$errori = $wpdb->suppress_errors( true );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: si scavalca il codice per provare il vincolo.
+		$doppia = $wpdb->insert(
+			$tabella,
+			array(
+				'istante' => '2026-10-02 09:15:30',
+				'sezione' => self::SEZIONE,
+				'azione'  => 'effetto_sul_periodo',
+				'origine' => 'componente',
+				'chiave'  => 'effetto_sul_periodo:' . $id,
+			)
+		);
+		$wpdb->suppress_errors( $errori );
+		$this->assertFalse( $doppia, 'La banca dati rifiuta da sola la chiave ripetuta.' );
 	}
 
 	/**
@@ -1296,6 +1318,8 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	 * tabella non c'e'.
 	 */
 	public function test_c222_installazione() {
+		global $wpdb;
+
 		$this->assertTrue( Conformita_Core_Registro::tabella_presente() );
 		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ) );
 
@@ -1338,6 +1362,107 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			'Su una tabella gia\' allineata l\'installazione non cambia la struttura: ripeterla a ogni aggiornamento non costa niente.'
 		);
 		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ) );
+
+		/*
+		 * Una tabella che c'e' ma non ha il vincolo di unicita' sulla chiave,
+		 * per esempio preesistente e non aggiornabile per mancanza di permessi,
+		 * non e' un registro installato: due scritture contemporanee potrebbero
+		 * portare la stessa chiave.
+		 */
+		delete_option( Conformita_Core_Registro::OPZIONE_SCHEMA );
+
+		$senza_vincolo = function ( $sql ) {
+			global $wpdb;
+
+			if ( 0 === strpos( $sql, 'SHOW INDEX FROM' ) && false !== strpos( $sql, Conformita_Core_Registro::tabella() ) ) {
+				return str_replace( Conformita_Core_Registro::tabella(), $wpdb->posts, $sql );
+			}
+			return $sql;
+		};
+
+		// dbDelta, ingannato allo stesso modo, prova ad aggiungere indici che ci sono gia': i suoi errori non interessano qui.
+		$errori = $wpdb->suppress_errors( true );
+		add_filter( 'query', $senza_vincolo );
+		$esito = Conformita_Core_Registro::installa();
+		remove_filter( 'query', $senza_vincolo );
+		$wpdb->suppress_errors( $errori );
+
+		$this->assertFalse( $esito, 'Senza il vincolo sulla chiave l\'installazione non riesce.' );
+		$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'E la versione non si scrive.' );
+		$this->assertTrue( Conformita_Core_Registro::installa(), 'Controllo positivo.' );
+
+		/*
+		 * Lo stesso con un indice che si chiama come quello giusto ma non
+		 * vincola la chiave intera e da sola. La forma si legge da una tabella
+		 * di prova con quell'indice.
+		 */
+		$finta = $wpdb->prefix . 'prova_indice_chiave';
+
+		foreach ( array(
+			'solo l\'inizio della chiave'     => 'UNIQUE KEY chiave (chiave(10))',
+			'la chiave con un\'altra colonna' => 'UNIQUE KEY chiave (chiave,id)',
+			'senza unicita\''                 => 'KEY chiave (chiave)',
+		) as $caso => $indice ) {
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: tabella di prova con un indice sbagliato.
+			$wpdb->query( "DROP TABLE IF EXISTS {$finta}" );
+			$wpdb->query( "CREATE TABLE {$finta} (id bigint(20) unsigned NOT NULL, chiave varbinary(191) DEFAULT NULL, PRIMARY KEY  (id), {$indice})" );
+			$this->assertNotEmpty( $wpdb->get_results( "SHOW INDEX FROM {$finta} WHERE Key_name = 'chiave'" ), 'Precondizione: la tabella di prova ha l\'indice ' . $caso . '.' );
+			// phpcs:enable
+
+			$verso_finta = function ( $sql ) use ( $finta ) {
+				if ( 0 === strpos( $sql, 'SHOW INDEX FROM' ) && false !== strpos( $sql, Conformita_Core_Registro::tabella() ) ) {
+					return str_replace( Conformita_Core_Registro::tabella(), $finta, $sql );
+				}
+				return $sql;
+			};
+
+			delete_option( Conformita_Core_Registro::OPZIONE_SCHEMA );
+			$errori = $wpdb->suppress_errors( true );
+			add_filter( 'query', $verso_finta );
+			$esito = Conformita_Core_Registro::installa();
+			remove_filter( 'query', $verso_finta );
+			$wpdb->suppress_errors( $errori );
+
+			$this->assertFalse( $esito, 'Indice con ' . $caso . ': l\'installazione non riesce.' );
+			$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'Indice con ' . $caso . ': la versione non si scrive.' );
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- prova: si toglie la tabella di prova.
+		$wpdb->query( "DROP TABLE IF EXISTS {$finta}" );
+		$this->assertTrue( Conformita_Core_Registro::installa(), 'Controllo positivo sulla tabella vera.' );
+
+		/*
+		 * Una versione scritta e una tabella sparita, per esempio dopo un
+		 * ripristino parziale: la prima scrittura che fallisce se ne accorge e
+		 * toglie la versione, cosi' l'avvio successivo reinstalla. Una
+		 * scrittura che fallisce con la tabella al suo posto non la tocca.
+		 */
+		add_filter( 'query', array( $this, 'rompi_inserimento' ) );
+		$this->assertWPError(
+			conformita_core_registra_voce(
+				array(
+					'sezione' => self::SEZIONE,
+					'azione'  => 'prova',
+				)
+			)
+		);
+		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'Tabella presente: la versione resta.' );
+
+		add_filter( 'query', $nascondi );
+		$this->assertWPError(
+			conformita_core_registra_voce(
+				array(
+					'sezione' => self::SEZIONE,
+					'azione'  => 'prova',
+				)
+			)
+		);
+		remove_filter( 'query', $nascondi );
+		remove_filter( 'query', array( $this, 'rompi_inserimento' ) );
+
+		$this->assertFalse( get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'Tabella sparita: la versione si toglie.' );
+		Conformita_Core_Registro::assicura_tabella();
+		$this->assertSame( Conformita_Core_Registro::VERSIONE_SCHEMA, get_option( Conformita_Core_Registro::OPZIONE_SCHEMA ), 'E l\'avvio successivo reinstalla.' );
 	}
 
 	/**
