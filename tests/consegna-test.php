@@ -2,7 +2,8 @@
 /**
  * I due punti di consegna: indirizzi, catena di controlli, intestazioni.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176,
+ * e C-228 e C-240 dell'unita' S9 (il divieto di indicizzazione sui file).
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -108,6 +109,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 	public function tear_down() {
 		remove_filter( 'pre_http_request', array( $this, 'server_che_nega' ), 10 );
 		Conformita_Core_Consegna::azzera_emettitore();
+		Conformita_Core_Intestazioni::azzera_emettitore();
 
 		foreach ( $this->temporanei as $percorso ) {
 			if ( file_exists( $percorso ) ) {
@@ -1116,5 +1118,123 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$arnese = new PasswordHash( 8, true );
 
 		$_COOKIE[ 'wp-postpass_' . COOKIEHASH ] = $arnese->HashPassword( wp_unslash( $password ) );
+	}
+
+	/**
+	 * Un contenuto pubblicato di una sezione che consente l'indicizzazione, con
+	 * un allegato.
+	 *
+	 * @return array{0: int, 1: int} Contenuto e allegato.
+	 */
+	private function atto_consentito() {
+		$this->assertTrue(
+			conformita_core_registra_sezione(
+				'sezione_consegna_aperta',
+				array(
+					'indicizzazione' => 'consentita',
+					'scadenza'       => 'irraggiungibile',
+				)
+			)
+		);
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'prova_cons_aperta',
+				array(
+					'sezione'      => 'sezione_consegna_aperta',
+					'show_in_rest' => false,
+					'argomenti'    => array( 'public' => true ),
+				)
+			)
+		);
+
+		$aperto = self::factory()->post->create(
+			array(
+				'post_type'   => 'prova_cons_aperta',
+				'post_status' => 'publish',
+			)
+		);
+		update_post_meta( $aperto, conformita_core_chiave_fine_pubblicazione(), gmdate( 'Y-m-d', strtotime( '+30 days' ) ) );
+
+		return array( $aperto, $this->allegato( $aperto ) );
+	}
+
+	/**
+	 * C-228: il file di un contenuto di una sezione `vietata` porta il divieto
+	 * di indicizzazione nella risposta preparata; quello di una sezione
+	 * `consentita` no.
+	 */
+	public function test_c228_divieto_di_indicizzazione_sui_file() {
+		list( $aperto, $allegato_aperto ) = $this->atto_consentito();
+
+		$chiuso          = $this->atto();
+		$allegato_chiuso = $this->allegato( $chiuso );
+
+		$vietata    = $this->chiedi( $chiuso, $allegato_chiuso );
+		$consentita = $this->chiedi( $aperto, $allegato_aperto );
+
+		$this->assertNotNull( $vietata );
+		$this->assertNotNull( $consentita );
+		$this->assertSame( 200, $vietata['stato'], 'Precondizione: il file della sezione vietata deve essere consegnato.' );
+		$this->assertSame( 200, $consentita['stato'], 'Precondizione: il file della sezione consentita deve essere consegnato.' );
+
+		$this->assertArrayHasKey( 'X-Robots-Tag', $vietata['intestazioni'] );
+		$this->assertStringContainsString( 'noindex', $vietata['intestazioni']['X-Robots-Tag'] );
+		$this->assertArrayNotHasKey( 'X-Robots-Tag', $consentita['intestazioni'], 'Il file di una sezione che consente l\'indicizzazione non deve portare nessun divieto.' );
+	}
+
+	/**
+	 * C-240: il divieto esce davvero con il file, dal punto pubblico e dal
+	 * punto amministrativo; dal file di una sezione consentita non esce.
+	 *
+	 * Si guardano le righe che l'emissione manda, non la risposta preparata:
+	 * un divieto composto bene e poi saltato mentre si mandano le intestazioni
+	 * e' un divieto che nessun motore legge. Il punto amministrativo conta
+	 * perche' un indirizzo firmato puo' uscire dall'amministrazione, in una
+	 * mail o in un documento, e il motore che lo segue deve trovare il
+	 * divieto anche li'.
+	 */
+	public function test_c240_divieto_emesso_con_il_file() {
+		list( $aperto, $allegato_aperto ) = $this->atto_consentito();
+
+		$chiuso          = $this->atto();
+		$allegato_chiuso = $this->allegato( $chiuso );
+
+		$righe = function ( callable $richiesta ) {
+			$risposta = new Conformita_Core_Risposta_Registrata();
+			Conformita_Core_Intestazioni::fissa_emettitore( array( $risposta, 'registra' ) );
+
+			$preparata = $richiesta();
+
+			Conformita_Core_Intestazioni::azzera_emettitore();
+
+			$this->assertNotNull( $preparata );
+			$this->assertSame( 200, $preparata['stato'], 'Precondizione: il file deve essere consegnato.' );
+			$this->assertNotEmpty( $risposta->valori( 'Content-Type' ), 'Precondizione: le intestazioni escono.' );
+
+			return $risposta->valori( 'X-Robots-Tag' );
+		};
+
+		$pubblica = $righe(
+			function () use ( $chiuso, $allegato_chiuso ) {
+				return $this->chiedi( $chiuso, $allegato_chiuso );
+			}
+		);
+		$this->assertSame( array( 'noindex' ), $pubblica, 'Punto pubblico, sezione vietata.' );
+
+		$aperta = $righe(
+			function () use ( $aperto, $allegato_aperto ) {
+				return $this->chiedi( $aperto, $allegato_aperto );
+			}
+		);
+		$this->assertSame( array(), $aperta, 'Punto pubblico, sezione consentita.' );
+
+		wp_set_current_user( $this->utente_del_tipo() );
+
+		$amministrativa = $righe(
+			function () use ( $chiuso, $allegato_chiuso ) {
+				return $this->chiedi_da_amministrazione( $chiuso, $allegato_chiuso );
+			}
+		);
+		$this->assertSame( array( 'noindex' ), $amministrativa, 'Punto amministrativo, sezione vietata.' );
 	}
 }

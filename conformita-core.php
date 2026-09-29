@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.4.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.5.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -44,6 +44,8 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-sezioni.
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-tipi.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-scadenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-filtro-scadenza.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-intestazioni.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-indicizzazione.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-deposito-fermato.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-allegati.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-consegna.php';
@@ -64,6 +66,14 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/funzioni-api.php';
  * usa, e infatti nessuna funzione pubblica lo espone.
  */
 Conformita_Core_Filtro_Scadenza::avvia();
+
+/*
+ * Il meccanismo di indicizzazione si accende qui per la stessa ragione del
+ * motore di scadenza, e sbaglia nella stessa direzione: spento, lascerebbe
+ * indicizzabili le pagine di una sezione che lo vieta, senza che niente lo
+ * mostri a occhio. Per questo la registrazione di una sezione lo verifica.
+ */
+Conformita_Core_Indicizzazione::avvia();
 
 /*
  * La consegna degli allegati si accende qui per la stessa ragione del motore di

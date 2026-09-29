@@ -2881,10 +2881,12 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 
 	/**
 	 * C-223: la versione dell'interfaccia sale a 1.4.0 e le quattro funzioni
-	 * nuove esistono.
+	 * nuove esistono. Le unita' successive alzano la versione con aggiunte
+	 * compatibili: qui si verifica che non sia scesa sotto 1.4.0, la versione
+	 * esatta la fissa la prova dell'ultima unita'.
 	 */
 	public function test_c223_contratto_pubblico() {
-		$this->assertSame( '1.4.0', conformita_core_versione_api() );
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.4.0', '>=' ) );
 		$this->assertTrue( conformita_core_api_compatibile( '1.3.0', conformita_core_versione_api() ), 'Chi chiedeva 1.3.0 resta compatibile.' );
 		$this->assertSame( 'conformita_core_leggere_registro', conformita_core_capacita_registro(), 'Il nome della capability e\' parte del contratto: si scrive per esteso.' );
 		$this->assertSame( self::AZIONI_RISERVATE, Conformita_Core_Registro_Automatico::azioni(), 'I nomi riservati sono parte del contratto.' );

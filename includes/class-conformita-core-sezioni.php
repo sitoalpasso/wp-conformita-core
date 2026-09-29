@@ -58,6 +58,11 @@ final class Conformita_Core_Sezioni {
 	 * perché il motore si accende al caricamento di core: la guardia copre il caso
 	 * in cui il file del motore non venga caricato. Riga di collaudo C-94.
 	 *
+	 * **La stessa guardia sul meccanismo di indicizzazione**, per la stessa
+	 * ragione: spento, lascerebbe indicizzabili le pagine di una sezione che lo
+	 * vieta, e una pagina senza `noindex` ha lo stesso aspetto di una con
+	 * `noindex`. Riga di collaudo C-85.
+	 *
 	 * @param string $sezione   Identificativo della sezione.
 	 * @param array  $politica  Politiche dichiarate dal componente.
 	 * @return true|WP_Error Vero se la sezione è attiva, errore altrimenti.
@@ -67,6 +72,13 @@ final class Conformita_Core_Sezioni {
 			return new WP_Error(
 				'conformita_core_motore_non_avviato',
 				__( 'Motore di scadenza non avviato: la sezione non si registra, perché i suoi contenuti non sarebbero filtrati alla scadenza. Verificare che il file del motore sia caricato.', 'conformita-core' )
+			);
+		}
+
+		if ( ! Conformita_Core_Indicizzazione::avviato() ) {
+			return new WP_Error(
+				'conformita_core_indicizzazione_non_avviata',
+				__( 'Meccanismo di indicizzazione non avviato: la sezione non si registra, perché la sua politica di indicizzazione non sarebbe applicata. Verificare che il file del meccanismo sia caricato.', 'conformita-core' )
 			);
 		}
 
