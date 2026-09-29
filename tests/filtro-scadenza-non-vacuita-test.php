@@ -61,11 +61,18 @@ class Conformita_Core_Filtro_Scadenza_Non_Vacuita_Test extends WP_UnitTestCase {
 		update_option( 'timezone_string', 'Europe/Rome' );
 		$this->set_permalink_structure( '' );
 
+		/*
+		 * Indicizzazione consentita: la mappa per i motori elenca soltanto i tipi
+		 * delle sezioni che la consentono (unita' S9), e la riga C-108 misura la
+		 * scadenza dentro la mappa. Con `vietata` il tipo non ci sarebbe affatto
+		 * e la prova sarebbe vuota. Il filtro di scadenza non legge questa
+		 * politica, quindi per le altre prove di questo file non cambia niente.
+		 */
 		$this->assertTrue(
 			conformita_core_registra_sezione(
 				self::SEZIONE,
 				array(
-					'indicizzazione' => 'vietata',
+					'indicizzazione' => 'consentita',
 					'scadenza'       => 'irraggiungibile',
 				)
 			)
