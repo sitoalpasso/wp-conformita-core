@@ -10,7 +10,8 @@ un proprio ruolo il permesso di consultare il registro. Nessun registro proprio 
 se ci fosse, esisterebbero due verità su chi ha fatto che cosa.
 
 **Stato: costruita, riletta in proprio prima del primo giro di revisione e corretta dopo il
-primo giro (punto 11, ultime due parti), con le righe di collaudo verdi in locale.**
+primo e il secondo giro (punto 11, ultime tre parti), con le righe di collaudo verdi in
+locale.**
 Le sezioni sono al passato dove dicono cosa il codice fa.
 
 ---
@@ -37,7 +38,7 @@ se due persone la compiono nello stesso istante.
 
 **Come si prova che funziona, e che la prova è vera.** Ogni comportamento ha una prova
 automatica, e ogni prova è stata fatta fallire di proposito: si è rotto il codice in
-settantadue modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
+ottantasette modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
 11). Per esempio: se il registro si dimentica di scrivere la pubblicazione, cinque prove
 diventano rosse; se la pagina mostra il motivo senza neutralizzarne il codice, diventa rossa
 la prova C-219; se il permesso di lettura viene dato all'amministratore, diventano rosse
@@ -123,10 +124,10 @@ cancellano a vicenda.
 | `pubblicazione` | l'ingresso nello stato pubblicato, da qualunque stato |
 | `rimozione` | l'uscita dallo stato pubblicato, verso qualunque stato, cestino compreso |
 | `cambio_stato` | ogni altro cambio di stato, compresi quelli verso gli stati propri di un componente |
-| `modifica` | un campo del contenuto cambiato, fuori dalla bozza; si registrano i nomi dei campi, non i valori. Restano fuori solo i cambiamenti che WordPress fa da sé al cambio di stato (punto 8) |
+| `modifica` | un campo del contenuto cambiato, fuori dalla bozza; si registrano i nomi dei campi, non i valori. Restano fuori solo i cambiamenti che WordPress fa da sé al cambio di stato (punto 8). Comprende i campi che WordPress cambia con un'istruzione diretta, senza salvare il contenuto: l'autore, quando si elimina un utente affidandone i contenuti a un altro; il padre dei figli di un contenuto gerarchico eliminato, che passano al suo padre |
 | `modifica_fine_pubblicazione` | ogni cambio della data di fine, con il valore di prima e di dopo, anche quando la scrittura non nomina il contenuto: la cancellazione per chiave su tutti i contenuti, il cambio di chiave di una riga |
 | `eliminazione` | l'eliminazione definitiva, con lo stato da cui è stato eliminato; bozze comprese. Si scrive dopo che la banca dati ha cancellato la riga del contenuto |
-| `allegato_aggiunto`, `allegato_eliminato` | sul contenuto padre, con il numero dell'allegato: al caricamento e all'eliminazione del file (dopo che la banca dati ha cancellato la riga dell'allegato), quando un allegato cambia padre con il salvataggio di WordPress (tolto da uno, aggiunto all'altro), e quando lo si collega o scollega dalla libreria dei media |
+| `allegato_aggiunto`, `allegato_eliminato` | sul contenuto padre, con il numero dell'allegato: al caricamento e all'eliminazione del file (dopo che la banca dati ha cancellato la riga dell'allegato), quando un allegato cambia padre con il salvataggio di WordPress (tolto da uno, aggiunto all'altro), quando lo si collega o scollega dalla libreria dei media, e quando WordPress, eliminando un contenuto, ne sposta gli allegati sul suo padre: l'aggiunta si registra sul padre che li riceve |
 
 Questi nomi sono riservati: un componente non li può usare per le proprie voci.
 
@@ -151,7 +152,7 @@ Questi nomi sono riservati: un componente non li può usare per le proprie voci.
 | La tabella non c'è | la scrittura fallisce come sopra; l'opzione della versione non si scrive, o si toglie alla prima scrittura fallita se era scritta, quindi l'avvio successivo riprova a crearla |
 | La tabella c'è ma la chiave non ha il suo vincolo | per esempio una tabella preesistente che dbDelta non riesce ad allineare: non è un registro installato, la versione non si scrive e l'avvio riprova |
 | Un filtro sconosciuto o malformato | errore, mai un filtro ignorato: un filtro ignorato mostrerebbe tutte le voci come se fossero quelle chieste. Un filtro con valore nullo è malformato, e così la pagina senza la misura della pagina. Nella schermata è malformato anche un filtro che non è un testo o che la ripulitura cambierebbe: la pagina lo dice e non mostra voci |
-| La banca dati rifiuta la cancellazione della riga di un contenuto | il contenuto c'è ancora e la voce `eliminazione` non si scrive. WordPress però ha già cancellato i metadati, data di fine compresa, e quella cancellazione resta senza voce (punto 8) |
+| La banca dati rifiuta la cancellazione della riga di un contenuto | il contenuto c'è ancora e la voce `eliminazione` non si scrive. WordPress però ha già cancellato i metadati, data di fine compresa, e quella cancellazione resta senza voce (punto 8). Il tentativo fallito non lascia segni: ciò che segue nella stessa richiesta si registra normalmente |
 | Un utente eliminato | la voce resta con il suo numero, e la schermata scrive "utente N, non più presente" |
 | Un contenuto eliminato | le sue voci restano; la schermata scrive "N (tipo), non più presente" |
 
@@ -176,11 +177,19 @@ Righe C-195..C-224 al punto 10; file e metodi al punto 1. In locale, su WordPres
   fissate; si registrano un nome o una data scelti da chi pubblica o programma, anche su un
   contenuto che non li aveva, e quelli cambiati da un altro componente nello stesso
   salvataggio. Un annuncio di modifica che non viene da un salvataggio conta ogni campo.
+  WordPress aggiunge il suffisso del cestino anche al nome di un contenuto che è già nel
+  cestino, con un'istruzione diretta, quando un altro contenuto prende il suo indirizzo: è la
+  stessa riscrittura, e non si registra.
+  Una data si riconosce come rimessa a oggi da WordPress quando è quella di adesso, entro due
+  secondi, con la data in UTC vuota: chi indica da sé proprio l'ora di adesso in quella forma
+  chiede ciò che WordPress avrebbe fatto comunque, e la voce non si scrive.
 - **Un'eliminazione che fallisce a metà lascia un buco.** WordPress cancella i metadati del
   contenuto prima della sua riga. Se la banca dati rifiuta poi la cancellazione della riga, il
-  contenuto resta senza la data di fine e senza la voce che lo dice. Serve un guasto della
-  banca dati nel mezzo di un'eliminazione; accorgersene richiederebbe di rimandare la voce a
-  fine richiesta, e nessuna riga del catalogo lo chiede.
+  contenuto resta senza la data di fine e senza la voce che lo dice. Lo stesso per gli
+  allegati e i figli che WordPress ha già spostato sul padre: il padre che li riceve ha la sua
+  voce, il contenuto rimasto non ha quella dell'allegato tolto. Serve un guasto della banca
+  dati nel mezzo di un'eliminazione; accorgersene richiederebbe di rimandare la voce a fine
+  richiesta, e nessuna riga del catalogo lo chiede.
 - **I valori dei campi non si conservano**, solo i loro nomi. Il titolo e il testo di un atto
   possono contenere dati personali.
 - **Collegando dalla libreria dei media un allegato che aveva già un padre**, la voce
@@ -242,13 +251,13 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 |---|---|---|
 | C-195 | Un contenuto in verifica viene pubblicato, con il sito in un fuso diverso da UTC | una voce e una sola, `pubblicazione`, con utente, contenuto, tipo, sezione, origine automatica, stati di prima e di dopo, e l'istante dell'orologio di core conservato in UTC |
 | C-196 | Nascita di una bozza, di un contenuto già pubblicato, di una bozza automatica poi salvata | `creazione`; `creazione` e `pubblicazione`; niente per la bozza automatica e `creazione` al suo primo salvataggio |
-| C-197 | Modifica del titolo di un pubblicato e di uno in verifica; salvataggio senza modifiche; modifica di testo e riassunto; un pubblicato reso privato cambiando nello stesso salvataggio indirizzo e data. Seconda parte, da in verifica: pubblicato scegliendo l'indirizzo; programmato indicando la data; pubblicato mentre un altro componente cambia indirizzo e date; senza titolo; con la sola data locale dalla funzione di base; un annuncio di modifica lanciato a mano | una voce `modifica` con i nomi dei campi; nessuna voce; una voce con i due nomi e nessun valore; `rimozione` e `modifica` con indirizzo e date. Seconda parte: `modifica` con il solo indirizzo; `cambio_stato` e `modifica` con le due date; `modifica` con indirizzo e date; nessuna `modifica` per l'indirizzo generato dopo il salvataggio; `modifica` con le due date; `modifica` con l'indirizzo |
+| C-197 | Modifica del titolo di un pubblicato e di uno in verifica; salvataggio senza modifiche; modifica di testo e riassunto; un pubblicato reso privato cambiando nello stesso salvataggio indirizzo e data. Seconda parte, da in verifica: pubblicato scegliendo l'indirizzo; programmato indicando la data; pubblicato mentre un altro componente cambia indirizzo e date; senza titolo; con la sola data locale dalla funzione di base, con la data in UTC nulla, assente o vuota, e senza data in UTC con la data locale di prima; in verifica da giorni e pubblicato con la funzione di aggiornamento; un annuncio di modifica lanciato a mano. Terza parte, senza salvataggio: un utente eliminato affidando a un altro un pubblicato, uno in verifica e una bozza; un utente eliminato senza affidare niente; un contenuto gerarchico eliminato, con un figlio pubblicato e uno in bozza | una voce `modifica` con i nomi dei campi; nessuna voce; una voce con i due nomi e nessun valore; `rimozione` e `modifica` con indirizzo e date. Seconda parte: `modifica` con il solo indirizzo; `cambio_stato` e `modifica` con le due date; `modifica` con indirizzo e date; nessuna `modifica` per l'indirizzo generato dopo il salvataggio; `modifica` con le due date in tutti e tre i casi, nessuna senza la data in UTC e con la data di prima; nessuna `modifica` per la data rimessa a oggi; `modifica` con l'indirizzo. Terza parte: `modifica` con l'autore sul pubblicato e su quello in verifica, niente sulla bozza; nessuna voce; `modifica` con il padre sul figlio pubblicato, poi `eliminazione`, niente sulla bozza |
 | C-198 | Un pubblicato va in bozza, in verifica, privato, nel cestino | una voce `rimozione` ciascuno, e nessuna `modifica` accanto |
 | C-199 | Bozza, verifica, bozza, cestino, ripristino; un pubblicato messo nel cestino e ripreso | quattro `cambio_stato` con gli stati giusti; `rimozione` e `cambio_stato`, nessuna `modifica` per il suffisso del cestino |
-| C-200 | Eliminazione definitiva di un pubblicato con data di fine; eliminazione che la banca dati rifiuta | una sola voce `eliminazione` con lo stato; le voci di prima restano tutte; nessuna voce `eliminazione` per il contenuto che c'è ancora |
+| C-200 | Eliminazione definitiva di un pubblicato con data di fine; eliminazione che la banca dati rifiuta, seguita da una data di fine; eliminazione con la copia in memoria buttata appena prima della cancellazione; eliminazione di una bozza automatica | una sola voce `eliminazione` con lo stato; le voci di prima restano tutte; nessuna voce `eliminazione` per il contenuto che c'è ancora, e la data di fine successiva si registra; una sola `eliminazione` e nessuna voce mancata; nessuna voce |
 | C-201 | Le stesse tre operazioni (titolo, data di fine, allegato) su una bozza e su un contenuto in verifica; eliminazione di una bozza che era stata pubblicata | nella bozza nessuna voce, in verifica tre; l'eliminazione della bozza si registra |
 | C-202 | Data di fine scritta, riscritta uguale, cambiata, tolta; poi due righe duplicate aggiornate con una scrittura. Seconda parte: cancellazione per chiave su tutti i contenuti, la stessa nominando un contenuto senza data di fine, una riga della data che cambia chiave e che la riprende | tre voci con prima e dopo, nessuna per la riscrittura uguale; una sola voce per la scrittura su due righe. Una voce per ogni contenuto pubblicato toccato, contate prima di leggerne i valori, e nessuna per la bozza; due righe dello stesso contenuto tolte insieme fanno una voce con tutti e due i valori; la voce va al contenuto toccato, non a quello nominato; una voce per ciascun cambio di chiave |
-| C-203 | Allegato aggiunto ed eliminato su un pubblicato; un allegato libero assegnato a un contenuto e poi spostato su un altro; scollegato e ricollegato dalla libreria dei media; eliminazione dell'allegato che la banca dati rifiuta, poi riuscita | `allegato_aggiunto` e `allegato_eliminato` sul contenuto padre, con il numero dell'allegato; allo spostamento, tolto dal primo e aggiunto al secondo; lo stesso dalla libreria; nessuna voce finché l'allegato c'è ancora, la voce alla riuscita |
+| C-203 | Allegato aggiunto ed eliminato su un pubblicato; un allegato libero assegnato a un contenuto e poi spostato su un altro; scollegato e ricollegato dalla libreria dei media; eliminazione dell'allegato che la banca dati rifiuta, poi riuscita; eliminazione rifiutata, scollegamento, eliminazione riuscita; un contenuto con padre eliminato con un allegato, con la cancellazione riuscita, rifiutata, e con lo spostamento dell'allegato rifiutato | `allegato_aggiunto` e `allegato_eliminato` sul contenuto padre, con il numero dell'allegato; allo spostamento, tolto dal primo e aggiunto al secondo; lo stesso dalla libreria; nessuna voce finché l'allegato c'è ancora, la voce alla riuscita; la voce dello scollegamento e nessuna all'eliminazione riuscita; `allegato_aggiunto` sul padre che riceve l'allegato anche se la cancellazione fallisce, e nessuna se lo spostamento non avviene |
 | C-204 | Le stesse operazioni su un articolo di WordPress | nessuna voce e nessuna voce mancata annotata; controllo positivo sul tipo gestito |
 | C-205 | Operazione senza utente, poi con un utente con nome ed email | utente zero, poi il numero; le colonne sono quelle del punto 4 e nella riga non c'è nessun dato della persona |
 
@@ -370,6 +379,21 @@ rimesso a posto subito dopo.
 | G70 | dettagli senza neutralizzarli | C-219 |
 | G71 | valore di prima della data di fine non aggiornato dopo la voce | C-202 |
 | G72 | una voce della data di fine per ogni riga toccata | C-202 |
+| G73 | voce di eliminazione senza la copia del contenuto | C-200 |
+| G74 | copia del contenuto eliminato ignorata dal registro | C-200 |
+| G75 | data locale senza data in UTC vera presa per quella di WordPress | C-197 |
+| G76 | data rimessa a oggi da WordPress contata come modifica | C-197 |
+| G77 | ogni data con la data in UTC vuota presa per rimessa a oggi | C-197 |
+| G78 | data in UTC assente presa per una richiesta esplicita | C-197 |
+| G79 | allegati spostati dall'eliminazione non letti | C-203 |
+| G80 | spostamento registrato senza controllare che sia avvenuto | C-203 |
+| G81 | figli spostati dall'eliminazione non letti | C-197 |
+| G82 | figlio in bozza spostato registrato | C-197 |
+| G83 | segno dell'eliminazione tolto solo a eliminazione riuscita | C-200 |
+| G84 | padre di un tentativo di eliminazione passato usato di nuovo | C-203 |
+| G85 | contenuti affidati dall'utente eliminato non letti | C-197 |
+| G86 | cambio di autore di una bozza registrato | C-197 |
+| G87 | voce di eliminazione senza l'attesa della riga | C-200 |
 
 **Due guasti non hanno fatto diventare rossa nessuna riga, alla prima passata**, e le righe
 sono state corrette prima di chiudere. G25: una voce automatica su un tipo non gestito non si
@@ -438,6 +462,35 @@ difetti delle prove, rinforzata e misurata con un guasto nuovo.
 I guasti G04, G14, G15 e G25 sono stati riscritti sul codice nuovo e rifatti; G38..G42 misurano
 ora la regola nuova. G27 ha di nuovo contaminato i guasti successivi, che sono stati rifatti su
 una banca dati pulita.
+
+**Il secondo giro di revisione.** Cinque difetti, tutti nelle voci automatiche. Stesso metodo:
+prova scritta e vista fallire sul codice vecchio, poi guasti.
+
+1. *La voce di eliminazione dipendeva dalla memoria.* Il registro controllava tipo e sezione
+   rileggendo il contenuto, che a riga cancellata esiste solo se ne resta una copia in
+   memoria. Ora la voce automatica di eliminazione porta la copia che WordPress passa, letta
+   prima della cancellazione; per i componenti il contenuto deve esistere come prima (C-200;
+   G73, G74, G87).
+2. *La data locale senza data in UTC.* Una data indicata senza la data in UTC, o con la data
+   in UTC vuota, si prendeva per quella di WordPress. Ora è chiesta, salvo la forma precisa con
+   cui la funzione di aggiornamento rimette la data a oggi (C-197; G75..G78).
+3. *Gli allegati spostati dall'eliminazione.* WordPress li sposta sul padre del contenuto
+   eliminato con un'istruzione diretta: il padre riceveva allegati senza voce. Lo stesso vale
+   per i figli di un tipo gerarchico, che cambiano padre. Ora si leggono prima e si confrontano
+   dopo lo spostamento, prima della cancellazione della riga (C-197, C-203; G79..G82).
+4. *L'autore affidato a un altro.* Eliminando un utente e affidandone i contenuti a un altro,
+   WordPress cambia l'autore con un'istruzione diretta. Ora il cambio si registra, fuori dalla
+   bozza (C-197; G85, G86).
+5. *Segni rimasti dopo un tentativo fallito.* Il segno che tiene fuori la cancellazione dei
+   metadati restava dopo un'eliminazione fallita e zittiva ciò che seguiva; il padre annotato
+   per un allegato restava per il tentativo successivo. Ora il primo finisce appena i metadati
+   sono cancellati, il secondo si rifà a ogni tentativo (C-200, C-203; G83, G84).
+
+La causa comune dei punti 3 e 4 è la stessa del primo giro, vista da un altro lato: WordPress
+cambia i campi di un contenuto anche senza salvarlo. Oltre a queste due, le strade dirette di
+WordPress lette in questo giro sono il collegamento dalla libreria dei media, già coperto, e il
+suffisso del cestino aggiunto al nome di un contenuto già nel cestino, che resta fuori per
+scelta (punto 8).
 
 ## 12. Che cosa l'albo dovrà fare, adesso che questa unità esiste
 
