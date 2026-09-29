@@ -353,43 +353,37 @@ final class Conformita_Core_Registro_Automatico {
 				'aggancio'  => 'add_post_meta',
 				'metodo'    => 'fine_prima_aggiunta',
 				'priorita'  => PHP_INT_MIN,
-				'argomenti' => 2,
+				'argomenti' => 1,
 			),
 			array(
 				'aggancio'  => 'update_post_meta',
 				'metodo'    => 'fine_prima',
 				'priorita'  => PHP_INT_MIN,
-				'argomenti' => 3,
+				'argomenti' => 2,
 			),
 			array(
 				'aggancio'  => 'delete_post_meta',
 				'metodo'    => 'fine_prima',
 				'priorita'  => PHP_INT_MIN,
-				'argomenti' => 3,
-			),
-			array(
-				'aggancio'  => 'update_post_metadata_by_mid',
-				'metodo'    => 'fine_rinominata',
-				'priorita'  => PHP_INT_MIN,
-				'argomenti' => 4,
+				'argomenti' => 2,
 			),
 			array(
 				'aggancio'  => 'added_post_meta',
 				'metodo'    => 'fine_dopo',
 				'priorita'  => PHP_INT_MIN,
-				'argomenti' => 3,
+				'argomenti' => 2,
 			),
 			array(
 				'aggancio'  => 'updated_post_meta',
 				'metodo'    => 'fine_dopo',
 				'priorita'  => PHP_INT_MIN,
-				'argomenti' => 3,
+				'argomenti' => 2,
 			),
 			array(
 				'aggancio'  => 'deleted_post_meta',
 				'metodo'    => 'fine_dopo',
 				'priorita'  => PHP_INT_MIN,
-				'argomenti' => 3,
+				'argomenti' => 2,
 			),
 		);
 	}
@@ -1123,115 +1117,114 @@ final class Conformita_Core_Registro_Automatico {
 	}
 
 	/**
-	 * Legge la fine della pubblicazione prima che un'aggiunta la tocchi.
+	 * Legge la fine della pubblicazione prima di un'aggiunta di metadati.
 	 *
-	 * @param int    $post_id Identificativo del contenuto.
-	 * @param string $chiave  Chiave del metadato.
+	 * @param int $post_id Identificativo del contenuto.
 	 */
-	private static function fine_prima_aggiunta( $post_id, $chiave ) {
-		self::fine_prima( 0, $post_id, $chiave );
+	private static function fine_prima_aggiunta( $post_id ) {
+		self::fotografa_fine( (int) $post_id );
 	}
 
 	/**
-	 * Legge la fine della pubblicazione prima che una scrittura la tocchi.
+	 * Legge la fine della pubblicazione prima che una scrittura di metadati
+	 * possa toccarla.
 	 *
-	 * Si usano gli agganci che WordPress chiama prima della scrittura su tutte
-	 * le strade, compresa quella per numero di riga che la cancellazione di un
-	 * contenuto percorre: un filtro che solo alcune strade chiamano lascerebbe
-	 * in memoria un valore vecchio, e la voce successiva lo confronterebbe con
-	 * un dato che non c'entra.
+	 * Il nome della chiave annunciato non basta a dirlo. La banca dati
+	 * confronta i nomi dei metadati senza badare alle maiuscole, e spesso
+	 * nemmeno agli accenti: una scrittura con la chiave scritta in un altro
+	 * modo tocca le righe della fine, mentre un confronto fra testi in PHP
+	 * direbbe di no. Per questo, su un contenuto gestito, la fine si legge
+	 * prima e dopo ogni scrittura di metadati, qualunque chiave annunci: il
+	 * confronto dei valori, letti con lo stesso criterio della banca dati,
+	 * dice se la fine è cambiata. Costa due letture per ogni scrittura di
+	 * metadati sui soli contenuti gestiti.
 	 *
-	 * Quando la scrittura è una cancellazione, WordPress passa l'elenco delle
-	 * righe, e il contenuto che nomina non è detto sia quello delle righe: la
-	 * cancellazione per chiave su tutti i contenuti non ne nomina nessuno, o
-	 * nomina quello che ha passato chi l'ha chiesta. Il contenuto si legge
-	 * allora da ciascuna riga, finché le righe esistono, e si ricorda per
-	 * l'annuncio che segue la scrittura.
+	 * Resta la cancellazione per chiave su tutti i contenuti, che annuncia le
+	 * righe toccate con un contenuto che può non essere il loro. Le righe
+	 * della fine fra quelle annunciate si cercano nella banca dati, con la
+	 * chiave della fine e lo stesso confronto, e ciascuna si ricorda con il
+	 * suo contenuto per l'annuncio che segue la scrittura.
 	 *
 	 * @param int|array $meta_id Identificativo della riga, o delle righe.
-	 * @param int       $post_id Identificativo del contenuto.
-	 * @param string    $chiave  Chiave del metadato.
+	 * @param int       $post_id Identificativo del contenuto annunciato.
 	 */
-	private static function fine_prima( $meta_id, $post_id, $chiave ) {
-		if ( Conformita_Core_Scadenza::CHIAVE !== $chiave ) {
-			return;
-		}
+	private static function fine_prima( $meta_id, $post_id ) {
+		self::fotografa_fine( (int) $post_id );
 
 		if ( ! is_array( $meta_id ) ) {
-			self::$fine_prima[ (int) $post_id ] = self::valori_fine( (int) $post_id );
 			return;
 		}
 
-		/*
-		 * Più righe dello stesso contenuto nella stessa scrittura: i valori di
-		 * prima si leggono alla prima riga, quando nessuna è ancora cambiata.
-		 */
-		$letti = array();
-
-		foreach ( $meta_id as $riga_id ) {
-			$riga = get_metadata_by_mid( 'post', (int) $riga_id );
-
-			if ( ! $riga ) {
-				continue;
-			}
-
-			$contenuto = (int) $riga->post_id;
-
-			self::$righe_fine[ (int) $riga_id ] = $contenuto;
-
-			if ( ! isset( $letti[ $contenuto ] ) ) {
-				$letti[ $contenuto ]            = true;
-				self::$fine_prima[ $contenuto ] = self::valori_fine( $contenuto );
-			}
+		foreach ( self::righe_della_fine( $meta_id ) as $riga_id => $contenuto ) {
+			self::$righe_fine[ $riga_id ] = $contenuto;
+			self::fotografa_fine( $contenuto );
 		}
 	}
 
 	/**
-	 * Legge la fine della pubblicazione prima che una riga cambi chiave.
+	 * Legge e ricorda la fine della pubblicazione di un contenuto gestito.
 	 *
-	 * Una riga della fine che prende un'altra chiave toglie la fine al suo
-	 * contenuto, ma WordPress annuncia la scrittura con la chiave nuova, prima
-	 * e dopo. Solo questo filtro, che WordPress chiama prima di cambiare una
-	 * riga per numero, vede la chiave di prima. Il filtro non cambia niente:
-	 * restituisce quello che ha ricevuto.
+	 * Le bozze e i contenuti in eliminazione non hanno voci della fine, e
+	 * non si leggono.
 	 *
-	 * @param mixed        $risposta Risposta di un filtro precedente, nulla se nessuno ha risposto.
-	 * @param int          $meta_id  Identificativo della riga.
-	 * @param mixed        $valore   Valore nuovo.
-	 * @param string|false $chiave   Chiave nuova, falso se non cambia.
-	 * @return mixed
+	 * @param int $post_id Identificativo del contenuto.
 	 */
-	private static function fine_rinominata( $risposta, $meta_id, $valore, $chiave ) {
-		unset( $valore );
-
-		if ( null !== $risposta || false === $chiave || Conformita_Core_Scadenza::CHIAVE === $chiave ) {
-			return $risposta;
+	private static function fotografa_fine( $post_id ) {
+		if ( $post_id <= 0 || isset( self::$in_eliminazione[ $post_id ] ) ) {
+			return;
 		}
 
-		$riga = get_metadata_by_mid( 'post', (int) $meta_id );
+		$post = get_post( $post_id );
 
-		if ( $riga && Conformita_Core_Scadenza::CHIAVE === $riga->meta_key ) {
-			self::$righe_fine[ (int) $meta_id ]       = (int) $riga->post_id;
-			self::$fine_prima[ (int) $riga->post_id ] = self::valori_fine( (int) $riga->post_id );
+		if ( ! $post instanceof WP_Post || ! Conformita_Core_Tipi::registrato( $post->post_type ) || in_array( $post->post_status, self::STATI_IN_LAVORAZIONE, true ) ) {
+			return;
 		}
 
-		return $risposta;
+		self::$fine_prima[ $post_id ] = self::valori_fine( $post_id );
+	}
+
+	/**
+	 * Fra alcune righe di metadati, quelle della fine, con il loro contenuto.
+	 *
+	 * @param array<int, int> $ids Identificativi delle righe.
+	 * @return array<int, int> Contenuto per numero di riga.
+	 */
+	private static function righe_della_fine( array $ids ) {
+		global $wpdb;
+
+		$ids = array_values( array_filter( array_map( 'intval', $ids ) ) );
+
+		if ( array() === $ids ) {
+			return array();
+		}
+
+		$segnaposto = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Le righe prima della cancellazione, con il confronto della banca dati; i segnaposto sono uno per numero.
+		$righe = $wpdb->get_results( $wpdb->prepare( "SELECT meta_id, post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_id IN ( {$segnaposto} )", array_merge( array( Conformita_Core_Scadenza::CHIAVE ), $ids ) ) );
+
+		$trovate = array();
+
+		foreach ( (array) $righe as $riga ) {
+			$trovate[ (int) $riga->meta_id ] = (int) $riga->post_id;
+		}
+
+		return $trovate;
 	}
 
 	/**
 	 * Registra il cambio della fine della pubblicazione, se c'è stato.
 	 *
 	 * Si confrontano tutti i valori prima e dopo, non solo il primo: la chiave
-	 * può avere più righe, e WordPress segnala una scrittura per ciascuna. Dopo
-	 * la voce il valore di partenza diventa quello appena registrato, così la
-	 * seconda segnalazione della stessa scrittura non produce una seconda voce.
+	 * può avere più righe, e WordPress segnala una scrittura per ciascuna. La
+	 * lettura di prima si consuma al primo confronto, così la seconda
+	 * segnalazione della stessa scrittura non produce una seconda voce.
 	 *
 	 * @param int|array $meta_id Identificativo della riga, o delle righe.
-	 * @param int       $post_id Identificativo del contenuto.
-	 * @param string    $chiave  Chiave del metadato.
+	 * @param int       $post_id Identificativo del contenuto annunciato.
 	 */
-	private static function fine_dopo( $meta_id, $post_id, $chiave ) {
-		$contenuti = array();
+	private static function fine_dopo( $meta_id, $post_id ) {
+		$contenuti = array( (int) $post_id );
 
 		foreach ( (array) $meta_id as $riga_id ) {
 			if ( isset( self::$righe_fine[ (int) $riga_id ] ) ) {
@@ -1240,29 +1233,34 @@ final class Conformita_Core_Registro_Automatico {
 			}
 		}
 
-		if ( array() === $contenuti && Conformita_Core_Scadenza::CHIAVE === $chiave ) {
-			$contenuti[] = (int) $post_id;
-		}
-
 		foreach ( array_unique( $contenuti ) as $contenuto ) {
 			self::confronta_fine( $contenuto );
 		}
 	}
 
 	/**
-	 * Confronta la fine della pubblicazione di un contenuto con quella di
-	 * prima, e scrive la voce se è cambiata.
+	 * Confronta la fine della pubblicazione di un contenuto con quella letta
+	 * prima della scrittura, e scrive la voce se è cambiata.
 	 *
 	 * @param int $post_id Identificativo del contenuto.
 	 */
 	private static function confronta_fine( $post_id ) {
 		$post_id = (int) $post_id;
-		$prima   = isset( self::$fine_prima[ $post_id ] ) ? self::$fine_prima[ $post_id ] : array();
-		$dopo    = self::valori_fine( $post_id );
 
-		self::$fine_prima[ $post_id ] = $dopo;
+		if ( ! isset( self::$fine_prima[ $post_id ] ) ) {
+			return;
+		}
 
-		if ( $prima === $dopo || isset( self::$in_eliminazione[ $post_id ] ) ) {
+		$prima = self::$fine_prima[ $post_id ];
+		unset( self::$fine_prima[ $post_id ] );
+
+		if ( isset( self::$in_eliminazione[ $post_id ] ) ) {
+			return;
+		}
+
+		$dopo = self::valori_fine( $post_id );
+
+		if ( $prima === $dopo ) {
 			return;
 		}
 

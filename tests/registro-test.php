@@ -1323,6 +1323,75 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-202, quarta parte: la chiave scritta con altre maiuscole.
+	 *
+	 * La banca dati confronta i nomi dei metadati senza badare alle
+	 * maiuscole: la chiave della fine scritta in maiuscolo tocca le righe
+	 * della fine. Ogni cambiamento effettivo ha la sua voce, con il prima e
+	 * il dopo letti come li legge la banca dati.
+	 */
+	public function test_c202_fine_pubblicazione_chiave_in_maiuscolo() {
+		global $wpdb;
+
+		wp_set_current_user( $this->utente() );
+
+		$chiave    = conformita_core_chiave_fine_pubblicazione();
+		$maiuscola = strtoupper( $chiave );
+		$id        = $this->contenuto( 'publish' );
+		$altro     = $this->contenuto( 'publish' );
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-16' ) );
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $altro, '2026-10-17' ) );
+
+		$valori = function ( $voce ) {
+			return array( $voce['contenuto'], $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+		};
+
+		$this->segna();
+		update_post_meta( $id, $maiuscola, '2026-10-20' );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: il valore conservato.
+		$conservato = $wpdb->get_col( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $id, $chiave ) );
+		$this->assertSame( array( '2026-10-20' ), $conservato, 'Precondizione: la banca dati ha aggiornato la riga della fine.' );
+		$this->assertSame( array( array( $id, array( '2026-10-16' ), array( '2026-10-20' ) ) ), array_map( $valori, $this->nuove() ), 'Aggiornamento con la chiave in maiuscolo.' );
+
+		$this->segna();
+		delete_post_meta( $id, $maiuscola );
+		$this->assertSame( array( array( $id, array( '2026-10-20' ), array() ) ), array_map( $valori, $this->nuove() ), 'Cancellazione con la chiave in maiuscolo.' );
+
+		$this->segna();
+		add_post_meta( $id, $maiuscola, '2026-10-22' );
+		$this->assertSame( array( array( $id, array(), array( '2026-10-22' ) ) ), array_map( $valori, $this->nuove() ), 'Aggiunta con la chiave in maiuscolo.' );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: serve il numero della riga.
+		$mid = (int) $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $id, $chiave ) );
+		$this->assertGreaterThan( 0, $mid, 'Precondizione: la riga aggiunta si trova con la chiave.' );
+
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-23', $maiuscola ) );
+		$this->assertSame( array( array( $id, array( '2026-10-22' ), array( '2026-10-23' ) ) ), array_map( $valori, $this->nuove() ), 'Riga cambiata per numero, con la chiave in maiuscolo.' );
+
+		$this->segna();
+		$this->assertTrue( update_metadata_by_mid( 'post', $mid, '2026-10-23', 'chiave_qualunque' ) );
+		$this->assertSame( array( array( $id, array( '2026-10-23' ), array() ) ), array_map( $valori, $this->nuove() ), 'Riga che lascia la chiave.' );
+
+		$this->segna();
+		$this->assertTrue( delete_metadata( 'post', 0, $maiuscola, '', true ) );
+		$this->assertSame( array( array( $altro, array( '2026-10-17' ), array() ) ), array_map( $valori, $this->nuove() ), 'Cancellazione per chiave in maiuscolo su tutti i contenuti.' );
+
+		// E il contrario: una riga conservata con la chiave in maiuscolo, cancellata per chiave su tutti i contenuti con la chiave giusta.
+		add_post_meta( $altro, $maiuscola, '2026-10-24' );
+		$this->segna();
+		$this->assertTrue( delete_metadata( 'post', 0, $chiave, '', true ) );
+		$this->assertSame( array( array( $altro, array( '2026-10-24' ), array() ) ), array_map( $valori, $this->nuove() ), 'Riga in maiuscolo cancellata per chiave su tutti i contenuti.' );
+
+		// Controllo negativo: un altro metadato del contenuto non e' la fine.
+		$this->segna();
+		update_post_meta( $id, 'un_altro_dato', 'qualunque' );
+		delete_post_meta( $id, 'un_altro_dato' );
+		$this->assertSame( array(), $this->azioni_nuove() );
+	}
+
+	/**
 	 * C-203: un allegato aggiunto o eliminato scrive una voce sul contenuto a
 	 * cui appartiene.
 	 */
