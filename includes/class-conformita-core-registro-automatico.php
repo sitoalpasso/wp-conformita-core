@@ -395,12 +395,19 @@ final class Conformita_Core_Registro_Automatico {
 	 * cestino compreso. Gli altri passaggi, per esempio da bozza a in attesa o
 	 * verso gli stati propri di un componente, sono cambi di stato.
 	 *
+	 * La bozza automatica che WordPress crea all'apertura dell'editor non è
+	 * ancora un contenuto, e la sua nascita non si registra. Un contenuto che
+	 * esiste già e viene rimesso in bozza automatica, invece, esce dal suo
+	 * stato come verso qualunque altro.
+	 *
 	 * @param string  $nuovo      Stato nuovo.
 	 * @param string  $precedente Stato precedente.
 	 * @param WP_Post $post       Contenuto.
 	 */
 	private static function stato( $nuovo, $precedente, $post ) {
-		if ( ! $post instanceof WP_Post || $nuovo === $precedente || 'auto-draft' === $nuovo ) {
+		$nascita = in_array( $precedente, array( 'new', 'auto-draft' ), true );
+
+		if ( ! $post instanceof WP_Post || $nuovo === $precedente || ( 'auto-draft' === $nuovo && $nascita ) ) {
 			return;
 		}
 
@@ -409,7 +416,7 @@ final class Conformita_Core_Registro_Automatico {
 			'stato_nuovo'      => (string) $nuovo,
 		);
 
-		if ( in_array( $precedente, array( 'new', 'auto-draft' ), true ) ) {
+		if ( $nascita ) {
 			self::scrivi( $post, 'creazione', $dettagli );
 		}
 
@@ -417,7 +424,7 @@ final class Conformita_Core_Registro_Automatico {
 			self::scrivi( $post, 'pubblicazione', $dettagli );
 		} elseif ( 'publish' === $precedente ) {
 			self::scrivi( $post, 'rimozione', $dettagli );
-		} elseif ( ! in_array( $precedente, array( 'new', 'auto-draft' ), true ) ) {
+		} elseif ( ! $nascita ) {
 			self::scrivi( $post, 'cambio_stato', $dettagli );
 		}
 	}

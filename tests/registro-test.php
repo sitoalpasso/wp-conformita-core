@@ -649,6 +649,46 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-198 e C-199: la bozza automatica e' esclusa solo alla nascita. Un
+	 * contenuto gia' esistente che un componente rimette in bozza automatica
+	 * esce comunque dal suo stato: da pubblicato e' una rimozione, da un altro
+	 * stato un cambio di stato.
+	 */
+	public function test_c198_verso_bozza_automatica() {
+		wp_set_current_user( $this->utente() );
+
+		$this->segna();
+		$nascita = $this->contenuto( 'auto-draft' );
+		$this->assertSame( array(), $this->azioni_nuove(), 'Controllo negativo: la nascita della bozza automatica non e\' una voce.' );
+
+		foreach ( array(
+			'publish' => 'rimozione',
+			'pending' => 'cambio_stato',
+		) as $partenza => $azione ) {
+			$id = $this->contenuto( $partenza );
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'          => $id,
+					'post_status' => 'auto-draft',
+				)
+			);
+
+			$this->assertSame( 'auto-draft', get_post_status( $id ), 'Precondizione: il contenuto e\' in bozza automatica.' );
+
+			$voci = $this->nuove();
+
+			$this->assertCount( 1, $voci, "Da {$partenza}: " . wp_json_encode( $voci ) );
+			$this->assertSame( $azione, $voci[0]['azione'] );
+			$this->assertSame( $partenza, $voci[0]['dettagli']['stato_precedente'] );
+			$this->assertSame( 'auto-draft', $voci[0]['dettagli']['stato_nuovo'] );
+		}
+
+		$this->assertSame( 'auto-draft', get_post_status( $nascita ) );
+	}
+
+	/**
 	 * C-199: gli altri cambi di stato, compresi quelli che non passano dallo
 	 * stato pubblicato, si registrano come cambi di stato.
 	 */
