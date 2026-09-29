@@ -38,6 +38,7 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		'eliminazione',
 		'allegato_aggiunto',
 		'allegato_eliminato',
+		'cambio_tipo',
 	);
 
 	/**
@@ -671,6 +672,118 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			),
 			'Il figlio pubblicato cambia padre e lo dice; la bozza no.'
 		);
+	}
+
+	/**
+	 * C-197, quarta parte: il cambio di tipo.
+	 *
+	 * Un contenuto che cambia tipo esce dalla sezione di prima ed entra, se il
+	 * tipo nuovo e' gestito, in quella nuova. Ciascuna delle due ha la sua
+	 * voce, con il tipo di quella parte: la sezione di provenienza non perde
+	 * l'ultimo fatto del contenuto, anche quando il tipo nuovo non e' gestito
+	 * e il resto del salvataggio non ha voci. Le voci portano gli stati e i
+	 * campi cambiati nello stesso salvataggio.
+	 */
+	public function test_c197_cambio_tipo() {
+		wp_set_current_user( $this->utente() );
+
+		$sezioni = function () {
+			return array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['sezione'], $voce['tipo'], $voce['dettagli']['verso'] ?? null );
+				},
+				$this->nuove()
+			);
+		};
+
+		// Fra due tipi gestiti, senza altri cambiamenti.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'        => $id,
+				'post_type' => self::TIPO_ALTRO,
+			)
+		);
+		$this->assertSame( self::TIPO_ALTRO, get_post_type( $id ), 'Precondizione: il tipo e\' cambiato.' );
+		$this->assertSame(
+			array(
+				array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ),
+				array( 'cambio_tipo', self::SEZIONE_ALTRA, self::TIPO_ALTRO, 'ingresso' ),
+			),
+			$sezioni()
+		);
+		$this->assertSame(
+			array(
+				'verso'            => 'uscita',
+				'tipo_precedente'  => self::TIPO,
+				'tipo_nuovo'       => self::TIPO_ALTRO,
+				'stato_precedente' => 'publish',
+				'stato_nuovo'      => 'publish',
+				'campi'            => array(),
+			),
+			$this->nuove()[0]['dettagli']
+		);
+
+		// Da gestito a non gestito, cambiando anche il titolo: la voce resta nella sezione di prima.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_type'  => 'post',
+				'post_title' => 'Titolo nuovo',
+			)
+		);
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ) ), $sezioni() );
+		$this->assertSame( array( 'post_title' ), $this->nuove()[0]['dettagli']['campi'] );
+
+		// Da gestito pubblicato a non gestito in bozza: l'uscita dalla pubblicazione e' nella voce.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $id,
+				'post_type'   => 'post',
+				'post_status' => 'draft',
+			)
+		);
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ) ), $sezioni() );
+		$this->assertSame( array( 'publish', 'draft' ), array( $this->nuove()[0]['dettagli']['stato_precedente'], $this->nuove()[0]['dettagli']['stato_nuovo'] ) );
+
+		// Da non gestito a gestito.
+		$id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'        => $id,
+				'post_type' => self::TIPO,
+			)
+		);
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'ingresso' ) ), $sezioni() );
+
+		/*
+		 * La funzione di WordPress che cambia solo il tipo scrive nella banca
+		 * dati direttamente, senza salvataggio. Il contenuto letto prima dice
+		 * il tipo di partenza.
+		 */
+		$id = $this->contenuto( 'publish' );
+		$this->assertSame( self::TIPO, get_post( $id )->post_type, 'Precondizione: il contenuto e\' stato letto.' );
+		$this->segna();
+		set_post_type( $id, 'post' );
+		$this->assertSame( 'post', get_post_type( $id ), 'Precondizione: il tipo e\' cambiato.' );
+		$this->assertSame( array( array( 'cambio_tipo', self::SEZIONE, self::TIPO, 'uscita' ) ), $sezioni() );
+
+		// Controllo negativo: un salvataggio senza cambio di tipo non scrive cambi di tipo.
+		$id = $this->contenuto( 'publish' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_title' => 'Solo il titolo',
+			)
+		);
+		$this->assertSame( array( 'modifica' ), $this->azioni_nuove() );
 	}
 
 	/**

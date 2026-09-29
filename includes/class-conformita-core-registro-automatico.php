@@ -179,6 +179,7 @@ final class Conformita_Core_Registro_Automatico {
 			'eliminazione',
 			'allegato_aggiunto',
 			'allegato_eliminato',
+			'cambio_tipo',
 		);
 	}
 
@@ -287,6 +288,12 @@ final class Conformita_Core_Registro_Automatico {
 				'metodo'    => 'modifica',
 				'priorita'  => PHP_INT_MIN,
 				'argomenti' => 3,
+			),
+			array(
+				'aggancio'  => 'clean_post_cache',
+				'metodo'    => 'tipo_riscritto',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 2,
 			),
 			array(
 				'aggancio'  => 'before_delete_post',
@@ -566,10 +573,31 @@ final class Conformita_Core_Registro_Automatico {
 			return;
 		}
 
-		if ( in_array( $prima->post_status, self::STATI_IN_LAVORAZIONE, true ) ) {
+		$cambiati = in_array( $prima->post_status, self::STATI_IN_LAVORAZIONE, true )
+			? array()
+			: self::campi_cambiati( $prima, $dopo, $richiesta );
+
+		if ( (string) $prima->post_type !== (string) $dopo->post_type ) {
+			self::cambio_tipo( $prima, $dopo, $cambiati );
 			return;
 		}
 
+		if ( array() === $cambiati ) {
+			return;
+		}
+
+		self::scrivi( $dopo, 'modifica', array( 'campi' => $cambiati ) );
+	}
+
+	/**
+	 * I campi cambiati da chi ha agito, senza quelli che WordPress riscrive da sé.
+	 *
+	 * @param WP_Post    $prima     Contenuto prima.
+	 * @param WP_Post    $dopo      Contenuto dopo.
+	 * @param array|null $richiesta Cosa ha chiesto il salvataggio.
+	 * @return array<int, string>
+	 */
+	private static function campi_cambiati( WP_Post $prima, WP_Post $dopo, $richiesta ) {
 		$cambiati = array();
 
 		foreach ( self::CAMPI as $campo ) {
@@ -578,11 +606,82 @@ final class Conformita_Core_Registro_Automatico {
 			}
 		}
 
-		if ( array() === $cambiati ) {
+		return $cambiati;
+	}
+
+	/**
+	 * Un contenuto che cambia tipo.
+	 *
+	 * Il tipo decide la sezione, e la sezione decide dove il contenuto sta nel
+	 * registro: cambiando tipo il contenuto esce da una sezione ed entra in
+	 * un'altra, o esce del tutto se il tipo nuovo non è gestito. Ciascuna
+	 * delle due parti gestite ha la sua voce `cambio_tipo`, con il suo tipo e
+	 * la sua sezione, e con `verso` che dice se il contenuto esce o entra.
+	 * La voce dell'uscita si scrive sulla copia di prima, perché il contenuto
+	 * adesso ha già il tipo nuovo. Tutte e due portano gli stati e i campi
+	 * cambiati nello stesso salvataggio: se il tipo nuovo non è gestito, le
+	 * altre voci di quel salvataggio non si scrivono, e questa resta la sola
+	 * traccia. Il cambio di tipo si registra anche per una bozza, come un
+	 * cambio di stato: è il contenuto che lascia la sezione. Non si registra
+	 * per la bozza automatica mai nata.
+	 *
+	 * @param WP_Post            $prima    Contenuto prima, con il tipo di prima.
+	 * @param WP_Post            $dopo     Contenuto dopo, con il tipo nuovo.
+	 * @param array<int, string> $cambiati Altri campi cambiati.
+	 */
+	private static function cambio_tipo( WP_Post $prima, WP_Post $dopo, array $cambiati ) {
+		if ( self::mai_nato( (int) $prima->ID, (string) $prima->post_status ) && self::mai_nato( (int) $dopo->ID, (string) $dopo->post_status ) ) {
 			return;
 		}
 
-		self::scrivi( $dopo, 'modifica', array( 'campi' => $cambiati ) );
+		$dettagli = array(
+			'tipo_precedente'  => (string) $prima->post_type,
+			'tipo_nuovo'       => (string) $dopo->post_type,
+			'stato_precedente' => (string) $prima->post_status,
+			'stato_nuovo'      => (string) $dopo->post_status,
+			'campi'            => $cambiati,
+		);
+
+		self::scrivi( $prima, 'cambio_tipo', array( 'verso' => 'uscita' ) + $dettagli, true );
+		self::scrivi( $dopo, 'cambio_tipo', array( 'verso' => 'ingresso' ) + $dettagli );
+	}
+
+	/**
+	 * Il tipo cambiato con un'istruzione diretta.
+	 *
+	 * La funzione di WordPress che cambia solo il tipo di un contenuto scrive
+	 * nella banca dati senza passare dal salvataggio, e lo annuncia soltanto
+	 * togliendo il contenuto dalla memoria. Questo aggancio riceve la copia
+	 * che la memoria aveva, letta prima di toglierla: se è di un tipo gestito
+	 * e la banca dati dice un altro tipo, il tipo è cambiato. Durante un
+	 * salvataggio il confronto lo fa `modifica()`, che ha le due copie, e qui
+	 * non si fa. Se il contenuto non era in memoria la copia viene dalla
+	 * banca dati, ha già il tipo nuovo e il cambio non si vede (scheda,
+	 * punto 8).
+	 *
+	 * @param int          $post_id Identificativo del contenuto.
+	 * @param WP_Post|null $post    Copia che la memoria aveva.
+	 */
+	private static function tipo_riscritto( $post_id, $post = null ) {
+		global $wpdb;
+
+		$post_id = (int) $post_id;
+
+		if ( ! $post instanceof WP_Post || (int) $post->ID !== $post_id || isset( self::$richieste[ $post_id ] ) || ! Conformita_Core_Tipi::registrato( $post->post_type ) ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Lettura dopo un'istruzione diretta di WordPress: la memoria è quella che si sta togliendo.
+		$tipo = $wpdb->get_var( $wpdb->prepare( "SELECT post_type FROM {$wpdb->posts} WHERE ID = %d", $post_id ) );
+
+		if ( null === $tipo || (string) $tipo === (string) $post->post_type ) {
+			return;
+		}
+
+		$dopo            = clone $post;
+		$dopo->post_type = (string) $tipo;
+
+		self::cambio_tipo( $post, $dopo, array() );
 	}
 
 	/**
@@ -1219,11 +1318,12 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param WP_Post              $post      Contenuto.
 	 * @param string               $azione    Operazione.
 	 * @param array<string, mixed> $dettagli  Dettagli.
-	 * @param bool                 $eliminato Il contenuto non c'è più: tipo
-	 *                                        e sezione si controllano sulla
-	 *                                        copia passata.
+	 * @param bool                 $copia     Tipo e sezione si controllano
+	 *                                        sulla copia passata e non sulla
+	 *                                        banca dati: il contenuto non c'è
+	 *                                        più, o ha cambiato tipo.
 	 */
-	private static function scrivi( WP_Post $post, $azione, array $dettagli, $eliminato = false ) {
+	private static function scrivi( WP_Post $post, $azione, array $dettagli, $copia = false ) {
 		if ( ! Conformita_Core_Tipi::registrato( $post->post_type ) ) {
 			return;
 		}
@@ -1238,7 +1338,7 @@ final class Conformita_Core_Registro_Automatico {
 					'contenuto' => (int) $post->ID,
 					'dettagli'  => $dettagli,
 				),
-				$eliminato ? $post : null
+				$copia ? $post : null
 			)
 			: null;
 
