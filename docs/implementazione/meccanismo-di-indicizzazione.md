@@ -1,7 +1,7 @@
 # Meccanismo di indicizzazione: scheda di lavorazione
 
 **Repository: `wp-conformita-core`.** Unità S9 del piano, righe di collaudo C-80..C-85 e
-C-225..C-230 e C-232..C-246, elencate al punto 11.
+C-225..C-230 e C-232..C-247, elencate al punto 11.
 
 **Nel componente dell'albo pretorio non si implementa niente di tutto questo.** L'albo
 dichiara già la propria politica (`vietata`) quando registra la sua sezione: da questa
@@ -9,7 +9,7 @@ versione quella dichiarazione produce effetti. L'albo, in un'altra unità, dovr�
 richiedere la versione `1.4.0` dell'interfaccia, perché è la prima che garantisce il
 divieto.
 
-**Stato: costruita, cinque giri di revisione indipendente recepiti (punti 13..16 e 18).** Il punto 17 elenca, selettore per selettore, come la mappa del sito è coperta. Le sezioni sono al passato e dicono quello che il codice fa.
+**Stato: costruita, sei giri di revisione indipendente recepiti (punti 13..16, 18 e 19).** Il punto 17 elenca, selettore per selettore, come la mappa del sito è coperta. Le sezioni sono al passato e dicono quello che il codice fa.
 
 ---
 
@@ -180,7 +180,12 @@ all'esclusione. I vincoli sul padre del componente restano com'erano, compreso l
 allegati senza contenuto (C-241, C-243). Un contenuto scelto per identificativo si guarda
 direttamente, ma conta soltanto quello che WordPress sceglie davvero, con le sue precedenze:
 `attachment_id` prende il posto di `p`, e `page_id` vince su tutti. Se è vietato la lettura
-si svuota, se è consentito non si tocca niente (C-242, C-245).
+si svuota, se è consentito non si tocca niente (C-242, C-245). Lo stesso vale per un
+contenuto scelto per percorso: WordPress lo cerca anche fra gli allegati e, se trova un
+allegato, cambia da sé il tipo interrogato. Conta quindi il contenuto che WordPress trova,
+con le sue regole (la variabile di un tipo diventa nome o percorso, il nome prevale sul
+percorso, il percorso già risolto vale per primo), e non i tipi chiesti: un allegato
+consentito trovato per percorso resta anche se la lettura chiede un tipo vietato (C-247).
 
 **La regola che tiene insieme la difesa preventiva:** si toglie quello che la politica vieta,
 contenuto per contenuto, e mai quello che gli sta accanto. Un contenuto consentito che esce
@@ -252,6 +257,7 @@ consegna, di cui si sostituisce soltanto il riversamento del file e l'uscita.
 | C-241 | `test_c241_allegati_scelti_per_padre` |
 | C-245 | `test_c245_selettori_concorrenti` |
 | C-246 | `test_c246_lettura_mista_con_lo_stesso_padre` |
+| C-247 | `test_c247_contenuto_scelto_per_percorso` |
 
 **Tre prove di S4 toccate, e perché.** C-14, C-92 e C-108 controllano che un contenuto
 scaduto sparisca dalla mappa del sito, e lo facevano su sezioni dichiarate `vietata`. Da
@@ -336,7 +342,7 @@ C-80..C-85 sono le righe del catalogo scritte quando l'unità è stata pianifica
 le ha fatte emergere il lavoro, cercando ogni strada da cui un motore arriva ai contenuti di
 una sezione; C-232..C-238 il primo giro di revisione (punto 13), C-239 e C-240 il secondo
 (punto 14), C-241 il terzo (punto 15), C-242..C-244 il quarto (punto 16), C-245 e C-246 il
-quinto (punto 18). Numerazione continuata dopo
+quinto (punto 18), C-247 il sesto (punto 19). Numerazione continuata dopo
 C-224, l'ultima del registro delle modifiche, per non sovrapporsi a un ramo ancora aperto. C-231 non è di questa unità: è della correzione della guardia di dipendenza, rinumerata lì
 per lo stesso motivo.
 
@@ -369,6 +375,7 @@ per lo stesso motivo.
 | C-244 | fatto | Ultima difesa: il fornitore della mappa è quello di core; con le difese sull'interrogazione scavalcate (allargamento dopo la restrizione con i filtri spenti) il vietato arriva alle voci ma non nella mappa, nessuna voce vuota, l'articolo resta; le voci dei contenuti consentiti e gli altri fornitori non si toccano |
 | C-245 | fatto | Selettori per identificativo concorrenti, con i filtri spenti: `p` vietato con `attachment_id` o `page_id` consentito, resta il consentito che WordPress sceglie; `attachment_id` vietato con `page_id` consentito, resta la pagina scelta; `p` consentito con `attachment_id` vietato, o `attachment_id` consentito con `page_id` vietato, lettura vuota |
 | C-246 | fatto | Lettura mista di pagine e allegati con i filtri spenti, con una pagina consentita e un allegato vietato figli dello stesso contenuto vietato: senza vincoli sul padre, con il padre singolo, con l'elenco dei padri, con l'inclusione di entrambi, resta la pagina e sparisce solo l'allegato; con l'inclusione del solo allegato la lettura è vuota |
+| C-247 | fatto | Lettura con i filtri spenti che sceglie un contenuto per percorso: un allegato consentito (di una pagina, o senza padre) trovato per percorso con la lettura chiesta per un tipo vietato resta; un allegato vietato trovato per percorso, o per la variabile di un tipo vietato gerarchico, con la lettura chiesta anche per le pagine sparisce; il nome prevale sul percorso; una pagina consentita con lo stesso percorso di un atto resta; la variabile di un tipo vietato che porta a un allegato consentito non si perde |
 
 "Fatto" vuol dire verde nella suite locale (WordPress 6.5, PHP 8.4). Diventa definitivo con
 la verifica continua verde sul commit di punta.
@@ -430,14 +437,21 @@ loro verifica è questa tabella.
 | G47. Selettori letti in ordine fisso, `p` per primo | C-245 |
 | G48. Allegati esclusi per padre invece che uno per uno | C-241, C-243, C-246 |
 | G49. Lettura svuotata anche per un contenuto consentito scelto per identificativo | C-242, C-245 |
+| G50. Percorso ignorato: decidono i tipi chiesti | C-247 |
+| G51. Allegato vietato trovato per percorso lasciato passare | C-247 |
+| G52. Variabile del tipo non convertita in percorso | C-247 |
+| G53. Percorso cercato soltanto fra le pagine | C-247 |
+| G54. Percorso già risolto ignorato | C-247 |
+| G55. Percorso che prevale sul nome | C-247 |
 
 Composizione ed emissione sono coperte da prove diverse, ed è voluto: C-233 guarda come si
 compone la riga preparata, C-239 e C-240 guardano le righe che escono. G25, G26, G32 e G33
 lasciano intatta la risposta preparata, e infatti nessuna prova sulla composizione le
 prende: le prendono solo le prove sull'emissione, che il secondo giro ha chiesto per questo.
 
-Dopo le correzioni del quinto giro tutte le righe ancora valide, G1..G49 tranne le due
-ritirate, sono state rieseguite, tutte rosse. Dopo le correzioni del quarto giro le righe
+Dopo le correzioni del sesto giro tutte le righe ancora valide, G1..G55 tranne le due
+ritirate, sono state rieseguite, tutte rosse. Dopo le correzioni del quinto giro le righe
+G1..G49 erano state rieseguite, tutte rosse. Dopo le correzioni del quarto giro le righe
 G1..G46 erano state rieseguite, tutte rosse. Dopo le correzioni del terzo giro le righe G1..G38 erano state rieseguite, tutte
 rosse. Dopo le correzioni del secondo giro tutte le righe, G1..G35, erano state rieseguite sul codice
 nuovo: tutte rosse dove indicato. G31 all'inizio è rimasta verde, perché il caso scelto (la
@@ -530,7 +544,8 @@ indirizzo (C-244).
 | `page_id` | sceglie un contenuto e riscrive anche i vincoli sul padre; vince su `attachment_id` e `p` (tranne che per la pagina degli articoli con la pagina iniziale statica) | come `p` | C-242, C-245 |
 | `attachment_id` (e `subpost_id`, che WordPress converte) | sceglie un allegato e vince su `p` | come `p` | C-242, C-245 |
 | `attachment` (per nome) | con il tipo vuoto, WordPress cerca un allegato | si applica l'esclusione degli allegati dei vietati | C-242 |
-| `name`, `pagename` | scelgono per nome o percorso; un percorso che porta a un allegato fa cambiare tipo a WordPress | esclusione degli allegati dei vietati; il cambio di tipo lo copre l'ultima difesa | C-244 |
+| `name` | sceglie per nome dentro i tipi chiesti, e prevale sul percorso | i tipi vietati si tolgono come per `post_type`; esclusione degli allegati dei vietati | C-242, C-247 |
+| `pagename`, o la variabile di un tipo gerarchico | sceglie per percorso, anche fra gli allegati; se trova un allegato WordPress cambia il tipo interrogato | conta il contenuto che WordPress trova, con le sue regole: se è vietato la lettura si svuota, se è consentito non si tocca niente, qualunque tipo sia chiesto | C-247 |
 | `post__in` | restringe, e fa ignorare `post__not_in` | se possono entrare allegati, si tolgono da lì quelli vietati; se non resta niente la lettura si svuota | C-242, C-246 |
 | `post_parent` | un padre solo, vince sugli altri vincoli sul padre | non si tocca: vale anche per i contenuti consentiti; gli allegati vietati si escludono per identificativo | C-241, C-246 |
 | `post_parent__in` | elenco dei padri, vince sull'esclusione | non si tocca, zero compreso; gli allegati vietati si escludono per identificativo | C-241, C-243, C-246 |
@@ -549,7 +564,8 @@ primo selettore valorizzato (C-245).
 
 **Nessun eccesso.** La difesa preventiva toglie soltanto contenuti vietati e allegati di
 contenuti vietati; un contenuto consentito che le sta accanto nella stessa lettura resta
-(C-245, C-246). L'ultima difesa lavora voce per voce, quindi non può togliere per eccesso.
+(C-245, C-246), compreso l'allegato consentito trovato per percorso in una lettura chiesta
+per un tipo vietato (C-247). L'ultima difesa lavora voce per voce, quindi non può togliere per eccesso.
 
 **Conclusione.** Nella mappa di WordPress un contenuto vietato non diventa un indirizzo,
 qualunque lettura lo porti. Restano fuori soltanto i casi in cui un componente scrive la mappa
@@ -573,7 +589,20 @@ attribuiva il divieto alla richiesta intera invece che ai contenuti scelti.
    C-241 e C-243 sono rimaste verdi senza modifiche: il comportamento verso gli allegati è lo
    stesso, cambia solo che non tocca più gli altri contenuti.
 
-## 19. Cosa manca
+## 19. Il sesto giro di revisione indipendente
+
+Sul commit `3665a62`, un rilievo medio, ancora su un contenuto **consentito** tolto dalla
+mappa per eccesso; nessun contenuto vietato indicizzato. Stessa causa del quinto giro: il
+divieto attribuito ai selettori provvisori invece che al contenuto scelto.
+
+1. **Allegato consentito trovato per percorso.** Con la lettura chiesta per un tipo vietato
+   e un percorso che porta all'allegato di una pagina, WordPress trova l'allegato e cambia
+   da sé il tipo interrogato; la restrizione guardava prima i tipi e svuotava la lettura.
+   Ora, quando la lettura sceglie per percorso, conta il contenuto che WordPress trova,
+   calcolato con le stesse regole di WordPress e prima di guardare i tipi. C-247, con il
+   caso speculare dell'allegato vietato e i casi che distinguono le singole regole (G50..G55).
+
+## 20. Cosa manca
 
 - La verifica continua sul commit di punta: da riportare quando arriva.
 - L'albo deve richiedere `1.4.0` (unità A10 del piano, che verifica il divieto sulle pagine
