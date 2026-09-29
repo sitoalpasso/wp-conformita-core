@@ -198,7 +198,9 @@ Righe C-195..C-224 al punto 10; file e metodi al punto 1. In locale, su WordPres
   WordPress; il registro serve a sapere cosa è successo attraverso WordPress, non a difendersi
   da un plugin ostile, che è già un problema più grande.
 - **Nessuna garanzia verso chi amministra il server.** Chi scrive direttamente nella banca
-  dati può cambiare la tabella. Un vincolo nella banca dati (un innesco che rifiuta le
+  dati può cambiare la tabella, e anche togliere il vincolo sulla chiave dopo l'installazione:
+  il vincolo si controlla a ogni installazione e aggiornamento dello schema, non a ogni avvio,
+  che costerebbe un'interrogazione per ogni pagina del sito. Un vincolo nella banca dati (un innesco che rifiuta le
   modifiche) richiede permessi che molti servizi di ospitalità non danno, e farebbe fallire
   l'installazione; una catena di impronte che renda visibile una manomissione è possibile, ma
   è una unità a sé e nessuna riga del catalogo la chiede.
