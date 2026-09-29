@@ -10,7 +10,7 @@ un proprio ruolo il permesso di consultare il registro. Nessun registro proprio 
 se ci fosse, esisterebbero due verità su chi ha fatto che cosa.
 
 **Stato: costruita, riletta in proprio prima del primo giro di revisione e corretta dopo il
-primo, il secondo, il terzo, il quarto e il quinto giro (punto 11, ultime sette parti), con le
+primo, il secondo, il terzo, il quarto, il quinto e il sesto giro (punto 11, ultime otto parti), con le
 righe di collaudo verdi in locale.** Le strade di WordPress che cambiano un contenuto senza
 il salvataggio ordinario, e come ciascuna è coperta, sono al punto 13.
 Le sezioni sono al passato dove dicono cosa il codice fa.
@@ -39,7 +39,7 @@ se due persone la compiono nello stesso istante.
 
 **Come si prova che funziona, e che la prova è vera.** Ogni comportamento ha una prova
 automatica, e ogni prova è stata fatta fallire di proposito: si è rotto il codice in
-centoventisei modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
+centoventinove modi diversi, uno per volta, e si è guardato quale prova diventava rossa (punto
 11). Per esempio: se il registro si dimentica di scrivere la pubblicazione, cinque prove
 diventano rosse; se la pagina mostra il motivo senza neutralizzarne il codice, diventa rossa
 la prova C-219; se il permesso di lettura viene dato all'amministratore, diventano rosse
@@ -208,6 +208,10 @@ Righe C-195..C-224 al punto 10; file e metodi al punto 1. In locale, su WordPres
   dati ogni volta che un contenuto esce dalla memoria fuori da un salvataggio, gestito o no:
   una lettura in più, solo se almeno un tipo è gestito. Vederlo sempre richiederebbe una
   lettura del registro a ogni salvataggio di ogni contenuto del sito.
+- **Le voci di due salvataggi annidati seguono l'ordine in cui i salvataggi finiscono.** Se
+  un componente salva di nuovo un contenuto mentre un altro salvataggio è in corso, quello
+  interno finisce per primo e la sua voce viene prima, anche se ha scritto dopo. Le voci
+  dicono quali campi sono cambiati, non i valori, e ciascun salvataggio ha la sua.
 - **Un salvataggio che la banca dati rifiuta lascia la sua richiesta.** Il registro legge cosa
   chiede un salvataggio al filtro dei dati e la consuma all'annuncio della modifica; se la
   banca dati rifiuta la scrittura, WordPress si ferma senza annunciare niente, e la richiesta
@@ -272,7 +276,7 @@ C-50, C-51 e C-52 del catalogo restano le righe di contratto; queste le rendono 
 |---|---|---|
 | C-195 | Un contenuto in verifica viene pubblicato, con il sito in un fuso diverso da UTC. Seconda parte: un contenuto programmato pubblicato dalla funzione di WordPress che non salva | una voce e una sola, `pubblicazione`, con utente, contenuto, tipo, sezione, origine automatica, stati di prima e di dopo, e l'istante dell'orologio di core conservato in UTC; seconda parte: una `pubblicazione` dallo stato programmato |
 | C-196 | Nascita di una bozza, di un contenuto già pubblicato, di una bozza automatica poi salvata | `creazione`; `creazione` e `pubblicazione`; niente per la bozza automatica e `creazione` al suo primo salvataggio |
-| C-197 | Modifica del titolo di un pubblicato e di uno in verifica; salvataggio senza modifiche; modifica di testo e riassunto; un pubblicato reso privato cambiando nello stesso salvataggio indirizzo e data. Seconda parte, da in verifica: pubblicato scegliendo l'indirizzo; programmato indicando la data; pubblicato mentre un altro componente cambia indirizzo e date; senza titolo; con la sola data locale dalla funzione di base, con la data in UTC nulla, assente o vuota, e senza data in UTC con la data locale di prima; in verifica da giorni e pubblicato con la funzione di aggiornamento; un annuncio di modifica lanciato a mano. Terza parte, senza salvataggio: un utente eliminato affidando a un altro un pubblicato, uno in verifica e una bozza; un utente eliminato senza affidare niente; un contenuto gerarchico eliminato, con un figlio pubblicato e uno in bozza. Quarta parte: cambio di tipo fra due tipi gestiti, verso un tipo non gestito cambiando anche il titolo, verso un tipo non gestito passando in bozza, da un tipo non gestito, con la funzione di WordPress che cambia solo il tipo, in uscita e in ingresso; un salvataggio senza cambio di tipo. Quinta parte: un contenuto pubblicato che diventa un allegato, con lo stesso padre e con un padre diverso; un allegato che diventa un contenuto pubblicato. Sesta parte: un contenuto pubblicato mentre un altro componente, dentro la pubblicazione, lo salva di nuovo cambiandone il riassunto | una voce `modifica` con i nomi dei campi; nessuna voce; una voce con i due nomi e nessun valore; `rimozione` e `modifica` con indirizzo e date. Seconda parte: `modifica` con il solo indirizzo; `cambio_stato` e `modifica` con le due date; `modifica` con indirizzo e date; nessuna `modifica` per l'indirizzo generato dopo il salvataggio; `modifica` con le due date in tutti e tre i casi, nessuna senza la data in UTC e con la data di prima; nessuna `modifica` per la data rimessa a oggi; `modifica` con l'indirizzo. Terza parte: `modifica` con l'autore sul pubblicato e su quello in verifica, niente sulla bozza; nessuna voce; `modifica` con il padre sul figlio pubblicato, poi `eliminazione`, niente sulla bozza. Quarta parte: `cambio_tipo` uscita nella sezione di prima e ingresso in quella nuova; l'uscita con il titolo fra i campi; l'uscita con gli stati; l'ingresso; l'uscita e l'ingresso; solo `modifica`. Quinta parte: `cambio_tipo` in uscita e `allegato_aggiunto` sul padre, in tutti e due i casi; `pubblicazione`, `cambio_tipo` in ingresso e `allegato_eliminato` sul padre. Sesta parte: `pubblicazione` e una sola `modifica`, con il riassunto, quella del salvataggio interno; niente indirizzo e date di WordPress |
+| C-197 | Modifica del titolo di un pubblicato e di uno in verifica; salvataggio senza modifiche; modifica di testo e riassunto; un pubblicato reso privato cambiando nello stesso salvataggio indirizzo e data. Seconda parte, da in verifica: pubblicato scegliendo l'indirizzo; programmato indicando la data; pubblicato mentre un altro componente cambia indirizzo e date; senza titolo; un pubblicato di cui un altro componente svuota il nome, che WordPress rigenera uguale; con la sola data locale dalla funzione di base, con la data in UTC nulla, assente o vuota, e senza data in UTC con la data locale di prima; in verifica da giorni e pubblicato con la funzione di aggiornamento; un annuncio di modifica lanciato a mano. Terza parte, senza salvataggio: un utente eliminato affidando a un altro un pubblicato, uno in verifica e una bozza; un utente eliminato senza affidare niente; un contenuto gerarchico eliminato, con un figlio pubblicato e uno in bozza. Quarta parte: cambio di tipo fra due tipi gestiti, verso un tipo non gestito cambiando anche il titolo, verso un tipo non gestito passando in bozza, da un tipo non gestito, con la funzione di WordPress che cambia solo il tipo, in uscita e in ingresso; un salvataggio senza cambio di tipo. Quinta parte: un contenuto pubblicato che diventa un allegato, con lo stesso padre e con un padre diverso; un allegato che diventa un contenuto pubblicato; le stesse due conversioni con la funzione che cambia solo il tipo, con la copia in memoria. Sesta parte: un contenuto pubblicato mentre un altro componente, dentro la pubblicazione, lo salva di nuovo cambiandone il riassunto; un titolo cambiato mentre un altro componente, dentro il salvataggio, lo rimette com'era | una voce `modifica` con i nomi dei campi; nessuna voce; una voce con i due nomi e nessun valore; `rimozione` e `modifica` con indirizzo e date. Seconda parte: `modifica` con il solo indirizzo; `cambio_stato` e `modifica` con le due date; `modifica` con indirizzo e date; nessuna `modifica` per l'indirizzo generato dopo il salvataggio; `modifica` con il solo riassunto; `modifica` con le due date in tutti e tre i casi, nessuna senza la data in UTC e con la data di prima; nessuna `modifica` per la data rimessa a oggi; `modifica` con l'indirizzo. Terza parte: `modifica` con l'autore sul pubblicato e su quello in verifica, niente sulla bozza; nessuna voce; `modifica` con il padre sul figlio pubblicato, poi `eliminazione`, niente sulla bozza. Quarta parte: `cambio_tipo` uscita nella sezione di prima e ingresso in quella nuova; l'uscita con il titolo fra i campi; l'uscita con gli stati; l'ingresso; l'uscita e l'ingresso; solo `modifica`. Quinta parte: `cambio_tipo` in uscita e `allegato_aggiunto` sul padre, in tutti e due i casi; `pubblicazione`, `cambio_tipo` in ingresso e `allegato_eliminato` sul padre; con la funzione diretta, `cambio_tipo` e la voce sul padre allo stesso modo. Sesta parte: `pubblicazione` e una sola `modifica`, con il riassunto, quella del salvataggio interno; niente indirizzo e date di WordPress; due `modifica` con il titolo, una per salvataggio |
 | C-198 | Un pubblicato va in bozza, in verifica, privato, nel cestino; un pubblicato e uno in verifica rimessi in bozza automatica da un componente, accanto alla nascita di una bozza automatica; un pubblicato rimesso in bozza automatica e poi ripubblicato, un altro poi eliminato, nella stessa richiesta e in un'altra; una bozza automatica mai nata salvata e una eliminata | una voce `rimozione` ciascuno, e nessuna `modifica` accanto; `rimozione` e `cambio_stato`, e niente per la nascita; `pubblicazione` senza una seconda `creazione`, e `eliminazione`, in tutti e due i casi; `creazione` per la prima e niente per la seconda |
 | C-199 | Bozza, verifica, bozza, cestino, ripristino; un pubblicato messo nel cestino e ripreso | quattro `cambio_stato` con gli stati giusti; `rimozione` e `cambio_stato`, nessuna `modifica` per il suffisso del cestino |
 | C-200 | Eliminazione definitiva di un pubblicato con data di fine; eliminazione che la banca dati rifiuta, seguita da una data di fine; eliminazione con la copia in memoria buttata appena prima della cancellazione; eliminazione di una bozza automatica; un utente eliminato senza affidare i contenuti, con un contenuto di un tipo con autore e uno di un tipo senza | una sola voce `eliminazione` con lo stato; le voci di prima restano tutte; nessuna voce `eliminazione` per il contenuto che c'è ancora, e la data di fine successiva si registra; una sola `eliminazione` e nessuna voce mancata; nessuna voce; `eliminazione` del primo, niente per il secondo, che resta |
@@ -452,6 +456,9 @@ rimesso a posto subito dopo.
 | G122 | aggiunta di metadati non riconosciuta fra i due annunci | C-200, C-201, C-202 |
 | G123 | salvataggio interno con la richiesta di quello esterno | C-197 |
 | G124 | campo scritto uguale a prima contato come modifica | C-197 |
+| G127 | conseguenze sul padre solo dal salvataggio, non dal cambio di tipo diretto | C-197 |
+| G128 | contenuto riletto al posto di quello scritto dal salvataggio | C-197 |
+| G129 | nome rimasto vuoto dopo i filtri preso dai dati scritti | C-197 |
 | G125 | dati finali sulla richiesta sbagliata della pila | C-197 |
 | G126 | cambio di tipo guardato dopo il ramo degli allegati | C-197 |
 
@@ -459,10 +466,12 @@ rimesso a posto subito dopo.
 si legge per scrittura e non per contenuto. G05, G72 e G113 agivano sulla lettura unica per
 contenuto, che non c'è più: la stessa difesa ora la misurano G119..G121, e G71 è diventato
 G121. G43 e G44 agivano sul confronto del nome della chiave, tolto nel quarto giro: li
-misurano G111 e G112. G03, G22, G33, G73, G74, G83 e G110..G112 sono stati riapplicati alla
-forma nuova del codice, con le stesse righe rosse o con qualcuna in più. Tutti gli altri
-guasti, da G01, sono stati rifatti sul codice del quinto giro: ciascuno fa diventare rossa
-almeno una prova, tranne G45 e G93, equivalenti per le ragioni scritte nelle loro righe.
+misurano G111 e G112. Dopo il sesto giro G124 agiva su una regola compresa nel confronto con
+i dati scritti: la misura G128. G03, G22, G33, G73, G74, G83, G110..G112, G117 e G118 sono
+stati riapplicati alla forma nuova del codice, con le stesse righe rosse o con qualcuna in
+più. Tutti gli altri guasti, da G01, sono stati rifatti sul codice del sesto giro, su una banca
+dati pulita e con G27 per ultimo: ciascuno fa diventare rossa almeno una prova, tranne G12,
+G45 e G93, equivalenti per le ragioni scritte nelle loro righe.
 
 **Due guasti non hanno fatto diventare rossa nessuna riga, alla prima passata**, e le righe
 sono state corrette prima di chiudere. G25: una voce automatica su un tipo non gestito non si
@@ -660,6 +669,20 @@ cancellazione resta dopo un fallimento, ma il tentativo successivo la riscrive e
 che ha voci non torna mai nato. Le letture della banca dati sulle righe spostate
 dall'eliminazione usano lo stesso confronto delle istruzioni di WordPress che spostano.
 
+**Il sesto giro di revisione.** Due difetti, dello stesso tipo: una correzione del quinto giro
+arrivata a una sola delle strade. Stesso metodo: prova scritta e vista fallire sul codice
+vecchio, poi guasti.
+
+1. *Il campo rimesso com'era da un salvataggio annidato.* Il salvataggio esterno cambiava il
+   titolo, quello interno lo rimetteva com'era, e il confronto dell'esterno fra la copia di
+   prima e quella riletta alla fine non vedeva niente. Ora il salvataggio esterno si giudica
+   su ciò che ha mandato alla banca dati, dopo tutti i filtri; fa eccezione il nome rimasto
+   vuoto, che WordPress genera dopo aver scritto. La regola del quinto giro sui campi scritti
+   uguali a prima è compresa in questa (C-197; G128, G129).
+2. *La conversione in allegato con il cambio di tipo diretto.* Le voci sul padre esistevano
+   solo sulla strada del salvataggio. Ora stanno nel cambio di tipo, che le due strade
+   chiamano entrambe (C-197; G127).
+
 ## 12. Che cosa l'albo dovrà fare, adesso che questa unità esiste
 
 - **Scrivere la voce con il motivo dopo il passaggio, dentro la stessa transazione.** Un
@@ -689,7 +712,7 @@ dall'eliminazione usano lo stesso confronto delle istruzioni di WordPress che sp
 
 WordPress cambia un contenuto anche senza il salvataggio ordinario: con istruzioni dirette
 sulla banca dati, o con funzioni che toccano una parte sola. Questa è la mappa delle strade
-lette in cinque giri di revisione e nella rilettura finale, e di come ciascuna è coperta. "Fuori per scelta" vuol dire
+lette in sei giri di revisione e nella rilettura dopo il quinto, e di come ciascuna è coperta. "Fuori per scelta" vuol dire
 dichiarato al punto 8.
 
 | Strada | Che cosa cambia | Come è coperta | Righe |
@@ -701,8 +724,8 @@ dichiarato al punto 8.
 | Suffisso del cestino aggiunto a un contenuto già nel cestino | nome | fuori per scelta | punto 8 |
 | Cambio di tipo con il salvataggio | tipo | `cambio_tipo` in uscita e in ingresso | C-197 |
 | Cambio di tipo con l'istruzione diretta, in uscita e in ingresso | tipo | visto se il contenuto era in memoria, nei due versi; se no, non visto | C-197; punto 8 |
-| Contenuto che diventa allegato, allegato che diventa contenuto | tipo, padre | `cambio_tipo` e la voce dell'allegato aggiunto o tolto sul padre | C-197 |
-| Salvataggio dello stesso contenuto dentro un altro salvataggio | campi, stato | ciascun salvataggio con la sua richiesta e le sue voci | C-197 |
+| Contenuto che diventa allegato, allegato che diventa contenuto, con il salvataggio o con l'istruzione diretta | tipo, padre | `cambio_tipo` e la voce dell'allegato aggiunto o tolto sul padre, uguali sulle due strade | C-197 |
+| Salvataggio dello stesso contenuto dentro un altro salvataggio, anche che rimette com'era un campo | campi, stato | ciascun salvataggio con la sua richiesta e le sue voci; l'esterno giudicato su ciò che ha scritto | C-197 |
 | Salvataggio rifiutato dalla banca dati | niente, ma la richiesta resta | fuori: dichiarato | punto 8 |
 | Tipo salvato con altre maiuscole | tipo | fuori da questa unità: vedi sotto | nessuna |
 | Eliminazione definitiva | metadati, allegati e figli spostati sul padre, riga | `eliminazione` dopo la riga; spostamenti registrati; i metadati sono dentro l'eliminazione | C-197, C-200, C-203 |
