@@ -49,6 +49,17 @@ final class Conformita_Core_Indicizzazione {
 	const PRIORITA = PHP_INT_MAX;
 
 	/**
+	 * Tipo che non esiste, usato per svuotare una lettura della mappa.
+	 *
+	 * Il vincolo sul tipo e' l'unico che WordPress applica sempre: gli altri
+	 * modi di chiedere "niente", come `post__in` con zero, cedono ai selettori
+	 * per identificativo. Riga C-242.
+	 *
+	 * @var string
+	 */
+	const TIPO_INESISTENTE = 'conformita_core_nessuno';
+
+	/**
 	 * Direttive rivolte a un motore specifico, trovate nell'intestazione della
 	 * richiesta in corso e da emettere su una riga propria. Riga C-233.
 	 *
@@ -116,6 +127,16 @@ final class Conformita_Core_Indicizzazione {
 			array(
 				'aggancio'  => 'the_posts',
 				'metodo'    => 'filtra_contenuti_mappa',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'wp_sitemaps_posts_entry',
+				'metodo'    => 'filtra_voce_mappa',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'wp_sitemaps_add_provider',
+				'metodo'    => 'sostituisci_fornitore_mappa',
 				'argomenti' => 2,
 			),
 		);
@@ -542,21 +563,32 @@ final class Conformita_Core_Indicizzazione {
 			return;
 		}
 
+		/*
+		 * I selettori per identificativo vincono su `post__in`, e `page_id`
+		 * riscrive anche i vincoli sul padre: si guarda il contenuto scelto,
+		 * e se e' vietato la lettura si svuota. Riga C-242.
+		 */
+		foreach ( array( 'p', 'page_id', 'attachment_id' ) as $selettore ) {
+			$scelto = absint( $interrogazione->get( $selettore ) );
+
+			if ( $scelto > 0 && self::contenuto_vietato( $scelto ) ) {
+				self::svuota( $interrogazione );
+
+				return;
+			}
+		}
+
 		$tipi = $interrogazione->get( 'post_type' );
 
 		if ( 'any' === $tipi || ( empty( $tipi ) && ! empty( $interrogazione->get( 'tax_query' ) ) ) ) {
 			$tipi = array_values( get_post_types( array( 'exclude_from_search' => false ) ) );
 		}
 
-		if ( empty( $tipi ) ) {
-			return;
-		}
-
-		$tipi    = (array) $tipi;
+		$tipi    = empty( $tipi ) ? array() : (array) $tipi;
 		$rimasti = array_values( array_diff( $tipi, $vietati ) );
 
-		if ( empty( $rimasti ) ) {
-			$interrogazione->set( 'post__in', array( 0 ) );
+		if ( ! empty( $tipi ) && empty( $rimasti ) ) {
+			self::svuota( $interrogazione );
 
 			return;
 		}
@@ -565,7 +597,18 @@ final class Conformita_Core_Indicizzazione {
 			$interrogazione->set( 'post_type', $rimasti );
 		}
 
-		if ( in_array( 'attachment', $rimasti, true ) ) {
+		/*
+		 * Gli allegati possono entrare anche senza essere nell'elenco dei
+		 * tipi: WordPress li cerca da se' quando la lettura sceglie un
+		 * allegato per nome o per percorso.
+		 */
+		$allegati = in_array( 'attachment', $rimasti, true );
+
+		foreach ( array( 'attachment', 'pagename', 'name' ) as $selettore ) {
+			$allegati = $allegati || '' !== (string) $interrogazione->get( $selettore );
+		}
+
+		if ( $allegati ) {
 			$padri = self::contenuti_dei_tipi( $vietati );
 
 			if ( ! empty( $padri ) ) {
@@ -575,15 +618,34 @@ final class Conformita_Core_Indicizzazione {
 	}
 
 	/**
+	 * Svuota una lettura della mappa, in un modo che nessun selettore scavalca.
+	 *
+	 * Si tolgono i selettori che WordPress fa prevalere o che gli fanno
+	 * cambiare tipo da solo (un percorso che porta a un allegato), e si
+	 * chiede un tipo che non esiste. Riga C-242.
+	 *
+	 * @param WP_Query $interrogazione Interrogazione in preparazione.
+	 */
+	private static function svuota( WP_Query $interrogazione ) {
+		foreach ( array( 'p', 'page_id', 'attachment_id', 'subpost_id', 'name', 'pagename', 'attachment', 'subpost' ) as $selettore ) {
+			$interrogazione->set( $selettore, '' );
+		}
+
+		$interrogazione->set( 'post_name__in', array() );
+		$interrogazione->set( 'post_type', array( self::TIPO_INESISTENTE ) );
+		$interrogazione->set( 'post__in', array( 0 ) );
+	}
+
+	/**
 	 * Esclude dall'interrogazione i figli dei contenuti indicati.
 	 *
 	 * WordPress legge i tre vincoli sul padre in ordine e ne applica uno solo:
 	 * `post_parent`, se e' un numero, poi `post_parent__in`, e soltanto in
 	 * mancanza dei due `post_parent__not_in`. Aggiungere l'esclusione accanto a
 	 * un'inclusione non escluderebbe niente, quindi si corregge il vincolo che
-	 * WordPress applica davvero. Se non resta nessun padre ammesso,
-	 * l'interrogazione non restituisce niente: un elenco di padri vuoto, per
-	 * WordPress, vorrebbe dire nessun vincolo. Riga C-241.
+	 * WordPress applica davvero. Nell'inclusione lo zero resta: vuol dire
+	 * "allegati senza contenuto", che nessuna sezione governa (C-243). Se non
+	 * resta nessun padre ammesso, la lettura si svuota. Riga C-241.
 	 *
 	 * @param WP_Query        $interrogazione Interrogazione in preparazione.
 	 * @param array<int, int> $padri          Contenuti i cui figli si escludono.
@@ -593,19 +655,19 @@ final class Conformita_Core_Indicizzazione {
 
 		if ( is_numeric( $padre ) ) {
 			if ( in_array( (int) $padre, $padri, true ) ) {
-				$interrogazione->set( 'post__in', array( 0 ) );
+				self::svuota( $interrogazione );
 			}
 
 			return;
 		}
 
-		$inclusi = array_filter( array_map( 'absint', (array) $interrogazione->get( 'post_parent__in' ) ) );
+		$inclusione = $interrogazione->get( 'post_parent__in' );
 
-		if ( ! empty( $inclusi ) ) {
-			$ammessi = array_values( array_diff( $inclusi, $padri ) );
+		if ( ! empty( $inclusione ) ) {
+			$ammessi = array_values( array_diff( array_map( 'absint', (array) $inclusione ), $padri ) );
 
 			if ( empty( $ammessi ) ) {
-				$interrogazione->set( 'post__in', array( 0 ) );
+				self::svuota( $interrogazione );
 			} else {
 				$interrogazione->set( 'post_parent__in', $ammessi );
 			}
@@ -674,5 +736,50 @@ final class Conformita_Core_Indicizzazione {
 		}
 
 		return $rimasti;
+	}
+
+	/**
+	 * L'ultima difesa della mappa: la voce di un contenuto vietato si svuota.
+	 *
+	 * Le difese sull'interrogazione guardano come la lettura e' chiesta, e un
+	 * componente ha molti modi di chiederla. Questa guarda che cosa sta per
+	 * diventare un indirizzo della mappa: WordPress passa da qui con ogni
+	 * contenuto letto, qualunque interrogazione l'abbia portato, anche con i
+	 * filtri spenti. La voce vuota la toglie il fornitore della mappa di core
+	 * (`sostituisci_fornitore_mappa()`); se un altro componente ha sostituito
+	 * il fornitore, nella mappa resta una voce senza indirizzo, che non porta
+	 * nessun motore da nessuna parte. Riga C-244.
+	 *
+	 * @internal Aggancio di `wp_sitemaps_posts_entry`.
+	 *
+	 * @param mixed $voce      Voce della mappa.
+	 * @param mixed $contenuto Contenuto della voce.
+	 * @return mixed Voce vuota per i contenuti vietati.
+	 */
+	public static function filtra_voce_mappa( $voce, $contenuto = null ) {
+		return self::contenuto_vietato( $contenuto ) ? array() : $voce;
+	}
+
+	/**
+	 * Mette al posto del fornitore dei contenuti della mappa la sua versione
+	 * che scarta le voci vuote.
+	 *
+	 * Soltanto se il fornitore e' ancora quello di WordPress: uno sostituito
+	 * da un altro componente non si tocca. Riga C-244.
+	 *
+	 * @internal Aggancio di `wp_sitemaps_add_provider`.
+	 *
+	 * @param mixed $fornitore Fornitore registrato.
+	 * @param mixed $nome      Nome del fornitore.
+	 * @return mixed Fornitore.
+	 */
+	public static function sostituisci_fornitore_mappa( $fornitore, $nome = '' ) {
+		if ( 'posts' !== $nome || ! is_object( $fornitore ) || 'WP_Sitemaps_Posts' !== get_class( $fornitore ) ) {
+			return $fornitore;
+		}
+
+		require_once __DIR__ . '/class-conformita-core-mappa-contenuti.php';
+
+		return new Conformita_Core_Mappa_Contenuti();
 	}
 }

@@ -1,7 +1,7 @@
 <?php
 /**
  * Il meccanismo di indicizzazione: righe C-80..C-85, C-225..C-230,
- * C-232..C-239, C-241.
+ * C-232..C-239, C-241..C-244.
  *
  * Le righe C-228 e C-240, il divieto sui file consegnati, stanno in
  * `consegna-test.php`, perche' li' ci sono gli strumenti per chiedere un file
@@ -278,13 +278,35 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Gli indirizzi della mappa per un tipo.
+	 * Gli indirizzi della mappa per un tipo, chiesti al fornitore che WordPress
+	 * usa davvero per la mappa.
 	 *
 	 * @param string $tipo Tipo di contenuto.
 	 * @return array<int, string>
 	 */
 	private function indirizzi_in_mappa( $tipo ) {
-		return wp_list_pluck( ( new WP_Sitemaps_Posts() )->get_url_list( 1, $tipo ), 'loc' );
+		$voci = wp_sitemaps_get_server()->registry->get_provider( 'posts' )->get_url_list( 1, $tipo );
+
+		return array_map( fn( $voce ) => $voce['loc'] ?? '(voce senza indirizzo)', $voci );
+	}
+
+	/**
+	 * Gli indirizzi della mappa per un tipo, senza l'ultima difesa sulle voci.
+	 *
+	 * Le prove sulle difese dell'interrogazione (C-238, C-241, C-242) misurano
+	 * quelle difese da sole: con l'ultima difesa accesa passerebbero anche se
+	 * l'interrogazione lasciasse entrare il contenuto vietato. L'ultima difesa
+	 * ha la sua prova, C-244.
+	 *
+	 * @param string $tipo Tipo di contenuto.
+	 * @return array<int, string>
+	 */
+	private function indirizzi_dalle_interrogazioni( $tipo ) {
+		remove_filter( 'wp_sitemaps_posts_entry', array( 'Conformita_Core_Indicizzazione', 'filtra_voce_mappa' ), Conformita_Core_Indicizzazione::PRIORITA );
+		$indirizzi = $this->indirizzi_in_mappa( $tipo );
+		add_filter( 'wp_sitemaps_posts_entry', array( 'Conformita_Core_Indicizzazione', 'filtra_voce_mappa' ), Conformita_Core_Indicizzazione::PRIORITA, 2 );
+
+		return $indirizzi;
 	}
 
 	/**
@@ -610,7 +632,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	public function test_c230_accensione_e_spegnimento() {
 		$agganci = Conformita_Core_Indicizzazione::agganci();
 
-		$this->assertCount( 6, $agganci );
+		$this->assertCount( 8, $agganci );
 
 		foreach ( $agganci as $aggancio ) {
 			$this->assertSame(
@@ -936,14 +958,14 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 				Conformita_Core_Indicizzazione::avvia();
 				remove_action( 'pre_get_posts', $allarga_dopo, PHP_INT_MAX );
 				add_action( 'pre_get_posts', $allarga_dopo, PHP_INT_MAX );
-				$acceso = $this->indirizzi_in_mappa( $tipo );
+				$acceso = $this->indirizzi_dalle_interrogazioni( $tipo );
 				remove_action( 'pre_get_posts', $allarga_dopo, PHP_INT_MAX );
 			} else {
 				add_filter( 'wp_sitemaps_posts_query_args', $allarga_argomenti );
 				Conformita_Core_Indicizzazione::azzera_avvio();
 				$spento = $this->indirizzi_in_mappa( $tipo );
 				Conformita_Core_Indicizzazione::avvia();
-				$acceso = $this->indirizzi_in_mappa( $tipo );
+				$acceso = $this->indirizzi_dalle_interrogazioni( $tipo );
 				remove_filter( 'wp_sitemaps_posts_query_args', $allarga_argomenti );
 			}
 
@@ -1033,7 +1055,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 			Conformita_Core_Indicizzazione::azzera_avvio();
 			$spento = $this->indirizzi_in_mappa( 'post' );
 			Conformita_Core_Indicizzazione::avvia();
-			$acceso = $this->indirizzi_in_mappa( 'post' );
+			$acceso = $this->indirizzi_dalle_interrogazioni( 'post' );
 
 			remove_filter( 'wp_sitemaps_posts_query_args', $allarga );
 
@@ -1051,6 +1073,180 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 		}
 
 		set_query_var( 'sitemap', '' );
+	}
+
+	/**
+	 * Legge la mappa degli articoli con argomenti aggiunti da un componente, a
+	 * meccanismo spento e acceso (senza l'ultima difesa).
+	 *
+	 * @param array<string, mixed> $argomenti Argomenti aggiunti alla lettura.
+	 * @return array{0: array<int, string>, 1: array<int, string>} Spento, acceso.
+	 */
+	private function mappa_personalizzata( array $argomenti ) {
+		$allarga = function ( $originali ) use ( $argomenti ) {
+			return array_merge( $originali, $argomenti );
+		};
+		add_filter( 'wp_sitemaps_posts_query_args', $allarga );
+
+		set_query_var( 'sitemap', 'posts' );
+
+		Conformita_Core_Indicizzazione::azzera_avvio();
+		$spento = $this->indirizzi_in_mappa( 'post' );
+		Conformita_Core_Indicizzazione::avvia();
+		$acceso = $this->indirizzi_dalle_interrogazioni( 'post' );
+
+		set_query_var( 'sitemap', '' );
+		remove_filter( 'wp_sitemaps_posts_query_args', $allarga );
+
+		return array( $spento, $acceso );
+	}
+
+	/**
+	 * C-242: la mappa letta scegliendo un contenuto per identificativo, con i
+	 * filtri spenti. I selettori per identificativo vincono su `post__in`, e
+	 * `page_id` anche sui vincoli sul padre: la lettura di un contenuto vietato
+	 * deve risultare vuota, quella di un contenuto consentito no.
+	 */
+	public function test_c242_contenuto_scelto_per_identificativo() {
+		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
+		$articolo = $this->contenuto( 'post' );
+		$allegato = self::factory()->attachment->create_object( 'vietato.pdf', $vietato, array( 'post_mime_type' => 'application/pdf' ) );
+
+		$spenti   = array( 'suppress_filters' => true );
+		$allegati = array(
+			'post_type'   => array( 'post', 'attachment' ),
+			'post_status' => array( 'publish', 'inherit' ),
+		);
+
+		$casi = array(
+			'p sul tipo vietato'         => array(
+				array(
+					'post_type' => self::TIPO_CHIUSO,
+					'p'         => $vietato,
+				) + $spenti,
+				$vietato,
+			),
+			'page_id sul tipo vietato'   => array(
+				array(
+					'post_type' => self::TIPO_CHIUSO,
+					'page_id'   => $vietato,
+				) + $spenti,
+				$vietato,
+			),
+			'p fra tipi misti'           => array(
+				array(
+					'post_type' => array( 'post', self::TIPO_CHIUSO ),
+					'p'         => $vietato,
+				) + $spenti,
+				$vietato,
+			),
+			'allegato per attachment_id' => array( $allegati + array( 'attachment_id' => $allegato ) + $spenti, $allegato ),
+			'allegato per p e padre'     => array(
+				$allegati + array(
+					'p'           => $allegato,
+					'post_parent' => $vietato,
+				) + $spenti,
+				$allegato,
+			),
+			'allegato per page_id'       => array( $allegati + array( 'page_id' => $allegato ) + $spenti, $allegato ),
+			'allegato per nome'          => array(
+				array(
+					'post_type'   => '',
+					'post_status' => 'inherit',
+					'attachment'  => get_post_field( 'post_name', $allegato ),
+				) + $spenti,
+				$allegato,
+			),
+		);
+
+		foreach ( $casi as $nome => $caso ) {
+			list( $argomenti, $scelto ) = $caso;
+			list( $spento, $acceso )    = $this->mappa_personalizzata( $argomenti );
+
+			$this->assertContains( get_permalink( $scelto ), $spento, $nome . ': precondizione, senza il meccanismo il contenuto scelto entra.' );
+			$this->assertSame( array(), $acceso, $nome . ': la lettura e\' vuota.' );
+		}
+
+		list( , $acceso ) = $this->mappa_personalizzata(
+			array(
+				'post_type' => array( 'post', self::TIPO_CHIUSO ),
+				'p'         => $articolo,
+			) + $spenti
+		);
+		$this->assertSame( array( get_permalink( $articolo ) ), $acceso, 'Un articolo scelto per identificativo resta.' );
+	}
+
+	/**
+	 * C-243: gli allegati senza contenuto, inclusi nella lettura con il padre
+	 * zero, restano nella mappa: nessuna sezione li governa.
+	 */
+	public function test_c243_allegati_senza_contenuto() {
+		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
+		$articolo = $this->contenuto( 'post' );
+
+		$orfano            = get_permalink( self::factory()->attachment->create_object( 'orfano.pdf', 0, array( 'post_mime_type' => 'application/pdf' ) ) );
+		$allegato_vietato  = get_permalink( self::factory()->attachment->create_object( 'vietato.pdf', $vietato, array( 'post_mime_type' => 'application/pdf' ) ) );
+		$allegato_articolo = get_permalink( self::factory()->attachment->create_object( 'articolo.pdf', $articolo, array( 'post_mime_type' => 'application/pdf' ) ) );
+
+		$base = array(
+			'post_type'        => 'attachment',
+			'post_status'      => 'inherit',
+			'suppress_filters' => true,
+		);
+
+		list( $spento, $acceso ) = $this->mappa_personalizzata( $base + array( 'post_parent__in' => array( 0, $vietato ) ) );
+		$this->assertContains( $allegato_vietato, $spento, 'Precondizione: senza il meccanismo l\'allegato del vietato entra.' );
+		$this->assertSame( array( $orfano ), $acceso, 'Zero e vietato: resta l\'orfano.' );
+
+		list( , $acceso ) = $this->mappa_personalizzata( $base + array( 'post_parent__in' => array( 0, $vietato, $articolo ) ) );
+		$this->assertContains( $orfano, $acceso, 'Zero, vietato e articolo: l\'orfano resta.' );
+		$this->assertContains( $allegato_articolo, $acceso, 'Zero, vietato e articolo: l\'allegato dell\'articolo resta.' );
+		$this->assertNotContains( $allegato_vietato, $acceso );
+
+		list( , $acceso ) = $this->mappa_personalizzata( $base + array( 'post_parent' => 0 ) );
+		$this->assertSame( array( $orfano ), $acceso, 'Padre zero: l\'orfano resta.' );
+	}
+
+	/**
+	 * C-244: l'ultima difesa della mappa. Anche quando le difese
+	 * sull'interrogazione sono scavalcate, la voce di un contenuto vietato non
+	 * diventa un indirizzo, e nella mappa non restano voci vuote.
+	 *
+	 * Lo scavalcamento e' un componente che allarga la lettura dopo la
+	 * restrizione, alla stessa priorita', e spegne i filtri: la restrizione
+	 * non vede l'allargamento e `the_posts` non passa.
+	 */
+	public function test_c244_ultima_difesa_sulle_voci() {
+		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
+		$articolo = $this->contenuto( 'post' );
+
+		$this->assertInstanceOf( 'Conformita_Core_Mappa_Contenuti', wp_sitemaps_get_server()->registry->get_provider( 'posts' ), 'Il fornitore dei contenuti della mappa e\' quello di core.' );
+
+		$scavalca = function ( $interrogazione ) {
+			if ( ! $interrogazione->is_main_query() ) {
+				$interrogazione->set( 'post_type', array( 'post', self::TIPO_CHIUSO ) );
+				$interrogazione->set( 'suppress_filters', true );
+			}
+		};
+
+		set_query_var( 'sitemap', 'posts' );
+		add_action( 'pre_get_posts', $scavalca, PHP_INT_MAX );
+
+		$interrogazioni = $this->indirizzi_dalle_interrogazioni( 'post' );
+		$mappa          = $this->indirizzi_in_mappa( 'post' );
+
+		remove_action( 'pre_get_posts', $scavalca, PHP_INT_MAX );
+		set_query_var( 'sitemap', '' );
+
+		$this->assertContains( get_permalink( $vietato ), $interrogazioni, 'Precondizione: le difese sull\'interrogazione sono scavalcate.' );
+		$this->assertNotContains( get_permalink( $vietato ), $mappa, 'Il vietato non e\' nella mappa.' );
+		$this->assertNotContains( '(voce senza indirizzo)', $mappa, 'Nessuna voce vuota.' );
+		$this->assertContains( get_permalink( $articolo ), $mappa, 'L\'articolo resta.' );
+
+		$this->assertSame( array( 'loc' => 'x' ), Conformita_Core_Indicizzazione::filtra_voce_mappa( array( 'loc' => 'x' ), get_post( $articolo ) ) );
+
+		$altro = new WP_Sitemaps_Taxonomies();
+		$this->assertSame( $altro, Conformita_Core_Indicizzazione::sostituisci_fornitore_mappa( $altro, 'taxonomies' ), 'Gli altri fornitori non si toccano.' );
 	}
 
 	/**
