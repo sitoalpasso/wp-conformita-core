@@ -1,7 +1,7 @@
 <?php
 /**
  * Il meccanismo di indicizzazione: righe C-80..C-85, C-225..C-230,
- * C-232..C-239, C-241..C-244.
+ * C-232..C-239, C-241..C-246.
  *
  * Le righe C-228 e C-240, il divieto sui file consegnati, stanno in
  * `consegna-test.php`, perche' li' ci sono gli strumenti per chiedere un file
@@ -1012,8 +1012,8 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	/**
 	 * C-241: gli allegati letti dalla mappa per contenuto padre, con i filtri
 	 * spenti. WordPress applica un solo vincolo sul padre, e l'inclusione vince
-	 * sull'esclusione: la restrizione deve correggere quello che WordPress
-	 * applica davvero.
+	 * sull'esclusione: qualunque vincolo il componente abbia messo, l'allegato
+	 * del vietato non entra e quello dell'articolo si'.
 	 */
 	public function test_c241_allegati_scelti_per_padre() {
 		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
@@ -1247,6 +1247,120 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 
 		$altro = new WP_Sitemaps_Taxonomies();
 		$this->assertSame( $altro, Conformita_Core_Indicizzazione::sostituisci_fornitore_mappa( $altro, 'taxonomies' ), 'Gli altri fornitori non si toccano.' );
+	}
+
+	/**
+	 * C-245: selettori per identificativo concorrenti. Conta quello che
+	 * WordPress sceglie davvero: un selettore che scarta non svuota la
+	 * lettura, e uno che vince su un contenuto vietato la svuota.
+	 */
+	public function test_c245_selettori_concorrenti() {
+		$vietato           = $this->contenuto( self::TIPO_CHIUSO );
+		$articolo          = $this->contenuto( 'post' );
+		$allegato_vietato  = self::factory()->attachment->create_object( 'vietato.pdf', $vietato, array( 'post_mime_type' => 'application/pdf' ) );
+		$allegato_articolo = self::factory()->attachment->create_object( 'articolo.pdf', $articolo, array( 'post_mime_type' => 'application/pdf' ) );
+
+		$tutti = array(
+			'post_type'        => array( 'post', 'attachment', self::TIPO_CHIUSO ),
+			'post_status'      => array( 'publish', 'inherit' ),
+			'suppress_filters' => true,
+		);
+
+		$casi = array(
+			'p vietato, attachment_id consentito'       => array(
+				array(
+					'p'             => $vietato,
+					'attachment_id' => $allegato_articolo,
+				),
+				$allegato_articolo,
+			),
+			'p vietato, page_id consentito'             => array(
+				array(
+					'p'       => $vietato,
+					'page_id' => $articolo,
+				),
+				$articolo,
+			),
+			'attachment_id vietato, page_id consentito' => array(
+				array(
+					'attachment_id' => $allegato_vietato,
+					'page_id'       => $articolo,
+				),
+				$articolo,
+			),
+			'p consentito, attachment_id vietato'       => array(
+				array(
+					'p'             => $articolo,
+					'attachment_id' => $allegato_vietato,
+				),
+				null,
+			),
+			'attachment_id consentito, page_id vietato' => array(
+				array(
+					'attachment_id' => $allegato_articolo,
+					'page_id'       => $vietato,
+				),
+				null,
+			),
+		);
+
+		foreach ( $casi as $nome => $caso ) {
+			list( $selettori, $resta ) = $caso;
+			list( $spento, $acceso )   = $this->mappa_personalizzata( $tutti + $selettori );
+
+			if ( null === $resta ) {
+				$this->assertCount( 1, $spento, $nome . ': precondizione, WordPress sceglie un contenuto solo.' );
+				$this->assertSame( array(), $acceso, $nome . ': vince il vietato, la lettura e\' vuota.' );
+			} else {
+				$this->assertSame( array( get_permalink( $resta ) ), $spento, $nome . ': precondizione, WordPress sceglie il consentito.' );
+				$this->assertSame( array( get_permalink( $resta ) ), $acceso, $nome . ': il consentito resta.' );
+			}
+		}
+	}
+
+	/**
+	 * C-246: in una lettura che mescola allegati e altri tipi, l'esclusione
+	 * tocca soltanto gli allegati dei contenuti vietati. Una pagina consentita
+	 * con lo stesso padre di un allegato vietato resta, qualunque vincolo sul
+	 * padre il componente abbia messo.
+	 */
+	public function test_c246_lettura_mista_con_lo_stesso_padre() {
+		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
+		$pagina   = self::factory()->post->create(
+			array(
+				'post_type'   => 'page',
+				'post_status' => 'publish',
+				'post_parent' => $vietato,
+			)
+		);
+		$allegato = self::factory()->attachment->create_object( 'vietato.pdf', $vietato, array( 'post_mime_type' => 'application/pdf' ) );
+
+		$this->assertFalse( Conformita_Core_Indicizzazione::contenuto_vietato( $pagina ), 'Precondizione: la pagina non e\' vietata.' );
+
+		$misto = array(
+			'post_type'        => array( 'page', 'attachment' ),
+			'post_status'      => array( 'publish', 'inherit' ),
+			'suppress_filters' => true,
+		);
+
+		$casi = array(
+			'senza vincoli sul padre' => array(),
+			'padre singolo vietato'   => array( 'post_parent' => $vietato ),
+			'elenco dei padri'        => array( 'post_parent__in' => array( $vietato ) ),
+			'inclusione di entrambi'  => array( 'post__in' => array( $pagina, $allegato ) ),
+		);
+
+		foreach ( $casi as $nome => $vincoli ) {
+			list( $spento, $acceso ) = $this->mappa_personalizzata( $misto + $vincoli );
+
+			$this->assertContains( get_permalink( $allegato ), $spento, $nome . ': precondizione, senza il meccanismo l\'allegato entra.' );
+			$this->assertContains( get_permalink( $pagina ), $spento, $nome . ': precondizione, la pagina c\'e\'.' );
+			$this->assertSame( array( get_permalink( $pagina ) ), $acceso, $nome . ': resta la pagina, sparisce solo l\'allegato.' );
+		}
+
+		list( $spento, $acceso ) = $this->mappa_personalizzata( $misto + array( 'post__in' => array( $allegato ) ) );
+		$this->assertSame( array( get_permalink( $allegato ) ), $spento, 'Precondizione: l\'inclusione del solo allegato lo porta nella mappa.' );
+		$this->assertSame( array(), $acceso, 'Inclusione del solo allegato vietato: la lettura e\' vuota.' );
 	}
 
 	/**

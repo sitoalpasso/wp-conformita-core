@@ -524,25 +524,31 @@ final class Conformita_Core_Indicizzazione {
 	}
 
 	/**
-	 * Le interrogazioni della mappa non leggono i tipi vietati.
+	 * Le interrogazioni della mappa non leggono i contenuti vietati.
 	 *
-	 * Prima difesa sulla mappa allargata, riga C-238. Il filtro sui contenuti
-	 * restituiti non basta da solo: un componente che chiede la lettura con
-	 * `suppress_filters` spegne `the_posts`, mentre `pre_get_posts` passa
-	 * sempre. Si tolgono i tipi vietati dall'elenco dei tipi letti, anche
-	 * quando l'elenco e' `any` o manca con una tassonomia, che WordPress
-	 * allarga a tutti i tipi ricercabili. Se non resta nessun tipo,
-	 * l'interrogazione non restituisce niente: un elenco di tipi vuoto,
-	 * per WordPress, vorrebbe dire gli articoli. Se fra i tipi letti ci sono
-	 * gli allegati, si escludono quelli appesi a un contenuto vietato, qualunque
-	 * vincolo sul padre il componente abbia gia' messo (C-241). Stessi
-	 * confini del filtro sui contenuti: solo durante la mappa e solo sulle
-	 * interrogazioni secondarie.
+	 * Difesa preventiva sulla mappa, righe C-238, C-241..C-243. Il filtro sui
+	 * contenuti restituiti non basta da solo: un componente che chiede la
+	 * lettura con `suppress_filters` spegne `the_posts`, mentre
+	 * `pre_get_posts` passa sempre. La restrizione toglie soltanto quello che
+	 * la politica vieta, contenuto per contenuto, e mai quello che le sta
+	 * accanto: un contenuto consentito escluso dalla mappa e' un danno, non
+	 * una prudenza (C-245, C-246).
 	 *
-	 * **Limite dichiarato.** Un componente che interviene su `pre_get_posts`
-	 * dopo questo aggancio, o che scrive l'elenco degli indirizzi da se' con
-	 * `wp_sitemaps_posts_pre_url_list`, resta fuori dalla sua portata; il
-	 * primo caso lo ripara ancora `the_posts`, se non e' spento.
+	 * 1. Se la lettura sceglie un contenuto per identificativo, conta quello
+	 *    che WordPress sceglie davvero, con le sue precedenze
+	 *    (`scelto_da_wordpress()`): se e' vietato la lettura si svuota,
+	 *    altrimenti non si tocca niente.
+	 * 2. Si tolgono i tipi vietati dall'elenco dei tipi letti, anche quando
+	 *    l'elenco e' `any` o manca con una tassonomia, che WordPress allarga a
+	 *    tutti i tipi ricercabili. Se non resta nessun tipo la lettura si
+	 *    svuota: un elenco di tipi vuoto, per WordPress, vorrebbe dire gli
+	 *    articoli.
+	 * 3. Se possono entrare allegati, si escludono per identificativo gli
+	 *    allegati dei contenuti vietati, e soltanto quelli: i vincoli sul padre
+	 *    varrebbero anche per gli altri tipi della lettura.
+	 *
+	 * Solo durante la mappa e solo sulle interrogazioni secondarie. Quello che
+	 * sfugge a questa difesa lo ferma l'ultima, sulle voci (C-244).
 	 *
 	 * @internal Aggancio di `pre_get_posts`.
 	 *
@@ -563,19 +569,14 @@ final class Conformita_Core_Indicizzazione {
 			return;
 		}
 
-		/*
-		 * I selettori per identificativo vincono su `post__in`, e `page_id`
-		 * riscrive anche i vincoli sul padre: si guarda il contenuto scelto,
-		 * e se e' vietato la lettura si svuota. Riga C-242.
-		 */
-		foreach ( array( 'p', 'page_id', 'attachment_id' ) as $selettore ) {
-			$scelto = absint( $interrogazione->get( $selettore ) );
+		$scelto = self::scelto_da_wordpress( $interrogazione );
 
-			if ( $scelto > 0 && self::contenuto_vietato( $scelto ) ) {
+		if ( $scelto > 0 ) {
+			if ( self::contenuto_vietato( $scelto ) ) {
 				self::svuota( $interrogazione );
-
-				return;
 			}
+
+			return;
 		}
 
 		$tipi = $interrogazione->get( 'post_type' );
@@ -609,12 +610,35 @@ final class Conformita_Core_Indicizzazione {
 		}
 
 		if ( $allegati ) {
-			$padri = self::contenuti_dei_tipi( $vietati );
+			$esclusi = self::allegati_dei_tipi( $vietati );
 
-			if ( ! empty( $padri ) ) {
-				self::escludi_padri( $interrogazione, $padri );
+			if ( ! empty( $esclusi ) ) {
+				self::escludi_contenuti( $interrogazione, $esclusi );
 			}
 		}
+	}
+
+	/**
+	 * Il contenuto che WordPress sceglie per identificativo, zero se nessuno.
+	 *
+	 * Le precedenze sono quelle di `WP_Query`: `attachment_id` prende il posto
+	 * di `p`, e `page_id` riscrive tutta la selezione, tranne quando indica la
+	 * pagina degli articoli con la pagina iniziale statica. Un selettore che
+	 * WordPress scarta non conta. Righe C-242 e C-245.
+	 *
+	 * @param WP_Query $interrogazione Interrogazione in preparazione.
+	 * @return int
+	 */
+	private static function scelto_da_wordpress( WP_Query $interrogazione ) {
+		$pagina = absint( $interrogazione->get( 'page_id' ) );
+
+		if ( $pagina > 0 && ( 'page' !== get_option( 'show_on_front' ) || (int) get_option( 'page_for_posts' ) !== $pagina ) ) {
+			return $pagina;
+		}
+
+		$allegato = absint( $interrogazione->get( 'attachment_id' ) );
+
+		return $allegato > 0 ? $allegato : absint( $interrogazione->get( 'p' ) );
 	}
 
 	/**
@@ -637,64 +661,54 @@ final class Conformita_Core_Indicizzazione {
 	}
 
 	/**
-	 * Esclude dall'interrogazione i figli dei contenuti indicati.
+	 * Esclude dalla lettura i contenuti indicati, per identificativo.
 	 *
-	 * WordPress legge i tre vincoli sul padre in ordine e ne applica uno solo:
-	 * `post_parent`, se e' un numero, poi `post_parent__in`, e soltanto in
-	 * mancanza dei due `post_parent__not_in`. Aggiungere l'esclusione accanto a
-	 * un'inclusione non escluderebbe niente, quindi si corregge il vincolo che
-	 * WordPress applica davvero. Nell'inclusione lo zero resta: vuol dire
-	 * "allegati senza contenuto", che nessuna sezione governa (C-243). Se non
-	 * resta nessun padre ammesso, la lettura si svuota. Riga C-241.
+	 * WordPress applica un solo vincolo sugli identificativi: `post__in`, e
+	 * soltanto in sua mancanza `post__not_in` (la scelta di un contenuto solo
+	 * e' gia' decisa prima). Con un'inclusione si tolgono gli esclusi
+	 * dall'inclusione, e se non resta niente la lettura si svuota; altrimenti
+	 * si aggiungono all'esclusione. I vincoli sul padre non si toccano: sono
+	 * del componente, e valgono anche per i contenuti consentiti. Righe
+	 * C-241, C-243, C-246.
 	 *
 	 * @param WP_Query        $interrogazione Interrogazione in preparazione.
-	 * @param array<int, int> $padri          Contenuti i cui figli si escludono.
+	 * @param array<int, int> $esclusi        Contenuti da escludere.
 	 */
-	private static function escludi_padri( WP_Query $interrogazione, array $padri ) {
-		$padre = $interrogazione->get( 'post_parent' );
-
-		if ( is_numeric( $padre ) ) {
-			if ( in_array( (int) $padre, $padri, true ) ) {
-				self::svuota( $interrogazione );
-			}
-
-			return;
-		}
-
-		$inclusione = $interrogazione->get( 'post_parent__in' );
+	private static function escludi_contenuti( WP_Query $interrogazione, array $esclusi ) {
+		$inclusione = $interrogazione->get( 'post__in' );
 
 		if ( ! empty( $inclusione ) ) {
-			$ammessi = array_values( array_diff( array_map( 'absint', (array) $inclusione ), $padri ) );
+			$ammessi = array_values( array_diff( array_map( 'absint', (array) $inclusione ), $esclusi ) );
 
 			if ( empty( $ammessi ) ) {
 				self::svuota( $interrogazione );
 			} else {
-				$interrogazione->set( 'post_parent__in', $ammessi );
+				$interrogazione->set( 'post__in', $ammessi );
 			}
 
 			return;
 		}
 
-		$interrogazione->set( 'post_parent__not_in', array_merge( (array) $interrogazione->get( 'post_parent__not_in' ), $padri ) );
+		$interrogazione->set( 'post__not_in', array_merge( array_map( 'absint', (array) $interrogazione->get( 'post__not_in' ) ), $esclusi ) );
 	}
 
 	/**
-	 * Gli identificativi dei contenuti dei tipi indicati, in ogni stato.
+	 * Gli identificativi degli allegati dei contenuti dei tipi indicati.
 	 *
 	 * Si legge la tabella direttamente e non con `get_posts()`: questa lettura
 	 * avviene dentro `pre_get_posts`, e una nuova interrogazione ripasserebbe
-	 * da qui.
+	 * da qui. Un livello solo, come in `contenuto_vietato()`.
 	 *
 	 * @param array<int, string> $tipi Tipi di contenuto.
 	 * @return array<int, int>
 	 */
-	private static function contenuti_dei_tipi( array $tipi ) {
+	private static function allegati_dei_tipi( array $tipi ) {
 		global $wpdb;
 
 		$segnaposto = implode( ', ', array_fill( 0, count( $tipi ), '%s' ) );
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- lettura dentro pre_get_posts, vedi sopra; i segnaposto sono costruiti qui e i valori passano da prepare().
-		$identificativi = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_type IN ( {$segnaposto} )", $tipi ) );
+		$identificativi = $wpdb->get_col( $wpdb->prepare( "SELECT figli.ID FROM {$wpdb->posts} AS figli INNER JOIN {$wpdb->posts} AS padri ON padri.ID = figli.post_parent WHERE figli.post_type = 'attachment' AND padri.post_type IN ( {$segnaposto} )", $tipi ) );
 
 		return array_map( 'intval', $identificativi );
 	}
