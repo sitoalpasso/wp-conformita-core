@@ -383,7 +383,7 @@ usa.
 | C-113 | Vicino con data corrotta: mai il vicino, e le date valide restano |
 | C-114 | Più di un valore per la chiave: anomalia, e la scrittura ripara |
 
-Le righe C-248..C-255 sono dell'unità del punto 16 e sono elencate là.
+Le righe C-248..C-257 sono dell'unità del punto 16 e sono elencate là.
 
 **Righe che NON appartengono a questa unità**: C-91 e C-96, che sono l'unità S10. Il catalogo
 le tiene in una sezione a parte proprio perché non si contino qui.
@@ -669,7 +669,7 @@ andrebbe misurata sulle prestazioni. È una unità sua, non una riga di questa.
 ## 16. Un solo criterio per la chiave della data di fine e per il tipo gestito
 
 Unità a parte, aperta dopo il registro delle modifiche, che aveva trovato il difetto leggendo
-la chiave in maiuscolo (scheda del registro, nota in fondo al punto 13). Righe C-248..C-255,
+la chiave in maiuscolo (scheda del registro, nota in fondo al punto 13). Righe C-248..C-257,
 prove in `tests/criterio-unico-test.php`.
 
 ### Il difetto: la stessa domanda fatta in due modi
@@ -725,13 +725,15 @@ scadenza, consegna degli allegati, registro e, quando sarà unito, il blocco dei
 ricerca, riceve la stessa risposta e il nome registrato con cui cercare le proprie regole.
 
 - Il nome esatto di un tipo gestito, anche con spazi attorno come prima, è gestito.
-- Il nome esatto di un altro tipo registrato in WordPress non lo è, senza domande: WordPress
-  riduce ogni nome registrato a minuscole, cifre, trattino e trattino basso, core esclude il
+- Un nome scritto soltanto con minuscole, cifre, trattino e trattino basso, diverso da ogni
+  tipo gestito, non lo è, senza domande: i tipi gestiti usano lo stesso alfabeto senza il
   trattino, e due nomi diversi scritti solo con quei caratteri non sono uguali per nessun
-  confronto della banca dati. Così su un sito sano la domanda non parte mai.
+  confronto della banca dati. È l'alfabeto a cui WordPress riduce i nomi dei tipi, quindi su
+  un sito sano la domanda non parte mai. La scorciatoia guarda i caratteri del nome, non il
+  fatto che il tipo sia registrato in WordPress (secondo giro).
 - Ogni altro nome si chiede alla banca dati, con le regole della colonna del tipo (insieme di
-  caratteri e ordinamento), una volta per nome, per richiesta e per tabella dei contenuti.
-  Le risposte ricordate si azzerano a ogni nuova registrazione di un tipo.
+  caratteri e ordinamento) lette ogni volta. Nessuna risposta si ricorda: nella stessa
+  richiesta la tabella può cambiare, di nome o di struttura (secondo giro).
 - Se le regole della colonna non si possono leggere, il ripiego ignora maiuscole e spazi in
   coda. **Limite dichiarato**: nel ripiego una lettera accentata resta diversa, mentre molti
   ordinamenti la considerano uguale.
@@ -748,7 +750,9 @@ scaduto come gli altri.
 - Il registro scrive le voci anche per un contenuto con il tipo in maiuscolo. Il passaggio da
   una grafia all'altra è un cambio del tipo scritto nella riga, e il registro lo scrive come
   `cambio_tipo`, in uscita e in ingresso.
-- **Costo**: la data di fine si legge con una domanda alla banca dati per contenuto, mentre
+- **Costo sul tipo**: nessuno su un sito sano. Un contenuto con il tipo in una grafia non
+  ridotta costa due piccole domande alla banca dati ogni volta che core lo riconosce.
+- **Costo sulla data**: la data di fine si legge con una domanda alla banca dati per contenuto, mentre
   prima veniva dalla memoria che l'interrogazione aveva già riempito. Su un elenco sono tante
   piccole letture quanti i contenuti della pagina. La mappa per i motori di ricerca non
   riempiva quella memoria nemmeno prima, quindi lì il numero di letture non cambia.
@@ -774,6 +778,49 @@ Il plugin non supporta il multisito, dove il caso è ordinario, ma la correzione
 niente: le due memorie sono ora tenute per tabella, identificata da banca dati e nome, letti
 a ogni domanda. Riga C-255.
 
+### Il secondo giro di revisione
+
+Tre rilievi, tutti su casi che il salvataggio ordinario non produce, corretti alla radice.
+
+- **La scorciatoia si fidava della registrazione, non dei caratteri.** Un componente che
+  cambia la riduzione dei nomi può registrare `PROVA_ATTO` accanto al tipo gestito
+  `prova_atto`: il nome esisteva in WordPress, quindi core non chiedeva alla banca dati, e
+  un contenuto scaduto di quel tipo restava nella ricerca. Ora la scorciatoia vale solo per
+  i nomi scritti con l'alfabeto ridotto, in `canonico()` e in `uguale()`. Riga C-256.
+- **Le memorie legate al nome della tabella non bastavano.** Una tabella temporanea con lo
+  stesso nome, o una modifica delle regole nella stessa richiesta, cambia il confronto senza
+  cambiare il nome. È la causa del primo giro, invalidazione incompleta, e la correzione
+  alla radice è togliere le memorie: le regole della colonna si leggono ogni volta, e la
+  risposta non si ricorda. Il costo resta solo sui nomi non ridotti. Riga C-256.
+- **I nomi di sole cifre.** Core accetta un tipo `123`, ma PHP trasforma in numero una
+  chiave di elenco fatta solo di cifre, e il confronto stretto con il nome letto dalla
+  banca dati falliva. `identificativi()` restituisce ora sempre testi. Riga C-257.
+
+### Tabella di copertura: in quali modi un nome diverso arriva a core
+
+| Come arriva | Esempio | Coperto da | Righe |
+|---|---|---|---|
+| Stesso nome del tipo gestito | `prova_atto` | scorciatoia, nessuna domanda | C-248 |
+| Spazi attorno | `prova_atto  ` | scorciatoia sul nome ripulito | C-248 |
+| Maiuscole, scritte direttamente nella banca dati | `PROVA_ATTO` | domanda alla banca dati | C-248, C-249 |
+| Lettere accentate o cifre a larghezza piena che l'ordinamento considera uguali | `pròva_atto`, `１２３` | domanda alla banca dati | C-248, C-257 |
+| Nome di un altro tipo, ridotto | `post`, `prova-atto` | scorciatoia: diverso per ogni confronto | C-248 |
+| Tipo registrato in WordPress con un nome non ridotto | `PROVA_ATTO` registrato | domanda alla banca dati | C-256 |
+| Tipo gestito di sole cifre | `123` | nomi sempre come testo | C-257 |
+| Allegato con altra grafia | `ATTACHMENT` | `uguale()`, stessa regola | C-250 |
+| Altra tabella nella stessa richiesta | un altro sito | regole lette ogni volta | C-255 |
+| Stessa tabella con altre regole nella stessa richiesta | tabella temporanea omonima | regole lette ogni volta | C-256 |
+| Regole della colonna non leggibili | banca dati che non risponde | ripiego: maiuscole e spazi in coda | C-248; limite dichiarato sugli accenti |
+| Connessione con insieme di caratteri diverso dalla tabella | configurazione fuori da WordPress | fuori: dichiarato sopra | nessuna |
+
+| Come arriva la chiave della data | Coperto da | Righe |
+|---|---|---|
+| Chiave vera | lettura dalla banca dati | tutte |
+| Chiave in maiuscolo, da sola | la banca dati la conta: vale per tutti | C-251 |
+| Chiave vera e chiave in maiuscolo insieme | due righe, anomalia di C-114 | C-252 |
+| Scrittura dall'API su righe con grafie diverse | ripara tutte, successo solo con una | C-253 |
+| Filtro sui metadati che cambia la data letta | la lettura non passa dai filtri | C-254 |
+
 ### Le righe
 
 | Riga | Cosa verifica |
@@ -786,12 +833,14 @@ a ogni domanda. Riga C-255.
 | C-253 | La scrittura dall'API ripara anche la riga in maiuscolo, e dichiara successo solo se ne resta una |
 | C-254 | Un filtro di WordPress che mente sulla data non sposta la scadenza |
 | C-255 | Nella stessa richiesta, prima una tabella che distingue le maiuscole e poi quella vera: la risposta data per la prima non vale per la seconda, e il contenuto scaduto resta fuori dalla ricerca |
+| C-256 | Tipo registrato in WordPress con il nome non ridotto: i suoi contenuti sono gestiti. Tabella temporanea con lo stesso nome e altre regole, poi tolta: vale sempre la tabella del momento |
+| C-257 | Tipo gestito di sole cifre, e una sua grafia a larghezza piena: riconosciuto, con la sua sezione |
 
 Le prove chiedono alla banca dati di prova che cosa trova e pretendono che core risponda allo
 stesso modo; dove hanno senso solo se la banca dati ignora le maiuscole, lo asseriscono, così
 su una banca dati diversa diventano rosse invece di passare senza aver provato niente. Sul
 codice di prima di questa unità tutte e quindici le prime sono rosse; C-255 è rossa sul
-codice del primo giro.
+codice del primo giro, C-256 e C-257 su quello del secondo.
 
 **Guasti di prova**, ciascuno introdotto a mano e tolto, con le prove che diventano rosse:
 
@@ -800,8 +849,12 @@ codice del primo giro.
 | G1: nessuna domanda alla banca dati sul tipo | C-248, C-249 |
 | G2: righe della fine lette dalla memoria di WordPress | C-251..C-254, e due prove di C-202 del registro |
 | G3: allegato riconosciuto lettera per lettera | C-250 |
-| G4: risposte ricordate non azzerate alla registrazione | C-248 |
+| G4: risposte ricordate non azzerate alla registrazione | C-248 (guasto del primo giro; dal secondo le risposte non si ricordano più) |
 | G5: sezione e politica cercate senza il nome registrato | C-248, C-249 |
 | G6: ripiego che non ignora gli spazi in coda | C-248 |
 | G7: la scrittura legge le righe dalla memoria prima di riparare | C-253 |
-| G8: risposte ricordate per tutta la richiesta, senza la tabella | C-255 |
+| G8: risposte ricordate per tutta la richiesta, senza la tabella | C-255 (come G4) |
+| G9: scorciatoia su un tipo registrato in WordPress invece che sui caratteri | C-256 |
+| G10: nomi dei tipi gestiti restituiti come chiavi, numeri compresi | C-257 |
+| G11: regole della colonna ricordate per la richiesta | C-248 (ripiego), C-255, C-256 |
+| G12: alfabeto delle scorciatoie che ammette le maiuscole | C-248, C-249, C-250, C-255, C-256 |

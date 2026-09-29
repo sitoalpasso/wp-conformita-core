@@ -1,7 +1,7 @@
 <?php
 /**
  * Un solo criterio per la chiave della fine pubblicazione e per il tipo
- * gestito, righe C-248..C-254 del catalogo.
+ * gestito, righe C-248..C-257 del catalogo.
  *
  * Core leggeva la stessa cosa in due modi. La chiave della fine pubblicazione:
  * la scadenza la leggeva dalla memoria di WordPress, che distingue le
@@ -270,11 +270,11 @@ class Conformita_Core_Criterio_Unico_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-248: una risposta ricordata non sopravvive a un tipo registrato dopo.
+	 * C-248: una risposta data prima non sopravvive a un tipo registrato dopo.
 	 *
-	 * Le risposte della banca dati si ricordano per tutta la richiesta: un nome
-	 * che non era di nessun tipo gestito può diventarlo quando un componente
-	 * registra il suo tipo più tardi, e la risposta vecchia non deve restare.
+	 * Un nome che non era di nessun tipo gestito può diventarlo quando un
+	 * componente registra il suo tipo più tardi nella stessa richiesta, e la
+	 * risposta vecchia non deve restare.
 	 */
 	public function test_c248_registrazione_successiva_azzera_le_risposte() {
 		$this->assertNull( Conformita_Core_Tipi::canonico( 'PROVA_SECONDO' ) );
@@ -560,5 +560,148 @@ class Conformita_Core_Criterio_Unico_Test extends WP_UnitTestCase {
 
 		$this->assertContains( $valido, $ricerca );
 		$this->assertNotContains( $scaduto, $ricerca, 'La risposta ricordata per l\'altra tabella non lascia passare il contenuto scaduto.' );
+	}
+
+	/**
+	 * C-256: un tipo registrato in WordPress con un nome non ridotto non è una
+	 * scorciatoia.
+	 *
+	 * Un componente che cambia la riduzione dei nomi può registrare
+	 * `PROVA_CRITERIO` accanto al tipo gestito `prova_criterio`. Su una colonna
+	 * che non distingue le maiuscole la ricerca del tipo gestito trova anche i
+	 * contenuti di quello, quindi core deve trattarli come gestiti.
+	 */
+	public function test_c256_tipo_registrato_con_nome_non_ridotto() {
+		$conserva = static function ( $ridotto, $originale ) {
+			return 'PROVA_CRITERIO' === $originale ? $originale : $ridotto;
+		};
+
+		add_filter( 'sanitize_key', $conserva, 10, 2 );
+		register_post_type( 'PROVA_CRITERIO', array( 'public' => true ) ); // phpcs:ignore WordPress.NamingConventions.ValidPostTypeSlug.InvalidCharacters -- prova: è proprio il nome non ridotto.
+		remove_filter( 'sanitize_key', $conserva, 10 );
+
+		try {
+			$this->assertTrue( post_type_exists( 'PROVA_CRITERIO' ), 'Il tipo con il nome in maiuscolo deve essere registrato: senza, la prova non proverebbe niente.' );
+
+			$scaduto = $this->atto( '2026-09-01' );
+			$valido  = $this->atto( '2026-12-31' );
+
+			foreach ( array( $scaduto, $valido ) as $post_id ) {
+				$this->tipo_nella_riga( $post_id, 'PROVA_CRITERIO' );
+			}
+
+			$this->assertSame( self::TIPO, Conformita_Core_Tipi::canonico( 'PROVA_CRITERIO' ) );
+
+			$ricerca = $this->trovati(
+				array(
+					'post_type' => 'any',
+					's'         => 'cercabile',
+				)
+			);
+
+			$this->assertContains( $valido, $ricerca );
+			$this->assertNotContains( $scaduto, $ricerca, 'Il contenuto scaduto resta fuori anche se il suo tipo è registrato in WordPress.' );
+		} finally {
+			unregister_post_type( 'PROVA_CRITERIO' );
+		}
+	}
+
+	/**
+	 * C-256: nessuna risposta sopravvive a un cambio della tabella sotto lo
+	 * stesso nome.
+	 *
+	 * Una tabella temporanea con lo stesso nome nasconde quella vera e
+	 * confronta il tipo lettera per lettera; quando viene tolta, torna la
+	 * tabella vera, che non distingue le maiuscole. Il nome della tabella non
+	 * cambia, le regole sì.
+	 */
+	public function test_c256_tabella_omonima_nella_stessa_richiesta() {
+		global $wpdb;
+
+		$scaduto = $this->atto( '2026-09-01' );
+		$valido  = $this->atto( '2026-12-31' );
+
+		foreach ( array( $scaduto, $valido ) as $post_id ) {
+			$this->tipo_nella_riga( $post_id, 'PROVA_CRITERIO' );
+		}
+
+		$vera     = $wpdb->posts;
+		$appoggio = $vera . '_appoggio';
+		$colonna  = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$vera} LIKE 'post_type'", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: struttura della tabella.
+		$insieme  = strtok( (string) $colonna['Collation'], '_' );
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- prova: le tabelle temporanee non chiudono la transazione della prova.
+		$wpdb->query( "CREATE TEMPORARY TABLE {$appoggio} LIKE {$vera}" );
+		$wpdb->query( "ALTER TABLE {$appoggio} MODIFY post_type VARCHAR(20) CHARACTER SET {$insieme} COLLATE {$insieme}_bin NOT NULL DEFAULT 'post'" );
+		$wpdb->query( "INSERT INTO {$appoggio} SELECT * FROM {$vera} WHERE ID IN ( {$scaduto}, {$valido} )" );
+		$wpdb->query( "CREATE TEMPORARY TABLE {$vera} LIKE {$appoggio}" );
+		$wpdb->query( "INSERT INTO {$vera} SELECT * FROM {$appoggio}" );
+
+		try {
+			$colonna_ombra = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$vera} LIKE 'post_type'", ARRAY_A );
+			$this->assertStringEndsWith( '_bin', (string) $colonna_ombra['Collation'], 'La tabella temporanea deve nascondere quella vera: senza, la prova non proverebbe niente.' );
+			$this->assertNull( Conformita_Core_Tipi::canonico( 'PROVA_CRITERIO' ), 'Per la tabella che distingue le maiuscole il nome non è gestito.' );
+		} finally {
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$vera}" );
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$appoggio}" );
+		}
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange
+
+		$this->assertSame( self::TIPO, Conformita_Core_Tipi::canonico( 'PROVA_CRITERIO' ), 'Tolta la tabella temporanea, vale la tabella vera.' );
+
+		$ricerca = $this->trovati(
+			array(
+				'post_type' => 'any',
+				's'         => 'cercabile',
+			)
+		);
+
+		$this->assertContains( $valido, $ricerca );
+		$this->assertNotContains( $scaduto, $ricerca );
+	}
+
+	/**
+	 * C-257: un tipo gestito con un nome di sole cifre si riconosce come gli
+	 * altri, anche in una grafia che la banca dati considera uguale.
+	 *
+	 * PHP trasforma in numero la chiave di un elenco scritta solo con cifre, e
+	 * un confronto stretto fra il numero e il nome letto dalla banca dati
+	 * fallirebbe sempre.
+	 */
+	public function test_c257_tipo_con_nome_di_sole_cifre() {
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'123',
+				array(
+					'sezione'      => self::SEZIONE,
+					'show_in_rest' => false,
+				)
+			)
+		);
+
+		$this->assertContains( '123', Conformita_Core_Tipi::identificativi() );
+
+		$post_id = self::factory()->post->create( array( 'post_type' => '123' ) );
+		$grafia  = "\u{FF11}\u{FF12}\u{FF13}";
+		$this->tipo_nella_riga( $post_id, $grafia );
+
+		$trovato = in_array(
+			$post_id,
+			$this->trovati(
+				array(
+					'post_type'        => '123',
+					'post_status'      => 'any',
+					'post__in'         => array( $post_id ),
+					'fields'           => 'ids',
+					'suppress_filters' => true,
+				)
+			),
+			true
+		);
+
+		$this->assertTrue( $trovato, 'La banca dati di prova deve considerare uguali le cifre a larghezza piena e quelle normali: senza, la prova non proverebbe niente.' );
+		$this->assertSame( '123', Conformita_Core_Tipi::canonico( $grafia ) );
+		$this->assertSame( '123', Conformita_Core_Tipi::canonico( '123' ) );
+		$this->assertSame( self::SEZIONE, Conformita_Core_Tipi::sezione( $grafia ) );
 	}
 }
