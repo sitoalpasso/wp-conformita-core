@@ -91,6 +91,11 @@ if ( ! function_exists( 'conformita_core_tipo_registrato' ) ) {
 	/**
 	 * Il tipo è registrato attraverso core, quindi ha una sezione.
 	 *
+	 * Il nome si riconosce come lo riconosce la banca dati quando WordPress
+	 * cerca i contenuti per tipo: di norma senza badare alle maiuscole né agli
+	 * spazi in coda. Un contenuto con `PROVA_ATTO` nella riga è quindi di un
+	 * tipo gestito se `prova_atto` lo è.
+	 *
 	 * @param string $tipo Identificativo del tipo.
 	 * @return bool
 	 */

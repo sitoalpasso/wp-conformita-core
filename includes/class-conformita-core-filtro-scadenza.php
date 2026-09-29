@@ -476,7 +476,13 @@ final class Conformita_Core_Filtro_Scadenza {
 				continue;
 			}
 
-			if ( 'attachment' === $contenuto->post_type ) {
+			/*
+			 * L'allegato si riconosce con lo stesso criterio dei tipi gestiti,
+			 * quello della banca dati: un allegato salvato con il tipo in
+			 * maiuscolo è trovato dalle ricerche degli allegati, e deve seguire
+			 * il padre come gli altri. Riga C-250.
+			 */
+			if ( Conformita_Core_Tipi::uguale( $contenuto->post_type, 'attachment' ) ) {
 				if ( ! self::da_nascondere( (int) $contenuto->post_parent ) ) {
 					$rimasti[] = $contenuto;
 				}
