@@ -63,16 +63,40 @@ final class Conformita_Core_Registro_Automatico {
 	const DATA_NON_FISSATA = '0000-00-00 00:00:00';
 
 	/**
-	 * Suffisso che WordPress aggiunge all'indirizzo di un contenuto nel cestino.
-	 */
-	const SUFFISSO_CESTINO = '__trashed';
-
-	/**
 	 * Il meccanismo ha già agganciato i propri ascoltatori.
 	 *
 	 * @var bool
 	 */
 	private static $avviato = false;
+
+	/**
+	 * La scrittura delle voci automatiche, ricevuta dal registro all'avvio.
+	 *
+	 * @var Closure|null
+	 */
+	private static $scrittura = null;
+
+	/**
+	 * Gli ascoltatori agganciati, uno per voce di `agganci()`, nello stesso ordine.
+	 *
+	 * Sono chiusure nate qui dentro, che chiamano metodi privati: nessun
+	 * componente può chiamare da fuori un ascoltatore per far scrivere a core
+	 * una voce su un fatto che non è avvenuto.
+	 *
+	 * @var array<int, Closure>
+	 */
+	private static $ascoltatori = array();
+
+	/**
+	 * Cosa ha chiesto il salvataggio in corso e cosa ne ha ricavato WordPress,
+	 * per contenuto.
+	 *
+	 * Si legge al filtro dei dati, prima che la banca dati li riceva, e si
+	 * consuma all'annuncio della modifica, che segue nello stesso salvataggio.
+	 *
+	 * @var array<int, array<string, mixed>>
+	 */
+	private static $richieste = array();
 
 	/**
 	 * Valori della fine pubblicazione letti prima di una scrittura, per contenuto.
@@ -101,6 +125,16 @@ final class Conformita_Core_Registro_Automatico {
 	private static $in_eliminazione = array();
 
 	/**
+	 * Allegati in corso di eliminazione, con il contenuto a cui appartengono.
+	 *
+	 * La voce si scrive a eliminazione avvenuta, quando dell'allegato non
+	 * resta niente da cui leggere il padre.
+	 *
+	 * @var array<int, int>
+	 */
+	private static $allegati_in_eliminazione = array();
+
+	/**
 	 * Le operazioni che core registra da sé, riservate.
 	 *
 	 * Un componente non le può usare per le proprie voci: una voce
@@ -127,6 +161,9 @@ final class Conformita_Core_Registro_Automatico {
 	/**
 	 * Aggancia gli ascoltatori.
 	 *
+	 * Alla prima accensione riceve dal registro la scrittura delle voci
+	 * automatiche, che il registro consegna una volta sola.
+	 *
 	 * @internal Si accende al caricamento di core, come il motore di scadenza.
 	 */
 	public static function avvia() {
@@ -136,26 +173,48 @@ final class Conformita_Core_Registro_Automatico {
 
 		self::$avviato = true;
 
+		if ( null === self::$scrittura ) {
+			self::$scrittura = Conformita_Core_Registro::scrittura_automatica();
+		}
+
+		self::$ascoltatori = array();
+
 		foreach ( self::agganci() as $aggancio ) {
-			add_action( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), $aggancio['priorita'], $aggancio['argomenti'] );
+			$metodo = $aggancio['metodo'];
+
+			$ascoltatore = static function ( ...$argomenti ) use ( $metodo ) {
+				return self::$metodo( ...$argomenti );
+			};
+
+			self::$ascoltatori[] = $ascoltatore;
+
+			add_filter( $aggancio['aggancio'], $ascoltatore, $aggancio['priorita'], $aggancio['argomenti'] );
 		}
 	}
 
 	/**
 	 * Stacca gli ascoltatori.
 	 *
-	 * @internal Solo per le prove di non vacuità: usa lo stesso elenco
-	 *           dell'accensione, così lo spegnimento non può dimenticarne uno.
+	 * Privata: un componente che potesse spegnere le voci automatiche
+	 * lavorerebbe senza lasciare traccia. Le prove di non vacuità la chiamano
+	 * attraverso la riflessione. Usa lo stesso elenco dell'accensione, così lo
+	 * spegnimento non può dimenticarne uno.
 	 */
-	public static function spegni() {
-		foreach ( self::agganci() as $aggancio ) {
-			remove_action( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), $aggancio['priorita'] );
+	private static function spegni() {
+		foreach ( self::agganci() as $indice => $aggancio ) {
+			if ( isset( self::$ascoltatori[ $indice ] ) ) {
+				remove_filter( $aggancio['aggancio'], self::$ascoltatori[ $indice ], $aggancio['priorita'] );
+			}
 		}
 
+		self::$ascoltatori     = array();
 		self::$avviato         = false;
+		self::$richieste       = array();
 		self::$fine_prima      = array();
 		self::$righe_fine      = array();
 		self::$in_eliminazione = array();
+
+		self::$allegati_in_eliminazione = array();
 	}
 
 	/**
@@ -183,6 +242,18 @@ final class Conformita_Core_Registro_Automatico {
 				'metodo'    => 'stato',
 				'priorita'  => PHP_INT_MIN,
 				'argomenti' => 3,
+			),
+			array(
+				'aggancio'  => 'wp_insert_post_data',
+				'metodo'    => 'richiesta',
+				'priorita'  => PHP_INT_MIN,
+				'argomenti' => 4,
+			),
+			array(
+				'aggancio'  => 'wp_insert_post_data',
+				'metodo'    => 'richiesta_finale',
+				'priorita'  => PHP_INT_MAX,
+				'argomenti' => 4,
 			),
 			array(
 				'aggancio'  => 'post_updated',
@@ -283,7 +354,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param string  $precedente Stato precedente.
 	 * @param WP_Post $post       Contenuto.
 	 */
-	public static function stato( $nuovo, $precedente, $post ) {
+	private static function stato( $nuovo, $precedente, $post ) {
 		if ( ! $post instanceof WP_Post || $nuovo === $precedente || 'auto-draft' === $nuovo ) {
 			return;
 		}
@@ -307,6 +378,66 @@ final class Conformita_Core_Registro_Automatico {
 	}
 
 	/**
+	 * Legge cosa chiede il salvataggio, prima di ogni altro filtro.
+	 *
+	 * Serve a `riscritto_da_wordpress()`: un campo cambiato al cambio di stato
+	 * è di WordPress solo se nessuno l'ha chiesto. I dati non si toccano.
+	 *
+	 * @param array $dati           Dati del contenuto, come WordPress li ha preparati.
+	 * @param array $richiesta      Dati ricevuti, ripuliti.
+	 * @param array $non_ripuliti   Dati ricevuti, come sono arrivati.
+	 * @param bool  $aggiornamento  Il contenuto esiste già.
+	 * @return array
+	 */
+	private static function richiesta( $dati, $richiesta, $non_ripuliti, $aggiornamento ) {
+		unset( $richiesta );
+
+		if ( ! $aggiornamento || ! is_array( $dati ) || ! is_array( $non_ripuliti ) || empty( $non_ripuliti['ID'] ) ) {
+			return $dati;
+		}
+
+		$data_gmt = isset( $non_ripuliti['post_date_gmt'] ) ? (string) $non_ripuliti['post_date_gmt'] : '';
+
+		self::$richieste[ (int) $non_ripuliti['ID'] ] = array(
+			'nome'           => isset( $non_ripuliti['post_name'] ) ? (string) $non_ripuliti['post_name'] : null,
+			'data'           => isset( $non_ripuliti['post_date'] ) ? (string) $non_ripuliti['post_date'] : '',
+			'data_gmt'       => $data_gmt,
+			'data_esplicita' => ! empty( $non_ripuliti['edit_date'] ) || ( '' !== $data_gmt && self::DATA_NON_FISSATA !== $data_gmt ),
+			'nome_wordpress' => isset( $dati['post_name'] ) ? (string) $dati['post_name'] : '',
+			'nome_finale'    => null,
+			'date_wordpress' => array(
+				'post_date'     => isset( $dati['post_date'] ) ? (string) $dati['post_date'] : '',
+				'post_date_gmt' => isset( $dati['post_date_gmt'] ) ? (string) $dati['post_date_gmt'] : '',
+			),
+		);
+
+		return $dati;
+	}
+
+	/**
+	 * Legge il nome nell'indirizzo dopo ogni altro filtro.
+	 *
+	 * Se dopo tutti i filtri il nome è ancora vuoto, WordPress lo genera dal
+	 * titolo dopo aver salvato; se un altro componente l'ha cambiato, il
+	 * cambiamento è suo e non di WordPress.
+	 *
+	 * @param array $dati          Dati del contenuto.
+	 * @param array $richiesta     Dati ricevuti, ripuliti.
+	 * @param array $non_ripuliti  Dati ricevuti, come sono arrivati.
+	 * @param bool  $aggiornamento Il contenuto esiste già.
+	 * @return array
+	 */
+	private static function richiesta_finale( $dati, $richiesta, $non_ripuliti, $aggiornamento ) {
+		unset( $richiesta );
+
+		if ( $aggiornamento && is_array( $dati ) && is_array( $non_ripuliti ) && isset( $non_ripuliti['ID'], self::$richieste[ (int) $non_ripuliti['ID'] ] ) ) {
+			self::$richieste[ (int) $non_ripuliti['ID'] ]['nome_finale'] = isset( $dati['post_name'] ) ? (string) $dati['post_name'] : '';
+		}
+
+		return $dati;
+	}
+
+	/**
 	 * La modifica dei campi di un contenuto che non è più una bozza.
 	 *
 	 * Si registrano i nomi dei campi cambiati e non i loro valori: il titolo o
@@ -317,8 +448,10 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param WP_Post $dopo    Contenuto dopo la modifica.
 	 * @param WP_Post $prima   Contenuto prima della modifica.
 	 */
-	public static function modifica( $post_id, $dopo, $prima ) {
-		unset( $post_id );
+	private static function modifica( $post_id, $dopo, $prima ) {
+		$post_id   = (int) $post_id;
+		$richiesta = self::$richieste[ $post_id ] ?? null;
+		unset( self::$richieste[ $post_id ] );
 
 		if ( ! $dopo instanceof WP_Post || ! $prima instanceof WP_Post ) {
 			return;
@@ -347,7 +480,7 @@ final class Conformita_Core_Registro_Automatico {
 		$cambiati = array();
 
 		foreach ( self::CAMPI as $campo ) {
-			if ( (string) $prima->$campo !== (string) $dopo->$campo && ! self::riscritto_da_wordpress( $campo, $prima, $dopo ) ) {
+			if ( (string) $prima->$campo !== (string) $dopo->$campo && ! self::riscritto_da_wordpress( $campo, $prima, $dopo, $richiesta ) ) {
 				$cambiati[] = $campo;
 			}
 		}
@@ -364,40 +497,58 @@ final class Conformita_Core_Registro_Automatico {
 	 *
 	 * Contare questi cambiamenti come modifica affiancherebbe a ogni cambio di
 	 * stato una voce che attribuisce a chi ha agito un cambiamento che non ha
-	 * fatto. Ma il cambio di stato da solo non basta a dirlo: chi pubblica o
-	 * rimuove può, nello stesso salvataggio, cambiare lui l'indirizzo o la
-	 * data, e quello è una modifica. Per questo si riconosce la forma precisa
-	 * di ciò che fa WordPress, e solo quella.
+	 * fatto. Ma il cambio di stato da solo non basta a dirlo, e nemmeno il
+	 * valore di prima: chi pubblica o programma può, nello stesso salvataggio,
+	 * scegliere lui l'indirizzo o la data, anche di un contenuto che non li
+	 * aveva ancora, e quella è una modifica. Il criterio è chi ha chiesto il
+	 * valore di dopo: il campo è di WordPress solo se il salvataggio non l'ha
+	 * chiesto e il valore è quello che WordPress stesso ha preparato.
 	 *
-	 * - Il nome nell'indirizzo: WordPress lo genera quando il contenuto non ne
-	 *   aveva uno, gli aggiunge il suffisso del cestino quando ci entra e lo
-	 *   toglie quando ne esce, e lo svuota quando il contenuto passa in attesa
-	 *   di revisione per mano di chi non può pubblicarlo.
-	 * - Le due date: WordPress le fissa quando la data non era ancora fissata,
-	 *   cioè quando quella in UTC era la data nulla.
+	 * - Il nome nell'indirizzo: non chiesto vuol dire assente dalla richiesta o
+	 *   uguale a quello di prima. WordPress lo genera dal titolo quando dopo
+	 *   tutti i filtri è ancora vuoto, gli aggiunge il suffisso del cestino
+	 *   quando il contenuto ci entra e lo toglie quando ne esce, e lo svuota
+	 *   quando il contenuto passa in attesa di revisione per mano di chi non
+	 *   può pubblicarlo.
+	 * - Le due date: WordPress le fissa, o le rimette a oggi, solo quando la
+	 *   data non era ancora fissata, cioè quando quella in UTC era la data
+	 *   nulla. Non chieste vuol dire senza la richiesta esplicita di cambiare
+	 *   data e senza una data in UTC, con la data locale uguale a quella di
+	 *   prima; oppure con la data in UTC vuota, che è il segno con cui WordPress
+	 *   stesso rimette a oggi la data di una bozza.
 	 *
-	 * @param string  $campo Nome del campo.
-	 * @param WP_Post $prima Contenuto prima.
-	 * @param WP_Post $dopo  Contenuto dopo.
+	 * Senza la richiesta, per esempio se l'annuncio della modifica arriva da
+	 * un'altra strada, ogni campo cambiato è una modifica.
+	 *
+	 * @param string     $campo     Nome del campo.
+	 * @param WP_Post    $prima     Contenuto prima.
+	 * @param WP_Post    $dopo      Contenuto dopo.
+	 * @param array|null $richiesta Cosa ha chiesto il salvataggio.
 	 * @return bool
 	 */
-	private static function riscritto_da_wordpress( $campo, WP_Post $prima, WP_Post $dopo ) {
-		if ( $prima->post_status === $dopo->post_status ) {
+	private static function riscritto_da_wordpress( $campo, WP_Post $prima, WP_Post $dopo, $richiesta ) {
+		if ( $prima->post_status === $dopo->post_status || ! is_array( $richiesta ) ) {
 			return false;
 		}
 
 		if ( 'post_name' === $campo ) {
-			$nome_prima = (string) $prima->post_name;
-			$nome_dopo  = (string) $dopo->post_name;
+			$chiesto = null !== $richiesta['nome'] && (string) $prima->post_name !== $richiesta['nome'];
 
-			return '' === $nome_prima
-				|| ( 'pending' === $dopo->post_status && '' === $nome_dopo )
-				|| ( 'trash' === $dopo->post_status && ! str_contains( $nome_prima, self::SUFFISSO_CESTINO ) && str_contains( $nome_dopo, self::SUFFISSO_CESTINO ) )
-				|| ( 'trash' === $prima->post_status && str_contains( $nome_prima, self::SUFFISSO_CESTINO ) );
+			if ( $chiesto ) {
+				return false;
+			}
+
+			return (string) $dopo->post_name === $richiesta['nome_wordpress']
+				|| ( '' === $richiesta['nome_wordpress'] && '' === $richiesta['nome_finale'] );
 		}
 
 		if ( 'post_date' === $campo || 'post_date_gmt' === $campo ) {
-			return self::DATA_NON_FISSATA === (string) $prima->post_date_gmt;
+			$chiesta = $richiesta['data_esplicita']
+				|| ( '' !== $richiesta['data_gmt'] && (string) $prima->post_date !== $richiesta['data'] );
+
+			return self::DATA_NON_FISSATA === (string) $prima->post_date_gmt
+				&& ! $chiesta
+				&& (string) $dopo->$campo === $richiesta['date_wordpress'][ $campo ];
 		}
 
 		return false;
@@ -414,7 +565,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param int          $post_id Identificativo del contenuto.
 	 * @param WP_Post|null $post    Contenuto.
 	 */
-	public static function eliminazione_inizio( $post_id, $post = null ) {
+	private static function eliminazione_inizio( $post_id, $post = null ) {
 		$post = $post instanceof WP_Post ? $post : get_post( $post_id );
 
 		if ( ! $post instanceof WP_Post || ! Conformita_Core_Tipi::registrato( $post->post_type ) || in_array( $post->post_status, array( 'new', 'auto-draft' ), true ) ) {
@@ -444,8 +595,15 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param int          $post_id Identificativo del contenuto.
 	 * @param WP_Post|null $post    Contenuto, com'era prima dell'eliminazione.
 	 */
-	public static function eliminazione( $post_id, $post = null ) {
+	private static function eliminazione( $post_id, $post = null ) {
 		$post_id = (int) $post_id;
+
+		if ( isset( self::$allegati_in_eliminazione[ $post_id ] ) ) {
+			$padre = self::$allegati_in_eliminazione[ $post_id ];
+			unset( self::$allegati_in_eliminazione[ $post_id ] );
+			self::allegato( $post_id, $padre, 'allegato_eliminato' );
+			return;
+		}
 
 		if ( ! isset( self::$in_eliminazione[ $post_id ] ) ) {
 			return;
@@ -466,22 +624,29 @@ final class Conformita_Core_Registro_Automatico {
 	 *
 	 * @param int $allegato_id Identificativo dell'allegato.
 	 */
-	public static function allegato_aggiunto( $allegato_id ) {
+	private static function allegato_aggiunto( $allegato_id ) {
 		$allegato = get_post( $allegato_id );
 
 		self::allegato( $allegato_id, $allegato instanceof WP_Post ? (int) $allegato->post_parent : 0, 'allegato_aggiunto' );
 	}
 
 	/**
-	 * Un allegato eliminato da un contenuto gestito.
+	 * Segna un allegato che WordPress sta per eliminare.
+	 *
+	 * WordPress annuncia l'eliminazione di un allegato prima di cancellarne la
+	 * riga. La voce attesta un fatto avvenuto, e se la cancellazione fallisce
+	 * l'allegato c'è ancora: qui si annota solo il padre, e la voce la scrive
+	 * `eliminazione()` quando la riga non c'è più.
 	 *
 	 * @param int          $allegato_id Identificativo dell'allegato.
 	 * @param WP_Post|null $allegato    Allegato.
 	 */
-	public static function allegato_eliminato( $allegato_id, $allegato = null ) {
+	private static function allegato_eliminato( $allegato_id, $allegato = null ) {
 		$allegato = $allegato instanceof WP_Post ? $allegato : get_post( $allegato_id );
 
-		self::allegato( $allegato_id, $allegato instanceof WP_Post ? (int) $allegato->post_parent : 0, 'allegato_eliminato' );
+		if ( $allegato instanceof WP_Post && (int) $allegato->post_parent > 0 ) {
+			self::$allegati_in_eliminazione[ (int) $allegato_id ] = (int) $allegato->post_parent;
+		}
 	}
 
 	/**
@@ -496,7 +661,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param int    $allegato_id Identificativo dell'allegato.
 	 * @param int    $padre       Contenuto padre.
 	 */
-	public static function allegato_collegato( $azione, $allegato_id, $padre ) {
+	private static function allegato_collegato( $azione, $allegato_id, $padre ) {
 		self::allegato( $allegato_id, (int) $padre, 'detach' === $azione ? 'allegato_eliminato' : 'allegato_aggiunto' );
 	}
 
@@ -527,7 +692,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param int    $post_id Identificativo del contenuto.
 	 * @param string $chiave  Chiave del metadato.
 	 */
-	public static function fine_prima_aggiunta( $post_id, $chiave ) {
+	private static function fine_prima_aggiunta( $post_id, $chiave ) {
 		self::fine_prima( 0, $post_id, $chiave );
 	}
 
@@ -551,7 +716,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param int       $post_id Identificativo del contenuto.
 	 * @param string    $chiave  Chiave del metadato.
 	 */
-	public static function fine_prima( $meta_id, $post_id, $chiave ) {
+	private static function fine_prima( $meta_id, $post_id, $chiave ) {
 		if ( Conformita_Core_Scadenza::CHIAVE !== $chiave ) {
 			return;
 		}
@@ -600,7 +765,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param string|false $chiave   Chiave nuova, falso se non cambia.
 	 * @return mixed
 	 */
-	public static function fine_rinominata( $risposta, $meta_id, $valore, $chiave ) {
+	private static function fine_rinominata( $risposta, $meta_id, $valore, $chiave ) {
 		unset( $valore );
 
 		if ( null !== $risposta || false === $chiave || Conformita_Core_Scadenza::CHIAVE === $chiave ) {
@@ -629,7 +794,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * @param int       $post_id Identificativo del contenuto.
 	 * @param string    $chiave  Chiave del metadato.
 	 */
-	public static function fine_dopo( $meta_id, $post_id, $chiave ) {
+	private static function fine_dopo( $meta_id, $post_id, $chiave ) {
 		$contenuti = array();
 
 		foreach ( (array) $meta_id as $riga_id ) {
@@ -708,17 +873,20 @@ final class Conformita_Core_Registro_Automatico {
 			return;
 		}
 
-		$esito = Conformita_Core_Registro::scrivi(
-			array(
-				'sezione'   => Conformita_Core_Tipi::sezione( $post->post_type ),
-				'azione'    => $azione,
-				'contenuto' => (int) $post->ID,
-				'dettagli'  => $dettagli,
-			),
-			Conformita_Core_Registro::ORIGINE_AUTOMATICA
-		);
+		$scrittura = self::$scrittura;
 
-		if ( is_wp_error( $esito ) ) {
+		$esito = $scrittura instanceof Closure
+			? $scrittura(
+				array(
+					'sezione'   => Conformita_Core_Tipi::sezione( $post->post_type ),
+					'azione'    => $azione,
+					'contenuto' => (int) $post->ID,
+					'dettagli'  => $dettagli,
+				)
+			)
+			: null;
+
+		if ( ! is_int( $esito ) ) {
 			Conformita_Core_Registro::annota_mancata();
 		}
 	}

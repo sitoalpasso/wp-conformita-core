@@ -274,16 +274,58 @@ KEY riferimento (riferimento)
 	}
 
 	/**
+	 * La scrittura delle voci automatiche è già stata consegnata.
+	 *
+	 * @var bool
+	 */
+	private static $scrittura_consegnata = false;
+
+	/**
+	 * La scrittura delle voci di origine automatica, consegnata una volta sola.
+	 *
+	 * Una voce automatica attesta un fatto che core ha visto accadere. Se un
+	 * metodo pubblico la scrivesse, un componente potrebbe attestare una
+	 * pubblicazione mai avvenuta: per questo la scrittura con l'origine è
+	 * privata, e la sola strada verso di essa è questa funzione, che la
+	 * consegna alla prima chiamata e poi non più. La prima chiamata la fa
+	 * core stesso, caricando le voci automatiche subito dopo questa classe:
+	 * un componente che la chiami dopo riceve nulla.
+	 *
+	 * Non è una garanzia verso il codice che gira nello stesso processo con
+	 * cattive intenzioni, che può sempre scrivere nella banca dati: è la
+	 * garanzia che nessuna strada offerta da core porti a una voce automatica
+	 * falsa (scheda, punto 8).
+	 *
+	 * @internal Riservata a `Conformita_Core_Registro_Automatico::avvia()`.
+	 *
+	 * @return Closure|null Funzione che riceve la descrizione della voce e
+	 *                      restituisce il numero o l'errore; nulla dopo la
+	 *                      prima chiamata.
+	 */
+	public static function scrittura_automatica() {
+		if ( self::$scrittura_consegnata ) {
+			return null;
+		}
+
+		self::$scrittura_consegnata = true;
+
+		return static function ( array $voce ) {
+			return self::scrivi( $voce, self::ORIGINE_AUTOMATICA );
+		};
+	}
+
+	/**
 	 * Valida e scrive una voce, poi la rilegge.
 	 *
-	 * @internal Le voci automatiche passano da qui senza il controllo sui nomi
-	 *           riservati; i componenti passano da `registra()`.
+	 * Le voci automatiche arrivano qui dalla funzione consegnata da
+	 * `scrittura_automatica()`, senza il controllo sui nomi riservati; i
+	 * componenti da `registra()`.
 	 *
 	 * @param array<string, mixed> $voce    Descrizione della voce.
 	 * @param string               $origine Una delle due costanti di origine.
 	 * @return int|WP_Error
 	 */
-	public static function scrivi( array $voce, $origine ) {
+	private static function scrivi( array $voce, $origine ) {
 		global $wpdb;
 
 		$riga = self::valida( $voce );

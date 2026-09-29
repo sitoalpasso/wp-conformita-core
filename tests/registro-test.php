@@ -323,6 +323,130 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		);
 		$this->assertSame( array( 'rimozione', 'modifica' ), $this->azioni_nuove() );
 		$this->assertSame( array( 'campi' => array( 'post_name', 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'] );
+
+		/*
+		 * Il criterio non e' il valore di prima ma chi ha chiesto il valore di
+		 * dopo. Un contenuto in verifica non ha ancora indirizzo ne' data
+		 * fissata: se chi lo pubblica sceglie lui l'indirizzo, o lo programma
+		 * indicando la data, quella e' una modifica anche se prima il campo era
+		 * vuoto.
+		 */
+		$in_verifica = $this->contenuto( 'pending' );
+		$this->assertSame( '', get_post( $in_verifica )->post_name, 'Precondizione: in verifica senza indirizzo.' );
+		$this->assertSame( '0000-00-00 00:00:00', get_post( $in_verifica )->post_date_gmt, 'Precondizione: data non fissata.' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $in_verifica,
+				'post_status' => 'publish',
+				'post_name'   => 'indirizzo-scelto-alla-pubblicazione',
+			)
+		);
+		$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name' ) ), $this->nuove()[1]['dettagli'], 'L\'indirizzo scelto si registra; la data fissata da WordPress no.' );
+
+		$programmato = $this->contenuto( 'pending' );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'            => $programmato,
+				'post_status'   => 'future',
+				'post_date'     => '2030-01-15 10:00:00',
+				'post_date_gmt' => '2030-01-15 09:00:00',
+				'edit_date'     => true,
+			)
+		);
+		$this->assertSame( 'future', get_post_status( $programmato ), 'Precondizione: programmato.' );
+		$this->assertSame( array( 'cambio_stato', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'], 'La data indicata da chi programma si registra.' );
+
+		/*
+		 * Un altro componente che, nello stesso salvataggio, cambia lui
+		 * l'indirizzo e la data: il cambiamento non e' di WordPress, e si
+		 * registra.
+		 */
+		$altri = function ( $dati ) {
+			if ( 'publish' === $dati['post_status'] ) {
+				$dati['post_name']     = 'indirizzo-scelto-da-altri';
+				$dati['post_date']     = '2026-10-05 10:00:00';
+				$dati['post_date_gmt'] = '2026-10-05 08:00:00';
+			}
+			return $dati;
+		};
+
+		$toccato = $this->contenuto( 'pending' );
+		$this->segna();
+		add_filter( 'wp_insert_post_data', $altri );
+		wp_update_post(
+			array(
+				'ID'          => $toccato,
+				'post_status' => 'publish',
+			)
+		);
+		remove_filter( 'wp_insert_post_data', $altri );
+
+		$this->assertSame( 'indirizzo-scelto-da-altri', get_post( $toccato )->post_name, 'Precondizione: l\'altro componente ha agito.' );
+		$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name', 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'], 'Il cambiamento di un altro componente non e\' di WordPress.' );
+
+		/*
+		 * Un contenuto senza titolo: WordPress non ha da dove prendere
+		 * l'indirizzo prima di salvare, e lo genera dopo, dal numero. Anche
+		 * questo e' suo.
+		 */
+		$senza_titolo = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'pending',
+				'post_title'  => '',
+			)
+		);
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $senza_titolo,
+				'post_status' => 'publish',
+			)
+		);
+		$this->assertSame( (string) $senza_titolo, get_post( $senza_titolo )->post_name, 'Precondizione: indirizzo generato dopo il salvataggio.' );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove() );
+
+		/*
+		 * Chi salva con la funzione di base, indicando la data locale senza
+		 * quella in UTC e senza la richiesta esplicita: la data e' sua, e
+		 * WordPress ne ricava l'altra. Con la funzione di aggiornamento, invece,
+		 * la stessa richiesta non cambia la data: WordPress la rimette a oggi,
+		 * e quel caso e' coperto sopra.
+		 */
+		$con_data = $this->contenuto( 'pending' );
+		$campi    = get_post( $con_data, ARRAY_A );
+
+		$campi['post_status'] = 'publish';
+		$campi['post_date']   = '2020-01-07 12:00:00';
+
+		$this->segna();
+		wp_insert_post( wp_slash( $campi ) );
+		$this->assertSame( '2020-01-07 12:00:00', get_post( $con_data )->post_date, 'Precondizione: la data indicata e\' quella salvata.' );
+		$this->assertSame( array( 'pubblicazione', 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_date', 'post_date_gmt' ) ), $this->nuove()[1]['dettagli'] );
+
+		/*
+		 * L'annuncio di una modifica che non viene da un salvataggio, per
+		 * esempio da un altro componente che lo lancia da se': senza sapere
+		 * cosa e' stato chiesto, ogni campo cambiato e' una modifica.
+		 */
+		$annunciato = $this->contenuto( 'pending' );
+		$prima      = get_post( $annunciato );
+		$dopo       = clone $prima;
+
+		$dopo->post_status = 'publish';
+		$dopo->post_name   = 'annunciato-da-altri';
+
+		$this->segna();
+		do_action( 'post_updated', $annunciato, $dopo, $prima );
+		$this->assertSame( array( 'modifica' ), $this->azioni_nuove() );
+		$this->assertSame( array( 'campi' => array( 'post_name' ) ), $this->nuove()[0]['dettagli'] );
 	}
 
 	/**
@@ -615,6 +739,12 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		);
 		$lette  = array();
 
+		$this->assertSame(
+			array( $primo, $altro ),
+			wp_list_pluck( $this->nuove(), 'contenuto' ),
+			'Cancellazione per chiave: due voci in tutto, una per contenuto, nessuna doppia.'
+		);
+
 		foreach ( $this->nuove() as $voce ) {
 			$this->assertSame( 'modifica_fine_pubblicazione', $voce['azione'] );
 			$lette[ $voce['contenuto'] ] = array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
@@ -628,6 +758,20 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->segna();
 		$this->assertTrue( delete_metadata( 'post', $senza, $chiave, '', true ) );
 		$this->assertSame( array( $primo ), wp_list_pluck( $this->nuove(), 'contenuto' ), 'La voce va al contenuto toccato, non a quello nominato.' );
+
+		/*
+		 * Due righe della fine sullo stesso contenuto, scritte saltando la
+		 * funzione di core: la cancellazione per chiave le toglie insieme, e la
+		 * voce e' una sola, con tutti e due i valori.
+		 */
+		add_post_meta( $primo, $chiave, '2026-10-27' );
+		add_post_meta( $primo, $chiave, '2026-10-28' );
+		$this->assertCount( 2, get_post_meta( $primo, $chiave, false ), 'Precondizione: due righe.' );
+
+		$this->segna();
+		$this->assertTrue( delete_post_meta_by_key( $chiave ) );
+		$this->assertSame( array( $primo ), wp_list_pluck( $this->nuove(), 'contenuto' ), 'Due righe tolte insieme, una voce.' );
+		$this->assertSame( array( '2026-10-27', '2026-10-28' ), $this->nuove()[0]['dettagli']['valore_precedente'] );
 
 		// Una riga della fine che cambia chiave: la fine sparisce.
 		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $primo, '2026-10-26' ) );
@@ -728,6 +872,31 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			),
 			'Il collegamento dalla libreria dei media.'
 		);
+
+		/*
+		 * La voce attesta un fatto avvenuto: se la banca dati rifiuta la
+		 * cancellazione della riga dell'allegato, l'allegato c'e' ancora.
+		 */
+		$resta = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'resta.pdf',
+				'post_parent'    => $id,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+
+		$this->segna();
+		add_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+		$esito = wp_delete_attachment( $resta, true );
+		remove_filter( 'query', array( $this, 'rompi_eliminazione' ) );
+
+		$this->assertFalse( $esito, 'Precondizione: l\'eliminazione e\' fallita.' );
+		$this->assertInstanceOf( WP_Post::class, get_post( $resta ), 'Precondizione: l\'allegato c\'e\' ancora.' );
+		$this->assertNotContains( 'allegato_eliminato', $this->azioni_nuove(), 'Nessuna voce per un\'eliminazione non avvenuta.' );
+
+		$this->segna();
+		$this->assertInstanceOf( WP_Post::class, wp_delete_attachment( $resta, true ) );
+		$this->assertSame( array( 'allegato_eliminato' ), $this->azioni_nuove(), 'Controllo positivo: riuscita, la voce c\'e\'.' );
 	}
 
 	/**
@@ -1287,6 +1456,47 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 
 		$metodi = get_class_methods( 'Conformita_Core_Registro' );
 		$this->assertSame( array(), preg_grep( '/(modific|cancell|elimin|aggiorn|rimuov|sostitu)/i', $metodi ) );
+
+		/*
+		 * Nessun metodo pubblico scrive una voce di origine automatica, ne' la
+		 * spegne. Un componente che chiamasse direttamente l'ascoltatore di un
+		 * aggancio, o la scrittura interna con l'origine automatica,
+		 * attesterebbe un fatto mai avvenuto; uno che potesse spegnere le voci
+		 * automatiche lavorerebbe senza lasciare traccia. Gli elenchi sono
+		 * scritti qui per esteso.
+		 */
+		$pubblici = array();
+
+		foreach ( array( 'Conformita_Core_Registro', 'Conformita_Core_Registro_Automatico' ) as $classe ) {
+			foreach ( ( new ReflectionClass( $classe ) )->getMethods( ReflectionMethod::IS_PUBLIC ) as $metodo ) {
+				$pubblici[] = $classe . '::' . $metodo->getName();
+			}
+		}
+		sort( $pubblici );
+
+		$this->assertSame(
+			array(
+				'Conformita_Core_Registro::annota_mancata',
+				'Conformita_Core_Registro::assicura_tabella',
+				'Conformita_Core_Registro::conta',
+				'Conformita_Core_Registro::installa',
+				'Conformita_Core_Registro::mancate',
+				'Conformita_Core_Registro::registra',
+				'Conformita_Core_Registro::scrittura_automatica',
+				'Conformita_Core_Registro::tabella',
+				'Conformita_Core_Registro::tabella_presente',
+				'Conformita_Core_Registro::utc',
+				'Conformita_Core_Registro::voce',
+				'Conformita_Core_Registro::voci',
+				'Conformita_Core_Registro_Automatico::agganci',
+				'Conformita_Core_Registro_Automatico::avvia',
+				'Conformita_Core_Registro_Automatico::avviato',
+				'Conformita_Core_Registro_Automatico::azioni',
+			),
+			$pubblici
+		);
+
+		$this->assertNull( Conformita_Core_Registro::scrittura_automatica(), 'La scrittura automatica si consegna una volta sola, a core, all\'avvio.' );
 	}
 
 	/**
@@ -1477,6 +1687,43 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Gli ascoltatori che il registro ha agganciato a un aggancio.
+	 *
+	 * Sono chiusure nate dentro la classe delle voci automatiche: si
+	 * riconoscono dalla classe a cui appartengono.
+	 *
+	 * @param string $nome Nome dell'aggancio.
+	 * @return array<int, mixed>
+	 */
+	private function ascoltatori_del_registro( $nome ) {
+		global $wp_filter;
+
+		$trovati = array();
+
+		if ( ! isset( $wp_filter[ $nome ] ) ) {
+			return $trovati;
+		}
+
+		foreach ( $wp_filter[ $nome ]->callbacks as $ascoltatori ) {
+			foreach ( $ascoltatori as $ascoltatore ) {
+				$funzione = $ascoltatore['function'];
+
+				if ( $funzione instanceof Closure ) {
+					$classe = ( new ReflectionFunction( $funzione ) )->getClosureScopeClass();
+
+					if ( $classe && 'Conformita_Core_Registro_Automatico' === $classe->getName() ) {
+						$trovati[] = $funzione;
+					}
+				} elseif ( is_array( $funzione ) && 'Conformita_Core_Registro_Automatico' === $funzione[0] ) {
+					$trovati[] = $funzione;
+				}
+			}
+		}
+
+		return $trovati;
+	}
+
+	/**
 	 * C-224: a voci automatiche spente le operazioni delle righe C-195..C-203
 	 * non scrivono niente. Se scrivessero lo stesso, quelle righe starebbero
 	 * misurando altro.
@@ -1486,12 +1733,15 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 
 		$id = $this->contenuto( 'pending' );
 
-		Conformita_Core_Registro_Automatico::spegni();
+		$spegni = new ReflectionMethod( 'Conformita_Core_Registro_Automatico', 'spegni' );
+		$spegni->setAccessible( true );
+		$spegni->invoke( null );
 		$this->assertFalse( Conformita_Core_Registro_Automatico::avviato() );
 
 		foreach ( Conformita_Core_Registro_Automatico::agganci() as $aggancio ) {
-			$this->assertFalse(
-				has_action( $aggancio['aggancio'], array( 'Conformita_Core_Registro_Automatico', $aggancio['metodo'] ) ),
+			$this->assertSame(
+				array(),
+				$this->ascoltatori_del_registro( $aggancio['aggancio'] ),
 				'Spento vuol dire spento: ' . $aggancio['aggancio']
 			);
 		}
