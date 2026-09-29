@@ -782,8 +782,15 @@ KEY riferimento (riferimento)
 					return $errore;
 				}
 
+				/*
+				 * Il limite superiore è l'inizio del giorno civile successivo.
+				 * Si passa prima alla data dopo e poi si cerca il suo inizio:
+				 * dove la mezzanotte non esiste l'inizio di un giorno è
+				 * spostato in avanti, e aggiungere un giorno a quell'orario
+				 * porterebbe lo spostamento anche nel giorno dopo.
+				 */
 				if ( 'al' === $campo ) {
-					$giorno = $giorno->modify( '+1 day' );
+					$giorno = $giorno->modify( '+1 day' )->setTime( 0, 0 );
 				}
 
 				$condizioni[] = "istante {$confronto} %s";

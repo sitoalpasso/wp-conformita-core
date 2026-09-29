@@ -431,6 +431,90 @@ class Conformita_Core_Registro_Schermata_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-216, quarta parte: i limiti dal e al seguono il giorno civile del
+	 * sito anche quando il giorno dura 23 o 25 ore, o quando la mezzanotte
+	 * non esiste perche' l'ora legale comincia proprio a mezzanotte. Ogni
+	 * caso ha una voce nell'ultimo istante del giorno, che deve esserci, e
+	 * una nel primo istante del giorno dopo, che non deve esserci.
+	 */
+	public function test_c216_confini_del_giorno() {
+		$casi = array(
+			'mezzanotte saltata' => array(
+				'America/Santiago',
+				'2024-09-08',
+				array(
+					'SANTIAGO-PRIMA'  => array( '2024-09-08 03:59:59', false ),
+					'SANTIAGO-INIZIO' => array( '2024-09-08 04:00:00', true ),
+					'SANTIAGO-FINE'   => array( '2024-09-09 02:59:59', true ),
+					'SANTIAGO-DOPO'   => array( '2024-09-09 03:00:00', false ),
+				),
+			),
+			'giorno di 25 ore'   => array(
+				'Europe/Rome',
+				'2026-10-25',
+				array(
+					'LUNGO-PRIMA'  => array( '2026-10-24 21:59:59', false ),
+					'LUNGO-INIZIO' => array( '2026-10-24 22:00:00', true ),
+					'LUNGO-FINE'   => array( '2026-10-25 22:59:59', true ),
+					'LUNGO-DOPO'   => array( '2026-10-25 23:00:00', false ),
+				),
+			),
+			'giorno di 23 ore'   => array(
+				'Europe/Rome',
+				'2026-03-29',
+				array(
+					'CORTO-PRIMA'  => array( '2026-03-28 22:59:59', false ),
+					'CORTO-INIZIO' => array( '2026-03-28 23:00:00', true ),
+					'CORTO-FINE'   => array( '2026-03-29 21:59:59', true ),
+					'CORTO-DOPO'   => array( '2026-03-29 22:00:00', false ),
+				),
+			),
+		);
+
+		foreach ( $casi as $nome => $caso ) {
+			list( $fuso, $giorno, $voci ) = $caso;
+
+			foreach ( $voci as $segno => $voce ) {
+				$this->voce( $segno, array(), null, $voce[0] );
+			}
+
+			update_option( 'timezone_string', $fuso );
+
+			$trovate = array_map(
+				function ( $voce ) {
+					return $voce['motivazione'];
+				},
+				conformita_core_voci_registro(
+					array(
+						'dal' => $giorno,
+						'al'  => $giorno,
+					)
+				)
+			);
+
+			foreach ( $voci as $segno => $voce ) {
+				if ( $voce[1] ) {
+					$this->assertContains( $segno, $trovate, "Caso {$nome}: {$segno} e' del giorno." );
+				} else {
+					$this->assertNotContains( $segno, $trovate, "Caso {$nome}: {$segno} non e' del giorno." );
+				}
+			}
+
+			$successivo = gmdate( 'Y-m-d', strtotime( $giorno . ' +1 day UTC' ) );
+			$dopo       = array_map(
+				function ( $voce ) {
+					return $voce['motivazione'];
+				},
+				conformita_core_voci_registro( array( 'dal' => $successivo ) )
+			);
+
+			foreach ( $voci as $segno => $voce ) {
+				$this->assertSame( str_ends_with( $segno, '-DOPO' ), in_array( $segno, $dopo, true ), "Caso {$nome}: dal giorno dopo si vede solo {$segno} se e' del giorno dopo." );
+			}
+		}
+	}
+
+	/**
 	 * C-217: senza un gettone valido i filtri dell'indirizzo non si applicano,
 	 * e la schermata lo dice.
 	 */
