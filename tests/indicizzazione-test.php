@@ -151,7 +151,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	 * riguarda questo meccanismo. Si stampa quindi il metatag, e si pretende
 	 * che la testata lo stampi: se un tema o un componente lo toglie dalla
 	 * testata, questa funzione restituisce vuoto e il divieto nel sorgente
-	 * risulta assente, come sulla pagina vera. Riga C-236.
+	 * risulta assente, come sulla pagina vera. Riga C-237.
 	 *
 	 * @return string
 	 */
@@ -400,7 +400,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	 * dai contenuti mostrati.
 	 *
 	 * Un elenco con dentro un contenuto vietato porterebbe il divieto anche per
-	 * la regola della riga C-231. Senza questa prova, dimenticare gli elenchi e
+	 * la regola della riga C-232. Senza questa prova, dimenticare gli elenchi e
 	 * i feed dei tipi resterebbe invisibile: si vedrebbe solo quando l'elenco e'
 	 * vuoto, per esempio perche' tutti gli atti sono scaduti.
 	 */
@@ -573,7 +573,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-231: un elenco che non e' quello del tipo, ma mostra contenuti vietati,
+	 * C-232: un elenco che non e' quello del tipo, ma mostra contenuti vietati,
 	 * porta il divieto.
 	 *
 	 * La pagina iniziale e gli elenchi per autore diventano misti con una
@@ -582,7 +582,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	 * davvero fra quelli mostrati, e poi che senza di esso lo stesso elenco resti
 	 * libero.
 	 */
-	public function test_c231_elenchi_misti() {
+	public function test_c232_elenchi_misti() {
 		$autore  = self::factory()->user->create( array( 'role' => 'editor' ) );
 		$vietato = $this->contenuto( self::TIPO_CHIUSO );
 		wp_update_post(
@@ -631,10 +631,10 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-232: come si compone `X-Robots-Tag` quando un altro componente ne ha
+	 * C-233: come si compone `X-Robots-Tag` quando un altro componente ne ha
 	 * gia' scritto uno.
 	 */
-	public function test_c232_composizione_dell_intestazione() {
+	public function test_c233_composizione_dell_intestazione() {
 		$vietato = $this->contenuto( self::TIPO_CHIUSO );
 		$this->go_to( get_permalink( $vietato ) );
 
@@ -680,10 +680,10 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-233: un allegato il cui contenuto padre non esiste piu' non prende la
+	 * C-234: un allegato il cui contenuto padre non esiste piu' non prende la
 	 * politica di nessun altro, nemmeno del contenuto globale.
 	 */
-	public function test_c233_padre_inesistente() {
+	public function test_c234_padre_inesistente() {
 		$vietato   = $this->contenuto( self::TIPO_CHIUSO );
 		$scomparso = $this->contenuto( self::TIPO_APERTO );
 
@@ -717,11 +717,11 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-234: se un altro componente toglie un aggancio solo, il meccanismo non
+	 * C-235: se un altro componente toglie un aggancio solo, il meccanismo non
 	 * risulta acceso, la registrazione di una sezione e' rifiutata, e la
 	 * riaccensione rimette l'aggancio mancante.
 	 */
-	public function test_c234_aggancio_tolto_da_fuori() {
+	public function test_c235_aggancio_tolto_da_fuori() {
 		foreach ( Conformita_Core_Indicizzazione::agganci() as $aggancio ) {
 			Conformita_Core_Indicizzazione::avvia();
 			$this->assertTrue( Conformita_Core_Indicizzazione::avviato() );
@@ -751,7 +751,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-235: il meccanismo si accende caricando il file di core, senza che
+	 * C-236: il meccanismo si accende caricando il file di core, senza che
 	 * nessuno lo chieda, e la versione dell'interfaccia e' almeno quella che lo
 	 * garantisce.
 	 *
@@ -760,7 +760,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	 * soltanto le accensioni. Senza la chiamata nel file, il meccanismo resta
 	 * spento e la prova e' rossa.
 	 */
-	public function test_c235_accensione_al_caricamento() {
+	public function test_c236_accensione_al_caricamento() {
 		Conformita_Core_Indicizzazione::azzera_avvio();
 		$this->assertFalse( Conformita_Core_Indicizzazione::avviato() );
 
@@ -773,11 +773,11 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-236: il percorso vero della pagina. Il divieto sta nella testata
+	 * C-237: il percorso vero della pagina. Il divieto sta nella testata
 	 * stampata per intero, sta nell'incorporamento, e se un tema o un componente
 	 * toglie il metatag dalla testata resta almeno l'intestazione.
 	 */
-	public function test_c236_percorso_della_pagina() {
+	public function test_c237_percorso_della_pagina() {
 		$vietato    = $this->contenuto( self::TIPO_CHIUSO );
 		$consentito = $this->contenuto( self::TIPO_APERTO );
 
@@ -799,14 +799,14 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-237: la mappa di un altro tipo, allargata da un componente ai tipi
+	 * C-238: la mappa di un altro tipo, allargata da un componente ai tipi
 	 * vietati, non elenca i contenuti vietati.
 	 *
 	 * La richiesta simulata e' quella di WordPress quando costruisce la mappa:
 	 * la variabile `sitemap` e' valorizzata, e la lettura dei contenuti passa da
 	 * un'interrogazione secondaria.
 	 */
-	public function test_c237_mappa_allargata_da_un_componente() {
+	public function test_c238_mappa_allargata_da_un_componente() {
 		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
 		$articolo = $this->contenuto( 'post' );
 

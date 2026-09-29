@@ -50,7 +50,7 @@ final class Conformita_Core_Indicizzazione {
 
 	/**
 	 * Direttive rivolte a un motore specifico, trovate nell'intestazione della
-	 * richiesta in corso e da emettere su una riga propria. Riga C-232.
+	 * richiesta in corso e da emettere su una riga propria. Riga C-233.
 	 *
 	 * @var array<int, string>
 	 */
@@ -63,7 +63,7 @@ final class Conformita_Core_Indicizzazione {
 	 *           accende al caricamento del file di core, come il motore di
 	 *           scadenza e per la stessa ragione: un meccanismo di conformita'
 	 *           che dipende dall'ordine di caricamento dei plugin non e' un
-	 *           meccanismo di conformita'. Riga C-235.
+	 *           meccanismo di conformita'. Riga C-236.
 	 *
 	 * Idempotente, e ripara: rimette gli agganci che mancano, anche se qualcuno
 	 * ne ha tolto uno solo. WordPress identifica un aggancio a un metodo
@@ -121,7 +121,7 @@ final class Conformita_Core_Indicizzazione {
 	 *
 	 * Si guarda lo stato degli agganci e non una variabile che lo ricorda: se un
 	 * altro componente ne toglie uno, il meccanismo non e' piu' acceso, e la
-	 * registrazione di una sezione lo deve sapere. Righe C-85 e C-234.
+	 * registrazione di una sezione lo deve sapere. Righe C-85 e C-235.
 	 *
 	 * @return bool
 	 */
@@ -138,7 +138,7 @@ final class Conformita_Core_Indicizzazione {
 	/**
 	 * Sgancia i filtri del meccanismo.
 	 *
-	 * @internal Esiste per la suite di test, per le righe C-85, C-230 e C-234.
+	 * @internal Esiste per la suite di test, per le righe C-85, C-230 e C-235.
 	 *           Chiamarlo in esercizio, dopo che le sezioni si sono registrate,
 	 *           lascia le loro pagine senza divieto: la guardia della
 	 *           registrazione vale al momento della registrazione e non dopo. E'
@@ -192,7 +192,7 @@ final class Conformita_Core_Indicizzazione {
 		/*
 		 * Niente `get_post()` su un valore vuoto: senza argomento restituisce
 		 * il contenuto globale, cioe' la politica di un altro contenuto. Riga
-		 * C-233.
+		 * C-234.
 		 */
 		if ( ! $contenuto instanceof WP_Post ) {
 			$contenuto = is_numeric( $contenuto ) && (int) $contenuto > 0 ? get_post( (int) $contenuto ) : null;
@@ -233,7 +233,7 @@ final class Conformita_Core_Indicizzazione {
 	 * un tema o un componente possono allargare ai tipi di una sezione vietata:
 	 * l'elenco espone comunque titoli e riassunti dei contenuti vietati. Le
 	 * pagine dei contenuti consentiti di quello stesso elenco restano
-	 * indicizzabili ciascuna per conto propria. Righe C-80, C-225, C-226, C-231.
+	 * indicizzabili ciascuna per conto propria. Righe C-80, C-225, C-226, C-232.
 	 *
 	 * Per gli elenchi e i feed di un tipo vietato basta il tipo, anche a elenco
 	 * vuoto: la pagina esiste e il suo indirizzo dice gia' a quale sezione
@@ -295,7 +295,7 @@ final class Conformita_Core_Indicizzazione {
 	 *
 	 * Le direttive rivolte a un motore specifico, che un altro componente
 	 * avesse gia' scritto, non si mescolano al divieto generale: si mettono da
-	 * parte e si emettono su una riga propria. Riga C-232.
+	 * parte e si emettono su una riga propria. Riga C-233.
 	 *
 	 * @internal Aggancio di `wp_headers`.
 	 *
@@ -337,7 +337,7 @@ final class Conformita_Core_Indicizzazione {
 	 * Le direttive per un motore specifico messe da parte per la richiesta in
 	 * corso.
 	 *
-	 * @internal Serve alla riga C-232.
+	 * @internal Serve alla riga C-233.
 	 *
 	 * @return array<int, string>
 	 */
@@ -368,7 +368,7 @@ final class Conformita_Core_Indicizzazione {
 	 * (anche `none` lo contiene). Un valore rivolto a un motore specifico, come
 	 * `googlebot: nofollow`, non conta come divieto generale e non riceve il
 	 * divieto in coda, dove varrebbe per quel motore soltanto: si restituisce a
-	 * parte. Riga C-232.
+	 * parte. Riga C-233.
 	 *
 	 * @param array<string, string> $intestazioni Intestazioni.
 	 * @return array{intestazioni: array<string, string>, specifiche: array<int, string>}
@@ -479,11 +479,11 @@ final class Conformita_Core_Indicizzazione {
 	 * Togliere il tipo dalla mappa non basta se un tema o un componente
 	 * allarga le interrogazioni di un altro tipo, per esempio degli articoli,
 	 * ai tipi di una sezione vietata: la mappa degli articoli elencherebbe
-	 * anche gli atti. E' lo stesso caso degli elenchi misti della riga C-231,
+	 * anche gli atti. E' lo stesso caso degli elenchi misti della riga C-232,
 	 * sul percorso della mappa. Si agisce soltanto mentre WordPress costruisce
 	 * la mappa, riconoscibile dalla variabile `sitemap` della richiesta, e
 	 * soltanto sulle interrogazioni secondarie, che sono quelle con cui la
-	 * mappa legge i contenuti. Riga C-237.
+	 * mappa legge i contenuti. Riga C-238.
 	 *
 	 * @internal Aggancio di `the_posts`.
 	 *
