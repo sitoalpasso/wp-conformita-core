@@ -1578,6 +1578,136 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-202, quinta parte: scritture annidate.
+	 *
+	 * Un componente che, mentre la fine cambia, aggiorna un suo metadato dello
+	 * stesso contenuto, o che cambia la fine mentre aggiorna un suo metadato:
+	 * in tutti e due i casi la fine cambia una volta, e la voce e' una, con
+	 * il prima e il dopo esatti. Se invece riscrive la fine dentro la
+	 * scrittura della fine, la fine cambia due volte, e le voci sono due.
+	 * Una scrittura annidata che WordPress annuncia e poi non compie non
+	 * toglie la voce a quella esterna.
+	 */
+	public function test_c202_fine_pubblicazione_scritture_annidate() {
+		wp_set_current_user( $this->utente() );
+
+		$chiave = conformita_core_chiave_fine_pubblicazione();
+		$id     = $this->contenuto( 'publish' );
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $id, '2026-10-16' ) );
+		update_post_meta( $id, 'dato_ausiliario', 'iniziale' );
+
+		$in_corso = false;
+		$dentro   = function ( $meta_id, $post_id, $meta_key ) use ( $id, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || $chiave !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			update_post_meta( $id, 'dato_ausiliario', 'durante la fine' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $dentro, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, $chiave, '2026-10-20' );
+		remove_action( 'update_post_meta', $dentro, 10 );
+
+		$this->assertSame( 'durante la fine', get_post_meta( $id, 'dato_ausiliario', true ), 'Precondizione: la scrittura annidata e\' avvenuta.' );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Metadato aggiornato dentro la scrittura della fine: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array( '2026-10-16' ), array( '2026-10-20' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+
+		$fuori = function ( $meta_id, $post_id, $meta_key ) use ( $id, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || 'dato_ausiliario' !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			update_post_meta( $id, $chiave, '2026-10-25' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $fuori, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, 'dato_ausiliario', 'con la fine dentro' );
+		remove_action( 'update_post_meta', $fuori, 10 );
+
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Fine cambiata dentro la scrittura di un altro metadato: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array( '2026-10-20' ), array( '2026-10-25' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+
+		// La stessa riga riscritta dentro la sua stessa scrittura: due cambi, due voci, in ordine.
+		$stessa = function ( $meta_id, $post_id, $meta_key ) use ( $id, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || $chiave !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			update_post_meta( $id, $chiave, '2026-10-28' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $stessa, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, $chiave, '2026-10-30' );
+		remove_action( 'update_post_meta', $stessa, 10 );
+
+		$this->assertSame( array( '2026-10-30' ), get_post_meta( $id, $chiave, false ), 'Precondizione: vince la scrittura esterna.' );
+		$this->assertSame(
+			array(
+				array( array( '2026-10-25' ), array( '2026-10-28' ) ),
+				array( array( '2026-10-28' ), array( '2026-10-30' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['dettagli']['valore_precedente'], $voce['dettagli']['valore_nuovo'] );
+				},
+				$this->nuove()
+			),
+			'Riga riscritta dentro la sua scrittura.'
+		);
+
+		/*
+		 * Una scrittura che WordPress annuncia e poi non fa, dentro la
+		 * scrittura della fine: due righe uguali riscritte con lo stesso
+		 * valore, su un altro contenuto. L'annuncio di dopo non arriva, e la
+		 * lettura di quella scrittura non deve prendere il posto di quella
+		 * della fine.
+		 */
+		$altro = $this->contenuto( 'publish' );
+		add_post_meta( $altro, 'dato_doppio', 'uguale' );
+		add_post_meta( $altro, 'dato_doppio', 'uguale' );
+
+		$mancata = function ( $meta_id, $post_id, $meta_key ) use ( $id, $altro, $chiave, &$in_corso ) {
+			unset( $meta_id );
+
+			if ( $in_corso || (int) $post_id !== $id || $chiave !== $meta_key ) {
+				return;
+			}
+
+			$in_corso = true;
+			$this->assertFalse( update_post_meta( $altro, 'dato_doppio', 'uguale' ), 'Precondizione: la scrittura annidata non avviene.' );
+			$in_corso = false;
+		};
+
+		add_action( 'update_post_meta', $mancata, 10, 3 );
+		$this->segna();
+		update_post_meta( $id, $chiave, '2026-11-02' );
+		remove_action( 'update_post_meta', $mancata, 10 );
+
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci, 'Scrittura mancata dentro la scrittura della fine: ' . wp_json_encode( $voci ) );
+		$this->assertSame( array( array( '2026-10-30' ), array( '2026-11-02' ) ), array( $voci[0]['dettagli']['valore_precedente'], $voci[0]['dettagli']['valore_nuovo'] ) );
+	}
+
+	/**
 	 * C-203: un allegato aggiunto o eliminato scrive una voce sul contenuto a
 	 * cui appartiene.
 	 */
