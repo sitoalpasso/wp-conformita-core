@@ -636,22 +636,51 @@ final class Conformita_Core_Registro_Automatico {
 	 * @return array<int, string>
 	 */
 	private static function campi_cambiati( WP_Post $prima, WP_Post $dopo, $richiesta ) {
+		$scritto  = self::come_scritto( $dopo, $richiesta );
 		$cambiati = array();
 
 		foreach ( self::CAMPI as $campo ) {
-			if ( (string) $prima->$campo === (string) $dopo->$campo || self::riscritto_da_wordpress( $campo, $prima, $dopo, $richiesta ) ) {
-				continue;
+			if ( (string) $prima->$campo !== (string) $scritto->$campo && ! self::riscritto_da_wordpress( $campo, $prima, $scritto, $richiesta ) ) {
+				$cambiati[] = $campo;
 			}
-
-			// Il salvataggio l'ha scritto com'era: l'ha cambiato un salvataggio annidato, che ha la sua voce.
-			if ( is_array( $richiesta ) && isset( $richiesta['dati_finali'][ $campo ] ) && (string) $prima->$campo === $richiesta['dati_finali'][ $campo ] ) {
-				continue;
-			}
-
-			$cambiati[] = $campo;
 		}
 
 		return $cambiati;
+	}
+
+	/**
+	 * Il contenuto come questo salvataggio l'ha scritto.
+	 *
+	 * La copia di dopo che WordPress annuncia si rilegge alla fine del
+	 * salvataggio, e nel frattempo un altro salvataggio dello stesso
+	 * contenuto, annidato in questo, può averla cambiata: può aver cambiato un
+	 * campo che questo non toccava, o aver rimesso com'era un campo che questo
+	 * aveva cambiato. Il salvataggio interno ha la sua voce; quello esterno si
+	 * giudica su ciò che ha scritto, cioè i dati dopo tutti i filtri. Fa
+	 * eccezione il nome nell'indirizzo che dopo tutti i filtri è ancora vuoto:
+	 * WordPress lo genera dopo aver scritto, e vale la copia riletta. Senza la
+	 * richiesta vale la copia riletta per ogni campo.
+	 *
+	 * @param WP_Post    $dopo      Contenuto riletto dopo il salvataggio.
+	 * @param array|null $richiesta Cosa ha chiesto il salvataggio.
+	 * @return WP_Post
+	 */
+	private static function come_scritto( WP_Post $dopo, $richiesta ) {
+		if ( ! is_array( $richiesta ) || empty( $richiesta['dati_finali'] ) ) {
+			return $dopo;
+		}
+
+		$scritto = clone $dopo;
+
+		foreach ( $richiesta['dati_finali'] as $campo => $valore ) {
+			if ( 'post_name' === $campo && '' === $valore ) {
+				continue;
+			}
+
+			$scritto->$campo = $valore;
+		}
+
+		return $scritto;
 	}
 
 	/**

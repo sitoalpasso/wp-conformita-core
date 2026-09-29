@@ -471,6 +471,34 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove() );
 
 		/*
+		 * Lo stesso sul contenuto pubblicato: un altro componente svuota il
+		 * nome, e WordPress lo rigenera uguale dopo aver scritto. Il nome non
+		 * e' cambiato; il riassunto si'.
+		 */
+		$pubblicato = $this->contenuto( 'publish' );
+		$nome       = get_post( $pubblicato )->post_name;
+		$svuota     = function ( $dati ) {
+			$dati['post_name'] = '';
+			return $dati;
+		};
+
+		$this->assertNotSame( '', $nome, 'Precondizione: il pubblicato ha un nome.' );
+		add_filter( 'wp_insert_post_data', $svuota );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'           => $pubblicato,
+				'post_excerpt' => 'Riassunto nuovo',
+			)
+		);
+		remove_filter( 'wp_insert_post_data', $svuota );
+
+		$this->assertSame( $nome, get_post( $pubblicato )->post_name, 'Precondizione: WordPress ha rigenerato lo stesso nome.' );
+		$voci = $this->nuove();
+		$this->assertCount( 1, $voci );
+		$this->assertSame( array( 'post_excerpt' ), $voci[0]['dettagli']['campi'] );
+
+		/*
 		 * Chi salva con la funzione di base, indicando la data locale senza
 		 * quella in UTC e senza la richiesta esplicita: la data e' sua, e
 		 * WordPress ne ricava l'altra. Con la funzione di aggiornamento, invece,
@@ -680,7 +708,9 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	 * Un componente che, mentre il contenuto viene pubblicato, lo salva di
 	 * nuovo cambiandone il riassunto. Il salvataggio interno ha la sua voce;
 	 * quello esterno non si prende il riassunto, che non ha cambiato, ne'
-	 * l'indirizzo e le date che WordPress fissa alla pubblicazione.
+	 * l'indirizzo e le date che WordPress fissa alla pubblicazione. Poi un
+	 * componente che rimette il titolo com'era mentre un altro salvataggio lo
+	 * cambia: tutti e due i salvataggi hanno la loro voce.
 	 */
 	public function test_c197_salvataggio_annidato() {
 		wp_set_current_user( $this->utente() );
@@ -728,6 +758,56 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 				},
 				$this->nuove()
 			)
+		);
+
+		/*
+		 * Il salvataggio interno rimette il titolo com'era: il titolo e'
+		 * cambiato due volte, e le voci sono due, una per salvataggio, nell'ordine
+		 * in cui i salvataggi finiscono.
+		 */
+		$fatto  = false;
+		$titolo = get_post( $id )->post_title;
+
+		$rimette = function ( $nuovo, $vecchio, $post ) use ( $id, $titolo, &$fatto ) {
+			unset( $nuovo, $vecchio );
+
+			if ( $fatto || (int) $post->ID !== $id ) {
+				return;
+			}
+
+			$fatto = true;
+			wp_update_post(
+				array(
+					'ID'         => $id,
+					'post_title' => $titolo,
+				)
+			);
+		};
+
+		add_action( 'transition_post_status', $rimette, 10, 3 );
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'         => $id,
+				'post_title' => 'Titolo cambiato e poi rimesso',
+			)
+		);
+		remove_action( 'transition_post_status', $rimette, 10 );
+
+		$this->assertTrue( $fatto, 'Precondizione: il salvataggio interno e\' avvenuto.' );
+		$this->assertSame( $titolo, get_post( $id )->post_title, 'Precondizione: il titolo e\' tornato com\'era.' );
+		$this->assertSame(
+			array(
+				array( 'modifica', array( 'post_title' ) ),
+				array( 'modifica', array( 'post_title' ) ),
+			),
+			array_map(
+				function ( $voce ) {
+					return array( $voce['azione'], $voce['dettagli']['campi'] ?? array() );
+				},
+				$this->nuove()
+			),
+			'Titolo cambiato dal salvataggio esterno e rimesso da quello interno.'
 		);
 	}
 
