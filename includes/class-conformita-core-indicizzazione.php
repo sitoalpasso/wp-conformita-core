@@ -513,7 +513,8 @@ final class Conformita_Core_Indicizzazione {
 	 * allarga a tutti i tipi ricercabili. Se non resta nessun tipo,
 	 * l'interrogazione non restituisce niente: un elenco di tipi vuoto,
 	 * per WordPress, vorrebbe dire gli articoli. Se fra i tipi letti ci sono
-	 * gli allegati, si escludono quelli appesi a un contenuto vietato. Stessi
+	 * gli allegati, si escludono quelli appesi a un contenuto vietato, qualunque
+	 * vincolo sul padre il componente abbia gia' messo (C-241). Stessi
 	 * confini del filtro sui contenuti: solo durante la mappa e solo sulle
 	 * interrogazioni secondarie.
 	 *
@@ -568,9 +569,51 @@ final class Conformita_Core_Indicizzazione {
 			$padri = self::contenuti_dei_tipi( $vietati );
 
 			if ( ! empty( $padri ) ) {
-				$interrogazione->set( 'post_parent__not_in', array_merge( (array) $interrogazione->get( 'post_parent__not_in' ), $padri ) );
+				self::escludi_padri( $interrogazione, $padri );
 			}
 		}
+	}
+
+	/**
+	 * Esclude dall'interrogazione i figli dei contenuti indicati.
+	 *
+	 * WordPress legge i tre vincoli sul padre in ordine e ne applica uno solo:
+	 * `post_parent`, se e' un numero, poi `post_parent__in`, e soltanto in
+	 * mancanza dei due `post_parent__not_in`. Aggiungere l'esclusione accanto a
+	 * un'inclusione non escluderebbe niente, quindi si corregge il vincolo che
+	 * WordPress applica davvero. Se non resta nessun padre ammesso,
+	 * l'interrogazione non restituisce niente: un elenco di padri vuoto, per
+	 * WordPress, vorrebbe dire nessun vincolo. Riga C-241.
+	 *
+	 * @param WP_Query        $interrogazione Interrogazione in preparazione.
+	 * @param array<int, int> $padri          Contenuti i cui figli si escludono.
+	 */
+	private static function escludi_padri( WP_Query $interrogazione, array $padri ) {
+		$padre = $interrogazione->get( 'post_parent' );
+
+		if ( is_numeric( $padre ) ) {
+			if ( in_array( (int) $padre, $padri, true ) ) {
+				$interrogazione->set( 'post__in', array( 0 ) );
+			}
+
+			return;
+		}
+
+		$inclusi = array_filter( array_map( 'absint', (array) $interrogazione->get( 'post_parent__in' ) ) );
+
+		if ( ! empty( $inclusi ) ) {
+			$ammessi = array_values( array_diff( $inclusi, $padri ) );
+
+			if ( empty( $ammessi ) ) {
+				$interrogazione->set( 'post__in', array( 0 ) );
+			} else {
+				$interrogazione->set( 'post_parent__in', $ammessi );
+			}
+
+			return;
+		}
+
+		$interrogazione->set( 'post_parent__not_in', array_merge( (array) $interrogazione->get( 'post_parent__not_in' ), $padri ) );
 	}
 
 	/**

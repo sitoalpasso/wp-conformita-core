@@ -1,7 +1,7 @@
 <?php
 /**
  * Il meccanismo di indicizzazione: righe C-80..C-85, C-225..C-230,
- * C-232..C-239.
+ * C-232..C-239, C-241.
  *
  * Le righe C-228 e C-240, il divieto sui file consegnati, stanno in
  * `consegna-test.php`, perche' li' ci sono gli strumenti per chiedere un file
@@ -985,6 +985,72 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 		remove_action( 'pre_get_posts', $allarga );
 
 		$this->assertContains( $vietato, $fuori, 'Fuori dalla mappa le interrogazioni altrui non si toccano.' );
+	}
+
+	/**
+	 * C-241: gli allegati letti dalla mappa per contenuto padre, con i filtri
+	 * spenti. WordPress applica un solo vincolo sul padre, e l'inclusione vince
+	 * sull'esclusione: la restrizione deve correggere quello che WordPress
+	 * applica davvero.
+	 */
+	public function test_c241_allegati_scelti_per_padre() {
+		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
+		$articolo = $this->contenuto( 'post' );
+
+		$allegato_vietato  = get_permalink( self::factory()->attachment->create_object( 'vietato.pdf', $vietato, array( 'post_mime_type' => 'application/pdf' ) ) );
+		$allegato_articolo = get_permalink( self::factory()->attachment->create_object( 'articolo.pdf', $articolo, array( 'post_mime_type' => 'application/pdf' ) ) );
+
+		$base = array(
+			'post_type'        => 'attachment',
+			'post_status'      => 'inherit',
+			'suppress_filters' => true,
+		);
+
+		$casi = array(
+			'padri misti'          => array( array( 'post_parent__in' => array( $vietato, $articolo ) ), true ),
+			'solo padri vietati'   => array( array( 'post_parent__in' => array( $vietato ) ), false ),
+			'padre vietato'        => array( array( 'post_parent' => $vietato ), false ),
+			'padre consentito'     => array( array( 'post_parent' => $articolo ), true ),
+			'inclusione e divieto' => array(
+				array(
+					'post_parent__in'     => array( $vietato, $articolo ),
+					'post_parent__not_in' => array( 0 ),
+				),
+				true,
+			),
+		);
+
+		set_query_var( 'sitemap', 'posts' );
+
+		foreach ( $casi as $nome => $caso ) {
+			list( $vincoli, $resta_articolo ) = $caso;
+
+			$allarga = function ( $originali ) use ( $base, $vincoli ) {
+				return array_merge( $originali, $base, $vincoli );
+			};
+			add_filter( 'wp_sitemaps_posts_query_args', $allarga );
+
+			Conformita_Core_Indicizzazione::azzera_avvio();
+			$spento = $this->indirizzi_in_mappa( 'post' );
+			Conformita_Core_Indicizzazione::avvia();
+			$acceso = $this->indirizzi_in_mappa( 'post' );
+
+			remove_filter( 'wp_sitemaps_posts_query_args', $allarga );
+
+			if ( 'padre consentito' !== $nome ) {
+				$this->assertContains( $allegato_vietato, $spento, $nome . ': precondizione, senza il meccanismo l\'allegato del vietato entra.' );
+			}
+
+			$this->assertNotContains( $allegato_vietato, $acceso, $nome . ': l\'allegato del vietato non c\'e\'.' );
+
+			if ( $resta_articolo ) {
+				$this->assertContains( $allegato_articolo, $acceso, $nome . ': l\'allegato dell\'articolo resta.' );
+			} else {
+				$this->assertSame( array(), $acceso, $nome . ': senza padri ammessi la lettura non restituisce niente.' );
+			}
+		}
+
+		set_query_var( 'sitemap', '' );
 	}
 
 	/**
