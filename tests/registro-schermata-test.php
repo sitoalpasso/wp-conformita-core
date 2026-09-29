@@ -39,7 +39,9 @@ class Conformita_Core_Registro_Schermata_Test extends WP_UnitTestCase {
 
 		Conformita_Core_Sezioni::azzera();
 		Conformita_Core_Tipi::azzera();
-		delete_option( Conformita_Core_Registro::OPZIONE_MANCATE );
+		foreach ( Conformita_Core_Registro::OPZIONI_MANCATE as $opzione ) {
+			delete_option( $opzione );
+		}
 		$this->fuso_originale = get_option( 'timezone_string' );
 
 		foreach ( array(

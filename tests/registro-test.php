@@ -55,7 +55,9 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 
 		Conformita_Core_Sezioni::azzera();
 		Conformita_Core_Tipi::azzera();
-		delete_option( Conformita_Core_Registro::OPZIONE_MANCATE );
+		foreach ( Conformita_Core_Registro::OPZIONI_MANCATE as $opzione ) {
+			delete_option( $opzione );
+		}
 
 		foreach ( array(
 			self::SEZIONE       => self::TIPO,
@@ -1144,6 +1146,30 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		$this->assertSame( 1, $mancate['conteggio'], 'La pubblicazione senza voce e\' annotata.' );
 		$this->assertSame( '2026-10-02 09:15:30', $mancate['prima'] );
 		$this->assertSame( '2026-10-02 09:15:30', $mancate['ultima'] );
+
+		/*
+		 * Due richieste che annotano insieme. Qui la seconda si simula: un'altra
+		 * richiesta ha gia' portato il conteggio da 1 a 3 nella banca dati, e
+		 * questa ne ha ancora in memoria il valore vecchio. Un conteggio letto
+		 * e poi riscritto perderebbe le due annotazioni dell'altra.
+		 */
+		global $wpdb;
+		$this->assertSame( 1, Conformita_Core_Registro::mancate()['conteggio'], 'Precondizione: il valore vecchio e\' in memoria.' );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: l'altra richiesta scrive nella banca dati, non nella memoria di questa.
+		$wpdb->update( $wpdb->options, array( 'option_value' => '3' ), array( 'option_name' => Conformita_Core_Registro::OPZIONE_MANCATE ) );
+
+		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-10-02 09:20:00', new DateTimeZone( 'UTC' ) ) );
+		Conformita_Core_Registro::annota_mancata();
+
+		$mancate = Conformita_Core_Registro::mancate();
+		$this->assertSame( 4, $mancate['conteggio'], 'Le annotazioni dell\'altra richiesta restano contate.' );
+		$this->assertSame( '2026-10-02 09:15:30', $mancate['prima'], 'La prima resta la prima.' );
+		$this->assertSame( '2026-10-02 09:20:00', $mancate['ultima'] );
+
+		// Un'annotazione con un istante precedente, arrivata per ultima, non sposta l'ultima indietro.
+		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-10-02 09:18:00', new DateTimeZone( 'UTC' ) ) );
+		Conformita_Core_Registro::annota_mancata();
+		$this->assertSame( '2026-10-02 09:20:00', Conformita_Core_Registro::mancate()['ultima'] );
 	}
 
 	/**

@@ -59,6 +59,21 @@ final class Conformita_Core_Registro {
 	const OPZIONE_MANCATE = 'conformita_core_registro_mancate';
 
 	/**
+	 * Opzione con l'istante della prima voce automatica mancata.
+	 */
+	const OPZIONE_MANCATE_PRIMA = 'conformita_core_registro_mancate_prima';
+
+	/**
+	 * Opzione con l'istante dell'ultima voce automatica mancata.
+	 */
+	const OPZIONE_MANCATE_ULTIMA = 'conformita_core_registro_mancate_ultima';
+
+	/**
+	 * Le tre opzioni delle voci mancate.
+	 */
+	const OPZIONI_MANCATE = array( self::OPZIONE_MANCATE, self::OPZIONE_MANCATE_PRIMA, self::OPZIONE_MANCATE_ULTIMA );
+
+	/**
 	 * La capability che apre la schermata di consultazione.
 	 *
 	 * Core non la assegna a nessun ruolo, nemmeno all'amministratore, come per
@@ -760,21 +775,19 @@ KEY riferimento (riferimento)
 	 * solo sapere che c'è. Il conteggio lo mostra la schermata di
 	 * consultazione, con la data della prima e dell'ultima.
 	 *
+	 * Conteggio e date stanno in tre opzioni separate, ciascuna aggiornata in
+	 * un passo solo: due richieste che annotano insieme non si cancellano a
+	 * vicenda, e un'annotazione con un istante precedente, arrivata per
+	 * ultima, non sposta indietro l'ultima.
+	 *
 	 * @internal Chiamata solo dalle voci automatiche.
 	 */
 	public static function annota_mancata() {
-		$adesso  = Conformita_Core_Scadenza::ora()->setTimezone( self::utc() )->format( 'Y-m-d H:i:s' );
-		$mancate = self::mancate();
+		$adesso = Conformita_Core_Scadenza::ora()->setTimezone( self::utc() )->format( 'Y-m-d H:i:s' );
 
-		update_option(
-			self::OPZIONE_MANCATE,
-			array(
-				'conteggio' => $mancate['conteggio'] + 1,
-				'prima'     => '' === $mancate['prima'] ? $adesso : $mancate['prima'],
-				'ultima'    => $adesso,
-			),
-			false
-		);
+		Conformita_Core_Contatore::incrementa( self::OPZIONE_MANCATE );
+		Conformita_Core_Contatore::limite( self::OPZIONE_MANCATE_PRIMA, $adesso, true );
+		Conformita_Core_Contatore::limite( self::OPZIONE_MANCATE_ULTIMA, $adesso, false );
 	}
 
 	/**
@@ -783,13 +796,14 @@ KEY riferimento (riferimento)
 	 * @return array{conteggio: int, prima: string, ultima: string}
 	 */
 	public static function mancate() {
-		$valore = get_option( self::OPZIONE_MANCATE, array() );
-		$valore = is_array( $valore ) ? $valore : array();
+		$conteggio = get_option( self::OPZIONE_MANCATE, 0 );
+		$prima     = get_option( self::OPZIONE_MANCATE_PRIMA, '' );
+		$ultima    = get_option( self::OPZIONE_MANCATE_ULTIMA, '' );
 
 		return array(
-			'conteggio' => isset( $valore['conteggio'] ) ? max( 0, (int) $valore['conteggio'] ) : 0,
-			'prima'     => isset( $valore['prima'] ) && is_string( $valore['prima'] ) ? $valore['prima'] : '',
-			'ultima'    => isset( $valore['ultima'] ) && is_string( $valore['ultima'] ) ? $valore['ultima'] : '',
+			'conteggio' => is_numeric( $conteggio ) ? max( 0, (int) $conteggio ) : 0,
+			'prima'     => is_string( $prima ) ? $prima : '',
+			'ultima'    => is_string( $ultima ) ? $ultima : '',
 		);
 	}
 

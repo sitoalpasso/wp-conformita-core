@@ -47,6 +47,7 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-filtro-s
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-deposito-fermato.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-allegati.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-consegna.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-contatore.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-automatico.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-schermata.php';
