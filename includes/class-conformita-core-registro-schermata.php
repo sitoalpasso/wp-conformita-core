@@ -155,6 +155,20 @@ final class Conformita_Core_Registro_Schermata {
 			$presenti[ $nome ] = $valore;
 		}
 
+		/*
+		 * Un nome che non è né un filtro né uno dei parametri della schermata
+		 * è un filtro chiesto che non esiste: chi ha scritto contenuti al
+		 * posto di contenuto si aspetta una selezione, non tutto il registro.
+		 */
+		$ammessi = array_merge( self::FILTRI, array( 'page', 'paged', self::CAMPO_GETTONE ) );
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Si leggono solo i nomi; il gettone si verifica subito sotto.
+		foreach ( array_keys( $_GET ) as $nome ) {
+			if ( ! in_array( (string) $nome, $ammessi, true ) ) {
+				$malformati = true;
+			}
+		}
+
 		if ( array() === $presenti && ! $malformati ) {
 			return array(
 				'filtri'     => array(),

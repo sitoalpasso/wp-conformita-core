@@ -378,6 +378,59 @@ class Conformita_Core_Registro_Schermata_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-216, terza parte: un nome sconosciuto nell'indirizzo della schermata
+	 * e' un errore come nella funzione per i componenti. Chi scrive contenuti
+	 * al posto di contenuto chiede un filtro che non c'e', e non deve vedere
+	 * tutto il registro come se il filtro fosse applicato.
+	 */
+	public function test_c216_nomi_sconosciuti() {
+		$this->voce( 'VOCE-QUALUNQUE' );
+
+		$lettore = $this->lettore();
+		wp_set_current_user( $lettore );
+
+		$gettone = wp_create_nonce( Conformita_Core_Registro_Schermata::AZIONE_FILTRI );
+
+		foreach ( array(
+			'solo il nome sbagliato'     => array( 'contenuti' => '123' ),
+			'accanto a un filtro giusto' => array(
+				'contenuti' => '123',
+				'azione'    => 'prova',
+			),
+		) as $nome => $parametri ) {
+			$pagina = $this->schermata(
+				array_merge(
+					array( 'page' => Conformita_Core_Registro_Schermata::PAGINA ),
+					$parametri,
+					array( Conformita_Core_Registro_Schermata::CAMPO_GETTONE => $gettone )
+				)
+			);
+
+			$this->assertStringContainsString( 'Uno dei filtri non è valido', $pagina, "Caso {$nome}." );
+			$this->assertStringNotContainsString( 'VOCE-QUALUNQUE', $pagina, "Caso {$nome}: la pagina non mostra tutto." );
+		}
+
+		$pagina = $this->schermata(
+			array(
+				'page'      => Conformita_Core_Registro_Schermata::PAGINA,
+				'contenuti' => '123',
+			)
+		);
+		$this->assertStringContainsString( 'non sono stati applicati', $pagina, 'Senza gettone: il nome sconosciuto non si applica, e la schermata lo dice.' );
+
+		$pagina = $this->schermata(
+			array(
+				'page'  => Conformita_Core_Registro_Schermata::PAGINA,
+				'paged' => '1',
+				'dal'   => '2026-10-01',
+				Conformita_Core_Registro_Schermata::CAMPO_GETTONE => $gettone,
+			)
+		);
+		$this->assertStringNotContainsString( 'Uno dei filtri non è valido', $pagina, 'Controllo positivo: pagina, numero di pagina e gettone sono nomi ammessi.' );
+		$this->assertStringContainsString( 'VOCE-QUALUNQUE', $pagina );
+	}
+
+	/**
 	 * C-217: senza un gettone valido i filtri dell'indirizzo non si applicano,
 	 * e la schermata lo dice.
 	 */
