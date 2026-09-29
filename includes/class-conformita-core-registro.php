@@ -598,9 +598,35 @@ KEY riferimento (riferimento)
 			}
 		}
 
-		$testo = wp_json_encode( $dettagli, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+		/*
+		 * I numeri decimali si scrivono con tutte le cifre che servono a
+		 * rileggerli uguali, qualunque precisione abbia scelto chi configura
+		 * PHP, e con la parte decimale anche quando è zero, perché 2.0 non
+		 * torni 2. Dopo la codifica si rilegge il testo: se non restituisce
+		 * esattamente i dettagli ricevuti, la voce non si scrive.
+		 */
+		$precisione = ini_get( 'serialize_precision' );
 
-		return false === $testo ? $errore : $testo;
+		try {
+			// phpcs:ignore WordPress.PHP.IniSet.Risky -- Solo per questa codifica, e si rimette subito sotto.
+			ini_set( 'serialize_precision', '-1' );
+			$testo = wp_json_encode( $dettagli, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION );
+		} finally {
+			if ( false !== $precisione ) {
+				// phpcs:ignore WordPress.PHP.IniSet.Risky -- Come sopra.
+				ini_set( 'serialize_precision', $precisione );
+			}
+		}
+
+		if ( false === $testo ) {
+			return $errore;
+		}
+
+		if ( json_decode( $testo, true ) !== $dettagli ) {
+			return self::errore( 'conformita_core_registro_dettagli_non_fedeli', __( 'Registro: i dettagli non si possono conservare senza cambiarli.', 'conformita-core' ) );
+		}
+
+		return $testo;
 	}
 
 	/**

@@ -1432,6 +1432,49 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-206, seconda parte: i numeri dei dettagli si rileggono uguali, qualunque
+	 * sia la precisione che PHP usa per scriverli, e un testo fatto di cifre
+	 * resta un testo.
+	 */
+	public function test_c206_dettagli_numerici() {
+		wp_set_current_user( $this->utente() );
+
+		$dettagli = array(
+			'decimale'       => 123.456789012345,
+			'somma'          => 0.1 + 0.2,
+			'piccolo'        => 1.0e-7,
+			'tondo'          => 2.0,
+			'intero'         => 7,
+			'testo_numerico' => '123',
+			'testo_decimale' => '1.50',
+			'elenco'         => array( 0.5, '0.5', 5 ),
+		);
+
+		$precisione = ini_get( 'serialize_precision' );
+
+		try {
+			// phpcs:ignore WordPress.PHP.IniSet.Risky -- prova: la precisione ridotta e' la condizione da provare, e si rimette subito.
+			ini_set( 'serialize_precision', '3' );
+
+			$this->assertNotSame( 123.456789012345, json_decode( wp_json_encode( 123.456789012345 ) ), 'Precondizione: con questa precisione la codifica semplice perde cifre.' );
+
+			$voce = conformita_core_registra_voce(
+				array(
+					'sezione'  => self::SEZIONE,
+					'azione'   => 'prova_numeri',
+					'dettagli' => $dettagli,
+				)
+			);
+		} finally {
+			// phpcs:ignore WordPress.PHP.IniSet.Risky -- come sopra.
+			ini_set( 'serialize_precision', $precisione );
+		}
+
+		$this->assertIsInt( $voce, wp_json_encode( $voce ) );
+		$this->assertSame( $dettagli, conformita_core_voce_registro( $voce )['dettagli'] );
+	}
+
+	/**
 	 * Descrizioni sbagliate, ciascuna con il codice d'errore atteso.
 	 *
 	 * @return array<string, array{0: mixed, 1: string}>
