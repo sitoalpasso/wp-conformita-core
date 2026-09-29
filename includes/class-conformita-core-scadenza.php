@@ -222,8 +222,7 @@ final class Conformita_Core_Scadenza {
 			return $esito;
 		}
 
-		$valori = get_post_meta( $post_id, self::CHIAVE, false );
-		$valori = is_array( $valori ) ? $valori : array();
+		$valori = self::valori( $post_id );
 
 		/*
 		 * WordPress ammette più righe di metadato con la stessa chiave. Scrivere
@@ -262,9 +261,7 @@ final class Conformita_Core_Scadenza {
 		 * resta invisibile. Fra le due, dichiarare un successo che non c'è è il
 		 * difetto peggiore, perché nessuno lo va a verificare.
 		 */
-		$scritti = get_post_meta( $post_id, self::CHIAVE, false );
-
-		if ( array( $data ) !== ( is_array( $scritti ) ? $scritti : array() ) ) {
+		if ( array( $data ) !== self::valori( $post_id ) ) {
 			return new WP_Error(
 				'conformita_core_dato_non_riparato',
 				__( 'Fine pubblicazione: dopo la scrittura il contenuto non ha esattamente una data di fine, quindi resta anomalo e scaduto.', 'conformita-core' )
@@ -301,8 +298,7 @@ final class Conformita_Core_Scadenza {
 			);
 		}
 
-		$valori = get_post_meta( $post_id, self::CHIAVE, false );
-		$valori = is_array( $valori ) ? $valori : array();
+		$valori = self::valori( $post_id );
 
 		if ( count( $valori ) > 1 ) {
 			return new WP_Error(
@@ -318,6 +314,61 @@ final class Conformita_Core_Scadenza {
 		$valore = reset( $valori );
 
 		return is_string( $valore ) ? $valore : '';
+	}
+
+	/**
+	 * Le righe della fine pubblicazione di un contenuto, come sono conservate.
+	 *
+	 * **Si leggono dalla banca dati, con il suo confronto sulla chiave, e mai
+	 * dalla memoria di WordPress.** La memoria dei metadati raccoglie le righe
+	 * per chiave con un confronto lettera per lettera, mentre la banca dati, di
+	 * norma, non distingue le maiuscole né gli spazi in coda. Una riga scritta
+	 * con la chiave in maiuscolo, da un componente o direttamente sulla banca
+	 * dati, era vista dal filtro dei percorsi di lettura, che interroga la banca
+	 * dati, e non da questa classe, che leggeva dalla memoria: il filtro la
+	 * contava fra le date valide, la scadenza no, e in un caso limite il
+	 * percorso più permissivo lasciava vedere un contenuto che per la scadenza
+	 * era scaduto. Ora tutti leggono con lo stesso confronto: il filtro, questa
+	 * classe e il registro delle modifiche, che chiede le righe qui.
+	 *
+	 * La lettura non passa dai filtri di WordPress sui metadati, quindi nessun
+	 * componente può far vedere a questa classe una data diversa da quella che
+	 * vede il filtro. Righe C-251..C-254.
+	 *
+	 * @internal Pubblica solo per le altre classi di core.
+	 *
+	 * @param int $post_id Identificativo del contenuto.
+	 * @return array<int, string> Valori così come conservati, anche serializzati,
+	 *                            nell'ordine in cui sono stati scritti.
+	 */
+	public static function righe( $post_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Serve il confronto della banca dati sulla chiave, lo stesso del filtro: vedi sopra.
+		$righe = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id",
+				(int) $post_id,
+				self::CHIAVE
+			)
+		);
+
+		return is_array( $righe ) ? array_values( $righe ) : array();
+	}
+
+	/**
+	 * I valori della fine pubblicazione, nella forma in cui WordPress li
+	 * restituirebbe.
+	 *
+	 * Sono le righe di `righe()` con i valori serializzati ricostruiti, come fa
+	 * WordPress: un elenco conservato per errore resta un elenco e non diventa
+	 * un testo che somiglia a una data.
+	 *
+	 * @param int $post_id Identificativo del contenuto.
+	 * @return array<int, mixed>
+	 */
+	private static function valori( $post_id ) {
+		return array_map( 'maybe_unserialize', self::righe( $post_id ) );
 	}
 
 	/**

@@ -258,13 +258,208 @@ final class Conformita_Core_Tipi {
 	/**
 	 * Il tipo è registrato attraverso core.
 	 *
+	 * Il nome si riconosce con il criterio della banca dati: vedi `canonico()`.
+	 *
 	 * @param string $tipo Identificativo del tipo.
 	 * @return bool
 	 */
 	public static function registrato( $tipo ) {
-		$tipo = is_string( $tipo ) ? trim( $tipo ) : '';
+		return null !== self::canonico( $tipo );
+	}
 
-		return isset( self::$tipi[ $tipo ] );
+	/**
+	 * Il tipo gestito che la banca dati riconosce in un nome.
+	 *
+	 * **Perché non basta il confronto in PHP.** Il tipo di un contenuto è una
+	 * colonna della banca dati, e le interrogazioni di WordPress lo cercano con
+	 * il confronto della banca dati, che di norma non distingue le maiuscole, né
+	 * gli spazi in coda, e in molte configurazioni nemmeno le lettere accentate.
+	 * Il salvataggio ordinario riduce il tipo in minuscolo, ma una scrittura
+	 * diretta nella banca dati, come un'importazione, o un componente che toglie
+	 * quella riduzione, può lasciare `PROVA_ATTO` al posto di `prova_atto`. Una
+	 * ricerca per il tipo gestito trova quel contenuto, e un confronto lettera per lettera in PHP
+	 * direbbe che non è gestito: il filtro della scadenza lo lascerebbe passare,
+	 * e il registro non ne scriverebbe le voci. Due criteri per la stessa
+	 * domanda sono due risposte, e fra le due vince la più permissiva.
+	 *
+	 * Il criterio è quindi uno solo, quello della banca dati, usato ovunque core
+	 * chiede se un tipo è gestito: questa funzione è l'unica che risponde.
+	 *
+	 * **Due scorciatoie, tutte e due senza banca dati.** Il nome esatto di un
+	 * tipo gestito è gestito; lo è anche con spazi attorno, come prima di
+	 * questa correzione, che per gli spazi in testa è più largo della banca
+	 * dati e quindi sbaglia nella direzione che trattiene. Un nome scritto
+	 * soltanto con minuscole, cifre, trattino e trattino basso, diverso da ogni
+	 * tipo gestito, non è gestito: i tipi gestiti usano lo stesso alfabeto
+	 * senza il trattino, e due nomi diversi scritti solo con quei caratteri non
+	 * sono uguali per nessun confronto della banca dati. È l'alfabeto a cui
+	 * WordPress riduce i nomi dei tipi, quindi un sito sano non fa mai la
+	 * domanda alla banca dati. La scorciatoia guarda i caratteri del nome e non
+	 * il fatto che il tipo sia registrato: un componente che cambia quella
+	 * riduzione può registrare un tipo con un nome qualsiasi, e quel nome va
+	 * chiesto alla banca dati come gli altri.
+	 *
+	 * Tutti gli altri nomi si chiedono alla banca dati a ogni riconoscimento,
+	 * senza ricordare la risposta: la tabella, e le sue regole, possono
+	 * cambiare nella stessa richiesta. Vedi `riconduci()`. Righe C-248..C-250,
+	 * C-255 e C-256.
+	 *
+	 * @internal Pubblica solo per le altre classi di core.
+	 *
+	 * @param mixed $tipo Nome del tipo, come arriva.
+	 * @return string|null Identificativo del tipo gestito, oppure null.
+	 */
+	public static function canonico( $tipo ) {
+		if ( ! is_string( $tipo ) || empty( self::$tipi ) ) {
+			return null;
+		}
+
+		$pulito = trim( $tipo );
+
+		if ( isset( self::$tipi[ $pulito ] ) ) {
+			return $pulito;
+		}
+
+		if ( '' === $pulito || self::normalizzato( $tipo ) ) {
+			return null;
+		}
+
+		return self::riconduci( $tipo, self::identificativi() );
+	}
+
+	/**
+	 * Il nome è, per la banca dati, quello di un tipo di WordPress indicato.
+	 *
+	 * Serve dove core riconosce un tipo di WordPress che non è suo, come
+	 * `attachment`, con lo stesso criterio con cui riconosce i propri. Riga
+	 * C-250.
+	 *
+	 * @internal Pubblica solo per le altre classi di core.
+	 *
+	 * @param mixed  $tipo        Nome del tipo, come arriva.
+	 * @param string $riferimento Nome registrato in WordPress.
+	 * @return bool
+	 */
+	public static function uguale( $tipo, $riferimento ) {
+		if ( ! is_string( $tipo ) ) {
+			return false;
+		}
+
+		if ( $tipo === $riferimento ) {
+			return true;
+		}
+
+		if ( '' === trim( $tipo ) || ( self::normalizzato( $tipo ) && self::normalizzato( $riferimento ) ) ) {
+			return false;
+		}
+
+		return self::riconduci( $tipo, array( $riferimento ) ) === $riferimento;
+	}
+
+	/**
+	 * Il nome è scritto soltanto con i caratteri a cui WordPress riduce i nomi
+	 * dei tipi: minuscole, cifre, trattino e trattino basso.
+	 *
+	 * Due nomi diversi scritti così sono diversi anche per la banca dati: è la
+	 * condizione delle scorciatoie di `canonico()` e `uguale()`. Riga C-256.
+	 *
+	 * @param string $tipo Nome del tipo.
+	 * @return bool
+	 */
+	private static function normalizzato( $tipo ) {
+		return 1 === preg_match( '/^[a-z0-9_-]+$/D', $tipo );
+	}
+
+	/**
+	 * Quale dei nomi indicati la banca dati considera uguale al nome dato.
+	 *
+	 * Il confronto si fa con le regole della colonna del tipo nella tabella dei
+	 * contenuti, che sono quelle con cui WordPress cerca i contenuti per tipo:
+	 * i due nomi si convertono nell'insieme di caratteri della colonna e si
+	 * confrontano con il suo ordinamento. Se le regole della colonna non si
+	 * possono leggere, il ripiego confronta senza badare alle maiuscole e agli
+	 * spazi in coda, che sono le differenze che ogni ordinamento comune ignora:
+	 * sbaglia al più trattenendo meno di quanto la banca dati troverebbe, e
+	 * soltanto su una banca dati che non risponde alla domanda sulle sue regole.
+	 *
+	 * @param string             $tipo      Nome da ricondurre.
+	 * @param array<int, string> $candidati Nomi fra cui cercare.
+	 * @return string|null Il nome trovato, oppure null.
+	 */
+	private static function riconduci( $tipo, array $candidati ) {
+		global $wpdb;
+
+		$regole = self::regole_della_colonna();
+
+		if ( null === $regole ) {
+			$ridotto = strtolower( rtrim( $tipo, ' ' ) );
+
+			foreach ( $candidati as $candidato ) {
+				if ( strtolower( $candidato ) === $ridotto ) {
+					return $candidato;
+				}
+			}
+
+			return null;
+		}
+
+		$lato      = "CONVERT( %s USING {$regole['insieme']} ) COLLATE {$regole['ordinamento']}";
+		$casi      = array();
+		$argomenti = array();
+
+		foreach ( $candidati as $candidato ) {
+			$casi[]      = "WHEN {$lato} = {$lato} THEN %s";
+			$argomenti[] = $tipo;
+			$argomenti[] = $candidato;
+			$argomenti[] = $candidato;
+		}
+
+		/*
+		 * Insieme di caratteri e ordinamento arrivano dalla banca dati stessa e
+		 * sono stati verificati carattere per carattere in
+		 * `regole_della_colonna()`; tutto il resto passa dai segnaposto.
+		 */
+		$istruzione = 'SELECT CASE ' . implode( ' ', $casi ) . " ELSE '' END";
+
+		// phpcs:disable WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$trovato = $wpdb->get_var( $wpdb->prepare( $istruzione, $argomenti ) );
+		// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+
+		return is_string( $trovato ) && in_array( $trovato, $candidati, true ) ? $trovato : null;
+	}
+
+	/**
+	 * Insieme di caratteri e ordinamento della colonna del tipo.
+	 *
+	 * Letti a ogni domanda, con la stessa istruzione che WordPress usa per
+	 * conoscere le regole delle proprie colonne. Non si ricordano: nella stessa
+	 * richiesta la tabella dei contenuti può cambiare nome (un altro sito della
+	 * stessa installazione) o struttura (una tabella temporanea con lo stesso
+	 * nome, una modifica delle regole), e una risposta ricordata varrebbe per
+	 * una tabella che non c'è più. Righe C-255, C-256 e C-258.
+	 *
+	 * @return array{insieme: string, ordinamento: string}|null
+	 */
+	private static function regole_della_colonna() {
+		global $wpdb;
+
+		/*
+		 * La colonna si cerca per nome esatto e non per somiglianza: in LIKE il
+		 * trattino basso vale per qualunque carattere, e una colonna aggiunta da
+		 * un componente, come `postXtype`, verrebbe presa al posto di quella del
+		 * tipo. Il nome letto si ricontrolla. Riga C-258.
+		 */
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Il nome della tabella viene da WordPress; la domanda riguarda la struttura, non i dati.
+		$colonna     = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$wpdb->posts} WHERE Field = 'post_type'", ARRAY_A );
+		$ordinamento = is_array( $colonna ) && isset( $colonna['Field'], $colonna['Collation'] ) && 'post_type' === $colonna['Field'] && is_string( $colonna['Collation'] ) ? $colonna['Collation'] : '';
+		$insieme     = strtok( $ordinamento, '_' );
+
+		return preg_match( '/^[A-Za-z0-9_]+$/D', $ordinamento ) && is_string( $insieme ) && '' !== $insieme
+			? array(
+				'insieme'     => $insieme,
+				'ordinamento' => $ordinamento,
+			)
+			: null;
 	}
 
 	/**
@@ -324,7 +519,12 @@ final class Conformita_Core_Tipi {
 	 * @return array<int, string>
 	 */
 	public static function identificativi() {
-		return array_keys( self::$tipi );
+		/*
+		 * PHP trasforma in numero la chiave di un elenco scritta solo con
+		 * cifre: un tipo `123` tornerebbe come intero, e ogni confronto stretto
+		 * con il nome letto dalla banca dati fallirebbe. Riga C-257.
+		 */
+		return array_map( 'strval', array_keys( self::$tipi ) );
 	}
 
 	/**
@@ -334,9 +534,11 @@ final class Conformita_Core_Tipi {
 	 * @return array<string, mixed>|WP_Error
 	 */
 	private static function voce( $tipo ) {
-		$tipo = is_string( $tipo ) ? trim( $tipo ) : '';
+		$canonico = self::canonico( $tipo );
 
-		if ( ! isset( self::$tipi[ $tipo ] ) ) {
+		if ( null === $canonico ) {
+			$tipo = is_string( $tipo ) ? trim( $tipo ) : '';
+
 			return new WP_Error(
 				'conformita_core_tipo_sconosciuto',
 				sprintf(
@@ -347,7 +549,7 @@ final class Conformita_Core_Tipi {
 			);
 		}
 
-		return self::$tipi[ $tipo ];
+		return self::$tipi[ $canonico ];
 	}
 
 	/**

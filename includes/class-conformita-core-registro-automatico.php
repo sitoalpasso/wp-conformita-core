@@ -1460,22 +1460,14 @@ final class Conformita_Core_Registro_Automatico {
 	 * letto da WordPress in testo farebbe di due elenchi diversi la stessa
 	 * parola, e di un oggetto un errore.
 	 *
+	 * Le righe le legge la scadenza, con lo stesso confronto sulla chiave che
+	 * usano la scadenza e il filtro dei percorsi di lettura.
+	 *
 	 * @param int $post_id Identificativo del contenuto.
 	 * @return array<int, string|null>
 	 */
 	private static function valori_fine( $post_id ) {
-		global $wpdb;
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Serve il valore conservato, non quello ricostruito dalla memoria di WordPress.
-		$valori = $wpdb->get_col(
-			$wpdb->prepare(
-				"SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id",
-				(int) $post_id,
-				Conformita_Core_Scadenza::CHIAVE
-			)
-		);
-
-		return is_array( $valori ) ? array_values( $valori ) : array();
+		return Conformita_Core_Scadenza::righe( $post_id );
 	}
 
 	/**
