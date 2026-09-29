@@ -970,6 +970,44 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-200, seconda parte: l'utente eliminato senza affidare i suoi
+	 * contenuti. WordPress elimina uno per uno quelli dei tipi che hanno un
+	 * autore, e ciascuno ha la sua voce; quelli degli altri tipi restano come
+	 * sono, e non hanno voci.
+	 */
+	public function test_c200_utente_eliminato_senza_affidamento() {
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+
+		add_post_type_support( self::TIPO, 'author' );
+
+		$autore = $this->utente();
+		wp_set_current_user( $this->utente( 'administrator' ) );
+
+		$eliminato = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+				'post_author' => $autore,
+			)
+		);
+		$rimasto   = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO_ALTRO,
+				'post_status' => 'publish',
+				'post_author' => $autore,
+			)
+		);
+
+		$this->segna();
+		$this->assertTrue( wp_delete_user( $autore ) );
+
+		$this->assertNull( get_post( $eliminato ), 'Precondizione: il contenuto con autore non c\'e\' piu\'.' );
+		$this->assertInstanceOf( WP_Post::class, get_post( $rimasto ), 'Precondizione: l\'altro resta.' );
+		$this->assertSame( array( 'eliminazione' ), $this->azioni_nuove() );
+		$this->assertSame( $eliminato, $this->nuove()[0]['contenuto'] );
+	}
+
+	/**
 	 * C-200: l'eliminazione definitiva scrive una voce, e le voci del contenuto
 	 * sopravvivono al contenuto.
 	 */
