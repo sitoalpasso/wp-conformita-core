@@ -142,11 +142,24 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Quello che WordPress stampa come metatag `robots` nel sorgente.
+	 * Quello che WordPress stampa come metatag `robots` nel sorgente, a
+	 * condizione che sia davvero agganciato alla testata della pagina.
+	 *
+	 * La testata intera non si stampa: in un ambiente di prova costruito dai
+	 * sorgenti di WordPress porta con se' il caricatore degli script, che cerca
+	 * file generati dalla compilazione e fallisce per un motivo che non
+	 * riguarda questo meccanismo. Si stampa quindi il metatag, e si pretende
+	 * che la testata lo stampi: se un tema o un componente lo toglie dalla
+	 * testata, questa funzione restituisce vuoto e il divieto nel sorgente
+	 * risulta assente, come sulla pagina vera. Riga C-236.
 	 *
 	 * @return string
 	 */
 	private function sorgente() {
+		if ( false === has_action( 'wp_head', 'wp_robots' ) ) {
+			return '';
+		}
+
 		return get_echo( 'wp_robots' );
 	}
 
@@ -383,6 +396,56 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-225 e C-226, elenco e feed vuoti: il divieto dipende dal tipo e non
+	 * dai contenuti mostrati.
+	 *
+	 * Un elenco con dentro un contenuto vietato porterebbe il divieto anche per
+	 * la regola della riga C-231. Senza questa prova, dimenticare gli elenchi e
+	 * i feed dei tipi resterebbe invisibile: si vedrebbe solo quando l'elenco e'
+	 * vuoto, per esempio perche' tutti gli atti sono scaduti.
+	 */
+	public function test_c225_c226_elenco_e_feed_vuoti() {
+		$this->go_to( get_post_type_archive_link( self::TIPO_CHIUSO ) );
+		$this->assertTrue( is_post_type_archive( self::TIPO_CHIUSO ), 'Precondizione: l\'elenco vuoto si apre.' );
+		$this->assertSame( array(), $GLOBALS['wp_query']->posts, 'Precondizione: l\'elenco e\' vuoto.' );
+		$this->assert_vietata( 'Elenco vuoto del tipo vietato' );
+
+		$this->go_to( '/?feed=rss2&post_type=' . self::TIPO_CHIUSO );
+		$this->assertTrue( is_feed() );
+		$this->assertSame( array(), $GLOBALS['wp_query']->posts, 'Precondizione: il feed e\' vuoto.' );
+		$this->assertStringContainsString( 'noindex', $this->intestazioni()['X-Robots-Tag'] ?? '', 'Feed vuoto del tipo vietato.' );
+
+		/*
+		 * Un tipo senza elenco proprio ha comunque il suo feed, e li' la
+		 * richiesta non e' un elenco del tipo: e' il caso che distingue la
+		 * regola dei feed da quella degli elenchi.
+		 */
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'prova_chiusa_bis',
+				array(
+					'sezione'      => self::SEZIONE_CHIUSA,
+					'show_in_rest' => false,
+					'argomenti'    => array(
+						'public'      => true,
+						'has_archive' => false,
+					),
+				)
+			)
+		);
+
+		$this->go_to( '/?feed=rss2&post_type=prova_chiusa_bis' );
+		$this->assertTrue( is_feed() );
+		$this->assertFalse( is_post_type_archive(), 'Precondizione: non e\' l\'elenco di un tipo.' );
+		$this->assertSame( array(), $GLOBALS['wp_query']->posts );
+		$this->assertStringContainsString( 'noindex', $this->intestazioni()['X-Robots-Tag'] ?? '', 'Feed vuoto di un tipo vietato senza elenco.' );
+
+		$this->go_to( get_post_type_archive_link( self::TIPO_APERTO ) );
+		$this->assertTrue( is_post_type_archive( self::TIPO_APERTO ) );
+		$this->assert_libera( 'Elenco vuoto del tipo consentito' );
+	}
+
+	/**
 	 * C-226: i feed dei tipi vietati, e il feed dei commenti di un contenuto
 	 * vietato, portano il divieto nell'intestazione. Un feed che mescola i due
 	 * tipi lo porta anche lui.
@@ -476,7 +539,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	public function test_c230_accensione_e_spegnimento() {
 		$agganci = Conformita_Core_Indicizzazione::agganci();
 
-		$this->assertCount( 3, $agganci );
+		$this->assertCount( 5, $agganci );
 
 		foreach ( $agganci as $aggancio ) {
 			$this->assertSame(
@@ -507,5 +570,277 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 
 		$this->go_to( get_permalink( $vietato ) );
 		$this->assert_vietata( 'Riacceso' );
+	}
+
+	/**
+	 * C-231: un elenco che non e' quello del tipo, ma mostra contenuti vietati,
+	 * porta il divieto.
+	 *
+	 * La pagina iniziale e gli elenchi per autore diventano misti con una
+	 * personalizzazione comune dell'interrogazione principale; il feed generale
+	 * con `post_type=any`. Ogni caso verifica prima che il contenuto vietato sia
+	 * davvero fra quelli mostrati, e poi che senza di esso lo stesso elenco resti
+	 * libero.
+	 */
+	public function test_c231_elenchi_misti() {
+		$autore  = self::factory()->user->create( array( 'role' => 'editor' ) );
+		$vietato = $this->contenuto( self::TIPO_CHIUSO );
+		wp_update_post(
+			array(
+				'ID'          => $vietato,
+				'post_author' => $autore,
+			)
+		);
+		$articolo = $this->contenuto( 'post' );
+		wp_update_post(
+			array(
+				'ID'          => $articolo,
+				'post_author' => $autore,
+			)
+		);
+
+		$allarga = function ( $interrogazione ) {
+			if ( $interrogazione->is_main_query() && ( $interrogazione->is_home() || $interrogazione->is_author() ) ) {
+				$interrogazione->set( 'post_type', array( 'post', self::TIPO_CHIUSO ) );
+			}
+		};
+
+		$casi = array(
+			'Pagina iniziale'   => home_url( '/' ),
+			'Elenco per autore' => get_author_posts_url( $autore ),
+		);
+
+		foreach ( $casi as $nome => $indirizzo ) {
+			$this->go_to( $indirizzo );
+			$this->assertContains( $articolo, wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ), $nome . ': precondizione, l\'elenco si apre.' );
+			$this->assertNotContains( $vietato, wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ), $nome . ': precondizione, senza personalizzazione il vietato non c\'e\'.' );
+			$this->assert_libera( $nome . ' senza contenuti vietati' );
+
+			add_action( 'pre_get_posts', $allarga );
+			$this->go_to( $indirizzo );
+			remove_action( 'pre_get_posts', $allarga );
+
+			$this->assertContains( $vietato, wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ), $nome . ': precondizione, il vietato e\' nell\'elenco.' );
+			$this->assert_vietata( $nome . ' con un contenuto vietato' );
+		}
+
+		$this->go_to( '/?feed=rss2&post_type=any' );
+		$this->assertTrue( is_feed() );
+		$this->assertContains( $vietato, wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ), 'Precondizione: il feed di tutti i tipi contiene il vietato.' );
+		$this->assertStringContainsString( 'noindex', $this->intestazioni()['X-Robots-Tag'] ?? '', 'Feed di tutti i tipi.' );
+	}
+
+	/**
+	 * C-232: come si compone `X-Robots-Tag` quando un altro componente ne ha
+	 * gia' scritto uno.
+	 */
+	public function test_c232_composizione_dell_intestazione() {
+		$vietato = $this->contenuto( self::TIPO_CHIUSO );
+		$this->go_to( get_permalink( $vietato ) );
+
+		$casi = array(
+			'nessuna'              => array( array(), 'noindex', array() ),
+			'generale senza'       => array( array( 'X-Robots-Tag' => 'nofollow' ), 'nofollow, noindex', array() ),
+			'generale con'         => array( array( 'X-Robots-Tag' => 'NoIndex, nofollow' ), 'NoIndex, nofollow', array() ),
+			'none'                 => array( array( 'X-Robots-Tag' => 'none' ), 'none', array() ),
+			'direttiva con valore' => array( array( 'X-Robots-Tag' => 'max-snippet: 20' ), 'max-snippet: 20, noindex', array() ),
+			'nome minuscolo'       => array( array( 'x-robots-tag' => 'nofollow' ), 'nofollow, noindex', array() ),
+			'motore con noindex'   => array( array( 'X-Robots-Tag' => 'googlebot: noindex' ), 'noindex', array( 'googlebot: noindex' ) ),
+			'motore con nofollow'  => array( array( 'X-Robots-Tag' => 'googlebot: nofollow' ), 'noindex', array( 'googlebot: nofollow' ) ),
+		);
+
+		foreach ( $casi as $nome => $caso ) {
+			list( $prima, $atteso, $specifiche ) = $caso;
+
+			$dopo = apply_filters( 'wp_headers', $prima, $GLOBALS['wp'] );
+
+			$nomi = array_values(
+				array_filter(
+					array_keys( $dopo ),
+					function ( $chiave ) {
+						return 0 === strcasecmp( $chiave, 'X-Robots-Tag' );
+					}
+				)
+			);
+
+			$this->assertSame( array( 'X-Robots-Tag' ), $nomi, $nome . ': una riga generale sola.' );
+			$this->assertSame( $atteso, $dopo['X-Robots-Tag'], $nome );
+			$this->assertSame( $specifiche, Conformita_Core_Indicizzazione::specifiche_in_attesa(), $nome . ': direttive per un motore messe da parte.' );
+		}
+
+		$consentito = $this->contenuto( self::TIPO_APERTO );
+		$this->go_to( get_permalink( $consentito ) );
+
+		$this->assertSame(
+			array( 'X-Robots-Tag' => 'googlebot: nofollow' ),
+			apply_filters( 'wp_headers', array( 'X-Robots-Tag' => 'googlebot: nofollow' ), $GLOBALS['wp'] ),
+			'Su un contenuto consentito l\'intestazione altrui resta com\'era.'
+		);
+		$this->assertSame( array(), Conformita_Core_Indicizzazione::specifiche_in_attesa() );
+	}
+
+	/**
+	 * C-233: un allegato il cui contenuto padre non esiste piu' non prende la
+	 * politica di nessun altro, nemmeno del contenuto globale.
+	 */
+	public function test_c233_padre_inesistente() {
+		$vietato   = $this->contenuto( self::TIPO_CHIUSO );
+		$scomparso = $this->contenuto( self::TIPO_APERTO );
+
+		$orfano = self::factory()->attachment->create_object( 'orfano.pdf', $scomparso, array( 'post_mime_type' => 'application/pdf' ) );
+
+		/*
+		 * Cancellare il padre con le funzioni di WordPress stacca anche gli
+		 * allegati. Il caso reale nasce fuori da quelle funzioni, da
+		 * un'importazione o da una cancellazione diretta, e la prova lo
+		 * riproduce allo stesso modo.
+		 */
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: si riproduce un riferimento rotto scritto fuori dalle funzioni di WordPress.
+		$wpdb->delete( $wpdb->posts, array( 'ID' => $scomparso ) );
+		clean_post_cache( $scomparso );
+		clean_post_cache( $orfano );
+
+		$this->assertSame( $scomparso, (int) get_post( $orfano )->post_parent, 'Precondizione: il padre dichiarato resta nel dato.' );
+		$this->assertNull( get_post( $scomparso ), 'Precondizione: il padre non esiste piu\'.' );
+
+		$GLOBALS['post'] = get_post( $vietato );
+		$this->assertFalse( Conformita_Core_Indicizzazione::contenuto_vietato( $orfano ), 'Con un contenuto vietato come globale.' );
+
+		$GLOBALS['post'] = get_post( $orfano );
+		$this->assertFalse( Conformita_Core_Indicizzazione::contenuto_vietato( $orfano ), 'Con l\'allegato stesso come globale.' );
+
+		$this->assertFalse( Conformita_Core_Indicizzazione::contenuto_vietato( 0 ) );
+		$this->assertFalse( Conformita_Core_Indicizzazione::contenuto_vietato( null ) );
+
+		unset( $GLOBALS['post'] );
+	}
+
+	/**
+	 * C-234: se un altro componente toglie un aggancio solo, il meccanismo non
+	 * risulta acceso, la registrazione di una sezione e' rifiutata, e la
+	 * riaccensione rimette l'aggancio mancante.
+	 */
+	public function test_c234_aggancio_tolto_da_fuori() {
+		foreach ( Conformita_Core_Indicizzazione::agganci() as $aggancio ) {
+			Conformita_Core_Indicizzazione::avvia();
+			$this->assertTrue( Conformita_Core_Indicizzazione::avviato() );
+
+			remove_filter( $aggancio['aggancio'], array( 'Conformita_Core_Indicizzazione', $aggancio['metodo'] ), Conformita_Core_Indicizzazione::PRIORITA );
+
+			$this->assertFalse( Conformita_Core_Indicizzazione::avviato(), 'Senza ' . $aggancio['aggancio'] . ' non e\' acceso.' );
+
+			$esito = conformita_core_registra_sezione(
+				'sezione_' . $aggancio['metodo'],
+				array(
+					'indicizzazione' => 'vietata',
+					'scadenza'       => 'irraggiungibile',
+				)
+			);
+			$this->assertWPError( $esito, 'Senza ' . $aggancio['aggancio'] );
+			$this->assertSame( 'conformita_core_indicizzazione_non_avviata', $esito->get_error_code() );
+
+			Conformita_Core_Indicizzazione::avvia();
+
+			$this->assertSame(
+				Conformita_Core_Indicizzazione::PRIORITA,
+				has_filter( $aggancio['aggancio'], array( 'Conformita_Core_Indicizzazione', $aggancio['metodo'] ) ),
+				'La riaccensione rimette ' . $aggancio['aggancio']
+			);
+		}
+	}
+
+	/**
+	 * C-235: il meccanismo si accende caricando il file di core, senza che
+	 * nessuno lo chieda, e la versione dell'interfaccia e' almeno quella che lo
+	 * garantisce.
+	 *
+	 * Il file di core si ricarica per intero dentro la prova: le definizioni sono
+	 * protette e le classi caricate una volta sola, quindi ricaricarlo rifa'
+	 * soltanto le accensioni. Senza la chiamata nel file, il meccanismo resta
+	 * spento e la prova e' rossa.
+	 */
+	public function test_c235_accensione_al_caricamento() {
+		Conformita_Core_Indicizzazione::azzera_avvio();
+		$this->assertFalse( Conformita_Core_Indicizzazione::avviato() );
+
+		require CONFORMITA_CORE_PERCORSO . 'conformita-core.php';
+
+		$this->assertTrue( Conformita_Core_Indicizzazione::avviato(), 'Caricare il file di core accende il meccanismo.' );
+
+		$this->assertTrue( version_compare( CONFORMITA_CORE_VERSIONE_API, '1.4.0', '>=' ), 'La versione dell\'interfaccia che garantisce il divieto e\' la 1.4.0.' );
+		$this->assertSame( CONFORMITA_CORE_VERSIONE_API, conformita_core_versione_api() );
+	}
+
+	/**
+	 * C-236: il percorso vero della pagina. Il divieto sta nella testata
+	 * stampata per intero, sta nell'incorporamento, e se un tema o un componente
+	 * toglie il metatag dalla testata resta almeno l'intestazione.
+	 */
+	public function test_c236_percorso_della_pagina() {
+		$vietato    = $this->contenuto( self::TIPO_CHIUSO );
+		$consentito = $this->contenuto( self::TIPO_APERTO );
+
+		$this->go_to( get_post_embed_url( $vietato ) );
+		$this->assertTrue( is_embed(), 'Precondizione: e\' l\'incorporamento.' );
+		$this->assertStringContainsString( 'noindex', $this->intestazioni()['X-Robots-Tag'] ?? '', 'Incorporamento del vietato.' );
+
+		$this->go_to( get_post_embed_url( $consentito ) );
+		$this->assertTrue( is_embed() );
+		$this->assertArrayNotHasKey( 'X-Robots-Tag', $this->intestazioni(), 'Incorporamento del consentito.' );
+
+		remove_action( 'wp_head', 'wp_robots', 1 );
+
+		$this->go_to( get_permalink( $vietato ) );
+		$this->assertStringNotContainsString( "name='robots'", $this->sorgente(), 'Precondizione: la testata non stampa piu\' il metatag.' );
+		$this->assertStringContainsString( 'noindex', $this->intestazioni()['X-Robots-Tag'] ?? '', 'Resta l\'intestazione.' );
+
+		add_action( 'wp_head', 'wp_robots', 1 );
+	}
+
+	/**
+	 * C-237: la mappa di un altro tipo, allargata da un componente ai tipi
+	 * vietati, non elenca i contenuti vietati.
+	 *
+	 * La richiesta simulata e' quella di WordPress quando costruisce la mappa:
+	 * la variabile `sitemap` e' valorizzata, e la lettura dei contenuti passa da
+	 * un'interrogazione secondaria.
+	 */
+	public function test_c237_mappa_allargata_da_un_componente() {
+		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
+		$articolo = $this->contenuto( 'post' );
+
+		$allarga = function ( $interrogazione ) {
+			if ( ! $interrogazione->is_main_query() && 'post' === $interrogazione->get( 'post_type' ) ) {
+				$interrogazione->set( 'post_type', array( 'post', self::TIPO_CHIUSO ) );
+			}
+		};
+		add_action( 'pre_get_posts', $allarga );
+
+		set_query_var( 'sitemap', 'posts' );
+
+		Conformita_Core_Indicizzazione::azzera_avvio();
+		$spento = $this->indirizzi_in_mappa( 'post' );
+		Conformita_Core_Indicizzazione::avvia();
+		$acceso = $this->indirizzi_in_mappa( 'post' );
+
+		set_query_var( 'sitemap', '' );
+		$fuori = wp_list_pluck(
+			get_posts(
+				array(
+					'post_type'        => 'post',
+					'posts_per_page'   => -1,
+					'suppress_filters' => false,
+				)
+			),
+			'ID'
+		);
+
+		remove_action( 'pre_get_posts', $allarga );
+
+		$this->assertContains( get_permalink( $vietato ), $spento, 'Precondizione: senza il meccanismo il componente porta il vietato nella mappa degli articoli.' );
+		$this->assertNotContains( get_permalink( $vietato ), $acceso, 'Con il meccanismo il vietato non c\'e\'.' );
+		$this->assertContains( get_permalink( $articolo ), $acceso, 'L\'articolo resta.' );
+		$this->assertContains( $vietato, $fuori, 'Fuori dalla mappa le interrogazioni altrui non si toccano.' );
 	}
 }

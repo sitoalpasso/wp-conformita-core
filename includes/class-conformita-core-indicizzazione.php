@@ -35,21 +35,26 @@ final class Conformita_Core_Indicizzazione {
 	/**
 	 * Priorita' degli agganci.
 	 *
-	 * Alta di proposito: il divieto deve essere l'ultima parola sui contenuti di
-	 * una sezione `vietata`, anche se un altro componente, prima, ha scritto il
-	 * contrario. Sugli altri contenuti gli agganci restituiscono quello che
-	 * ricevono, quindi arrivare per ultimi non toglie niente a nessuno.
+	 * La piu' alta che WordPress ammette: il divieto passa dopo ogni filtro
+	 * registrato a una priorita' minore, quindi un altro componente che prima
+	 * ha scritto il contrario viene corretto. **Non e' una garanzia assoluta.**
+	 * Un filtro registrato alla stessa priorita' dopo core passa dopo di lui e
+	 * puo' togliere il divieto: nessuna priorita' lo impedisce, ed e' la ragione
+	 * per cui la prova sul sito vero guarda la risposta finale e non il codice.
+	 * Sugli altri contenuti gli agganci restituiscono quello che ricevono,
+	 * quindi arrivare per ultimi non toglie niente a nessuno. Riga C-230.
 	 *
 	 * @var int
 	 */
-	const PRIORITA = 9999;
+	const PRIORITA = PHP_INT_MAX;
 
 	/**
-	 * Il meccanismo ha gia' agganciato i propri filtri.
+	 * Direttive rivolte a un motore specifico, trovate nell'intestazione della
+	 * richiesta in corso e da emettere su una riga propria. Riga C-232.
 	 *
-	 * @var bool
+	 * @var array<int, string>
 	 */
-	private static $avviato = false;
+	private static $specifiche = array();
 
 	/**
 	 * Aggancia i filtri del meccanismo.
@@ -58,20 +63,14 @@ final class Conformita_Core_Indicizzazione {
 	 *           accende al caricamento del file di core, come il motore di
 	 *           scadenza e per la stessa ragione: un meccanismo di conformita'
 	 *           che dipende dall'ordine di caricamento dei plugin non e' un
-	 *           meccanismo di conformita'.
+	 *           meccanismo di conformita'. Riga C-235.
 	 *
-	 * Idempotente. `$avviato` e' la condizione che `Conformita_Core_Sezioni::registra()`
-	 * legge per rifiutare una sezione a meccanismo spento: una sezione `vietata`
-	 * senza nessuno ad applicare il divieto avrebbe pagine indicizzabili, e il
-	 * difetto non si vedrebbe guardando la pagina. Riga C-85.
+	 * Idempotente, e ripara: rimette gli agganci che mancano, anche se qualcuno
+	 * ne ha tolto uno solo. WordPress identifica un aggancio a un metodo
+	 * statico con una chiave fissa, quindi riagganciare quelli presenti non ne
+	 * aggiunge un secondo.
 	 */
 	public static function avvia() {
-		if ( self::$avviato ) {
-			return;
-		}
-
-		self::$avviato = true;
-
 		foreach ( self::agganci() as $aggancio ) {
 			add_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), self::PRIORITA, $aggancio['argomenti'] );
 		}
@@ -80,9 +79,10 @@ final class Conformita_Core_Indicizzazione {
 	/**
 	 * L'elenco degli agganci, in un posto solo.
 	 *
-	 * @internal Letto sia dall'accensione sia dallo spegnimento, perche' i due
-	 *           non possano dire cose diverse: e' la lezione dello spegnimento
-	 *           incompleto del motore di scadenza. Riga C-230.
+	 * @internal Letto dall'accensione, dallo spegnimento e dalla domanda "e'
+	 *           acceso?", perche' i tre non possano dire cose diverse: e' la
+	 *           lezione dello spegnimento incompleto del motore di scadenza.
+	 *           Riga C-230.
 	 *
 	 * @return array<int, array<string, mixed>>
 	 */
@@ -99,37 +99,58 @@ final class Conformita_Core_Indicizzazione {
 				'argomenti' => 1,
 			),
 			array(
+				'aggancio'  => 'send_headers',
+				'metodo'    => 'emetti_specifiche',
+				'argomenti' => 0,
+			),
+			array(
 				'aggancio'  => 'wp_sitemaps_post_types',
 				'metodo'    => 'filtra_tipi_mappa',
 				'argomenti' => 1,
+			),
+			array(
+				'aggancio'  => 'the_posts',
+				'metodo'    => 'filtra_contenuti_mappa',
+				'argomenti' => 2,
 			),
 		);
 	}
 
 	/**
-	 * Il meccanismo ha agganciato i propri filtri.
+	 * Il meccanismo e' acceso: tutti i suoi agganci rispondono davvero.
+	 *
+	 * Si guarda lo stato degli agganci e non una variabile che lo ricorda: se un
+	 * altro componente ne toglie uno, il meccanismo non e' piu' acceso, e la
+	 * registrazione di una sezione lo deve sapere. Righe C-85 e C-234.
 	 *
 	 * @return bool
 	 */
 	public static function avviato() {
-		return self::$avviato;
+		foreach ( self::agganci() as $aggancio ) {
+			if ( self::PRIORITA !== has_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
 	 * Sgancia i filtri del meccanismo.
 	 *
-	 * @internal Serve alla suite di test, per la riga C-85 e per la C-230.
+	 * @internal Esiste per la suite di test, per le righe C-85, C-230 e C-234.
+	 *           Chiamarlo in esercizio, dopo che le sezioni si sono registrate,
+	 *           lascia le loro pagine senza divieto: la guardia della
+	 *           registrazione vale al momento della registrazione e non dopo. E'
+	 *           lo stesso limite dello spegnimento del motore di scadenza, e per
+	 *           la stessa ragione nessuna funzione pubblica lo espone.
 	 */
 	public static function azzera_avvio() {
-		if ( ! self::$avviato ) {
-			return;
-		}
-
 		foreach ( self::agganci() as $aggancio ) {
 			remove_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), self::PRIORITA );
 		}
 
-		self::$avviato = false;
+		self::$specifiche = array();
 	}
 
 	/**
@@ -168,31 +189,55 @@ final class Conformita_Core_Indicizzazione {
 	 * @return bool
 	 */
 	public static function contenuto_vietato( $contenuto ) {
-		$contenuto = get_post( $contenuto );
+		/*
+		 * Niente `get_post()` su un valore vuoto: senza argomento restituisce
+		 * il contenuto globale, cioe' la politica di un altro contenuto. Riga
+		 * C-233.
+		 */
+		if ( ! $contenuto instanceof WP_Post ) {
+			$contenuto = is_numeric( $contenuto ) && (int) $contenuto > 0 ? get_post( (int) $contenuto ) : null;
+		}
 
 		if ( ! $contenuto instanceof WP_Post ) {
 			return false;
 		}
 
-		if ( 'attachment' === $contenuto->post_type ) {
-			$padre = (int) $contenuto->post_parent;
-
-			return $padre > 0 && self::contenuto_vietato( get_post( $padre ) );
+		if ( 'attachment' !== $contenuto->post_type ) {
+			return self::tipo_vietato( $contenuto->post_type );
 		}
 
-		return self::tipo_vietato( $contenuto->post_type );
+		/*
+		 * Un livello solo, e nessuna ricorsione: il padre di un allegato che
+		 * non esiste piu' non prende in prestito la politica di nessuno, e un
+		 * padre che fosse a sua volta un allegato non apre una catena.
+		 */
+		$padre = (int) $contenuto->post_parent > 0 ? get_post( (int) $contenuto->post_parent ) : null;
+
+		if ( ! $padre instanceof WP_Post || 'attachment' === $padre->post_type ) {
+			return false;
+		}
+
+		return self::tipo_vietato( $padre->post_type );
 	}
 
 	/**
 	 * La richiesta in corso mostra contenuti di una sezione che vieta
 	 * l'indicizzazione.
 	 *
-	 * Tre casi: la pagina di un contenuto (compresa la pagina di un suo allegato
-	 * e il feed dei commenti di quel contenuto), l'elenco di un tipo, e il feed
-	 * di un tipo. Quando una richiesta riguarda piu' tipi insieme e anche uno
-	 * solo e' vietato, vince il divieto: l'elenco espone comunque i titoli dei
-	 * contenuti vietati, mentre le pagine dei contenuti consentiti restano
-	 * indicizzabili ciascuna per conto proprio. Righe C-80, C-225, C-226.
+	 * La pagina di un contenuto risponde per quel contenuto (compresa la pagina
+	 * di un suo allegato, il feed dei suoi commenti e il suo incorporamento).
+	 * Ogni altra richiesta risponde per quello che mostra davvero: se fra i
+	 * contenuti dell'interrogazione principale ce n'e' anche uno solo vietato,
+	 * vince il divieto. Vale per gli elenchi e i feed dei tipi, ma anche per la
+	 * pagina iniziale, gli elenchi per autore o per data e i feed generali, che
+	 * un tema o un componente possono allargare ai tipi di una sezione vietata:
+	 * l'elenco espone comunque titoli e riassunti dei contenuti vietati. Le
+	 * pagine dei contenuti consentiti di quello stesso elenco restano
+	 * indicizzabili ciascuna per conto propria. Righe C-80, C-225, C-226, C-231.
+	 *
+	 * Per gli elenchi e i feed di un tipo vietato basta il tipo, anche a elenco
+	 * vuoto: la pagina esiste e il suo indirizzo dice gia' a quale sezione
+	 * appartiene.
 	 *
 	 * Si legge dopo l'interrogazione principale: da WordPress 6.1 le intestazioni
 	 * si preparano dopo di essa, e la versione minima dichiarata e' 6.5.
@@ -207,6 +252,16 @@ final class Conformita_Core_Indicizzazione {
 		if ( is_post_type_archive() || is_feed() ) {
 			foreach ( (array) get_query_var( 'post_type' ) as $tipo ) {
 				if ( self::tipo_vietato( $tipo ) ) {
+					return true;
+				}
+			}
+		}
+
+		$principale = isset( $GLOBALS['wp_the_query'] ) ? $GLOBALS['wp_the_query'] : null;
+
+		if ( $principale instanceof WP_Query && is_array( $principale->posts ) ) {
+			foreach ( $principale->posts as $contenuto ) {
+				if ( self::contenuto_vietato( $contenuto ) ) {
 					return true;
 				}
 			}
@@ -238,21 +293,61 @@ final class Conformita_Core_Indicizzazione {
 	/**
 	 * Il divieto nell'intestazione della risposta.
 	 *
+	 * Le direttive rivolte a un motore specifico, che un altro componente
+	 * avesse gia' scritto, non si mescolano al divieto generale: si mettono da
+	 * parte e si emettono su una riga propria. Riga C-232.
+	 *
 	 * @internal Aggancio di `wp_headers`.
 	 *
 	 * @param mixed $intestazioni Intestazioni raccolte finora.
 	 * @return mixed Intestazioni, con `X-Robots-Tag: noindex` sulle pagine vietate.
 	 */
 	public static function filtra_intestazioni( $intestazioni ) {
+		self::$specifiche = array();
+
 		if ( ! is_array( $intestazioni ) || ! self::richiesta_vietata() ) {
 			return $intestazioni;
 		}
 
-		return self::aggiungi_divieto( $intestazioni );
+		$composte         = self::componi_divieto( $intestazioni );
+		self::$specifiche = $composte['specifiche'];
+
+		return $composte['intestazioni'];
 	}
 
 	/**
-	 * Aggiunge `noindex` a `X-Robots-Tag`, senza cancellare cio' che c'era.
+	 * Emette le direttive per un motore specifico, una riga ciascuna.
+	 *
+	 * WordPress manda le intestazioni una per nome, quindi una seconda riga
+	 * `X-Robots-Tag` si aggiunge qui, dopo di lui, senza sostituire la prima.
+	 *
+	 * @internal Aggancio di `send_headers`.
+	 */
+	public static function emetti_specifiche() {
+		if ( ! headers_sent() ) {
+			foreach ( self::$specifiche as $valore ) {
+				header( 'X-Robots-Tag: ' . $valore, false );
+			}
+		}
+
+		self::$specifiche = array();
+	}
+
+	/**
+	 * Le direttive per un motore specifico messe da parte per la richiesta in
+	 * corso.
+	 *
+	 * @internal Serve alla riga C-232.
+	 *
+	 * @return array<int, string>
+	 */
+	public static function specifiche_in_attesa() {
+		return self::$specifiche;
+	}
+
+	/**
+	 * Aggiunge il divieto generale a `X-Robots-Tag`, senza cancellare cio' che
+	 * c'era.
 	 *
 	 * Usata anche dal punto di consegna degli allegati, che serve i file prima
 	 * che WordPress prepari le intestazioni della pagina. Riga C-228.
@@ -261,15 +356,94 @@ final class Conformita_Core_Indicizzazione {
 	 * @return array<string, string>
 	 */
 	public static function aggiungi_divieto( array $intestazioni ) {
-		$presente = isset( $intestazioni['X-Robots-Tag'] ) ? trim( (string) $intestazioni['X-Robots-Tag'] ) : '';
+		return self::componi_divieto( $intestazioni )['intestazioni'];
+	}
 
-		if ( '' === $presente ) {
-			$intestazioni['X-Robots-Tag'] = 'noindex';
-		} elseif ( ! preg_match( '/(^|[\s,:])noindex([\s,]|$)/i', $presente ) ) {
-			$intestazioni['X-Robots-Tag'] = $presente . ', noindex';
+	/**
+	 * Compone `X-Robots-Tag` con il divieto generale.
+	 *
+	 * Il nome dell'intestazione si riconosce senza badare a maiuscole e
+	 * minuscole, e ne resta uno solo. Il valore generale gia' presente si
+	 * conserva, e `noindex` si aggiunge se non c'e' gia' come direttiva a se'
+	 * (anche `none` lo contiene). Un valore rivolto a un motore specifico, come
+	 * `googlebot: nofollow`, non conta come divieto generale e non riceve il
+	 * divieto in coda, dove varrebbe per quel motore soltanto: si restituisce a
+	 * parte. Riga C-232.
+	 *
+	 * @param array<string, string> $intestazioni Intestazioni.
+	 * @return array{intestazioni: array<string, string>, specifiche: array<int, string>}
+	 */
+	private static function componi_divieto( array $intestazioni ) {
+		$generali   = array();
+		$specifiche = array();
+
+		foreach ( $intestazioni as $nome => $valore ) {
+			if ( ! is_string( $nome ) || 0 !== strcasecmp( $nome, 'X-Robots-Tag' ) ) {
+				continue;
+			}
+
+			unset( $intestazioni[ $nome ] );
+
+			$valore = trim( (string) $valore );
+
+			if ( '' === $valore ) {
+				continue;
+			}
+
+			if ( self::rivolto_a_un_motore( $valore ) ) {
+				$specifiche[] = $valore;
+			} else {
+				$generali[] = $valore;
+			}
 		}
 
-		return $intestazioni;
+		$valore = implode( ', ', $generali );
+
+		if ( ! self::contiene_divieto( $valore ) ) {
+			$valore = '' === $valore ? 'noindex' : $valore . ', noindex';
+		}
+
+		$intestazioni['X-Robots-Tag'] = $valore;
+
+		return array(
+			'intestazioni' => $intestazioni,
+			'specifiche'   => $specifiche,
+		);
+	}
+
+	/**
+	 * Il valore comincia con il nome di un motore seguito dai due punti.
+	 *
+	 * Le direttive generali che hanno un valore dopo i due punti non sono nomi
+	 * di motori, e restano generali.
+	 *
+	 * @param string $valore Valore di `X-Robots-Tag`.
+	 * @return bool
+	 */
+	private static function rivolto_a_un_motore( $valore ) {
+		if ( ! preg_match( '/^\s*([A-Za-z0-9_.-]+)\s*:/', $valore, $parti ) ) {
+			return false;
+		}
+
+		$direttive_con_valore = array( 'max-snippet', 'max-image-preview', 'max-video-preview', 'unavailable_after' );
+
+		return ! in_array( strtolower( $parti[1] ), $direttive_con_valore, true );
+	}
+
+	/**
+	 * Il valore generale contiene gia' una direttiva che vieta l'indicizzazione.
+	 *
+	 * @param string $valore Valore generale di `X-Robots-Tag`.
+	 * @return bool
+	 */
+	private static function contiene_divieto( $valore ) {
+		foreach ( explode( ',', $valore ) as $direttiva ) {
+			if ( in_array( strtolower( trim( $direttiva ) ), array( 'noindex', 'none' ), true ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -297,5 +471,43 @@ final class Conformita_Core_Indicizzazione {
 		}
 
 		return $tipi;
+	}
+
+	/**
+	 * Nessun contenuto vietato nelle pagine della mappa degli altri tipi.
+	 *
+	 * Togliere il tipo dalla mappa non basta se un tema o un componente
+	 * allarga le interrogazioni di un altro tipo, per esempio degli articoli,
+	 * ai tipi di una sezione vietata: la mappa degli articoli elencherebbe
+	 * anche gli atti. E' lo stesso caso degli elenchi misti della riga C-231,
+	 * sul percorso della mappa. Si agisce soltanto mentre WordPress costruisce
+	 * la mappa, riconoscibile dalla variabile `sitemap` della richiesta, e
+	 * soltanto sulle interrogazioni secondarie, che sono quelle con cui la
+	 * mappa legge i contenuti. Riga C-237.
+	 *
+	 * @internal Aggancio di `the_posts`.
+	 *
+	 * @param mixed $contenuti      Contenuti restituiti dall'interrogazione.
+	 * @param mixed $interrogazione Interrogazione.
+	 * @return mixed Contenuti senza quelli vietati, durante la mappa.
+	 */
+	public static function filtra_contenuti_mappa( $contenuti, $interrogazione = null ) {
+		if ( ! is_array( $contenuti ) || ! $interrogazione instanceof WP_Query || $interrogazione->is_main_query() ) {
+			return $contenuti;
+		}
+
+		if ( '' === (string) get_query_var( 'sitemap' ) ) {
+			return $contenuti;
+		}
+
+		$rimasti = array();
+
+		foreach ( $contenuti as $contenuto ) {
+			if ( ! self::contenuto_vietato( $contenuto ) ) {
+				$rimasti[] = $contenuto;
+			}
+		}
+
+		return $rimasti;
 	}
 }
