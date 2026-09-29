@@ -383,7 +383,7 @@ usa.
 | C-113 | Vicino con data corrotta: mai il vicino, e le date valide restano |
 | C-114 | Più di un valore per la chiave: anomalia, e la scrittura ripara |
 
-Le righe C-248..C-257 sono dell'unità del punto 16 e sono elencate là.
+Le righe C-248..C-258 sono dell'unità del punto 16 e sono elencate là.
 
 **Righe che NON appartengono a questa unità**: C-91 e C-96, che sono l'unità S10. Il catalogo
 le tiene in una sezione a parte proprio perché non si contino qui.
@@ -669,7 +669,7 @@ andrebbe misurata sulle prestazioni. È una unità sua, non una riga di questa.
 ## 16. Un solo criterio per la chiave della data di fine e per il tipo gestito
 
 Unità a parte, aperta dopo il registro delle modifiche, che aveva trovato il difetto leggendo
-la chiave in maiuscolo (scheda del registro, nota in fondo al punto 13). Righe C-248..C-257,
+la chiave in maiuscolo (scheda del registro, nota in fondo al punto 13). Righe C-248..C-258,
 prove in `tests/criterio-unico-test.php`.
 
 ### Il difetto: la stessa domanda fatta in due modi
@@ -796,6 +796,14 @@ Tre rilievi, tutti su casi che il salvataggio ordinario non produce, corretti al
   chiave di elenco fatta solo di cifre, e il confronto stretto con il nome letto dalla
   banca dati falliva. `identificativi()` restituisce ora sempre testi. Riga C-257.
 
+### Il terzo giro di revisione
+
+Nessun rilievo sul codice del secondo giro. Una seconda lettura in parallelo ne ha trovato
+uno, vero e corretto: le regole della colonna del tipo si cercavano con `LIKE 'post_type'`, e
+in quel confronto il trattino basso vale per qualunque carattere. Una colonna dal nome simile
+(`postXtype`) messa prima nella tabella poteva prendere il posto di quella vera, con regole
+diverse. Ora la colonna si cerca per nome esatto e il nome letto si controlla. Riga C-258.
+
 ### Tabella di copertura: in quali modi un nome diverso arriva a core
 
 | Come arriva | Esempio | Coperto da | Righe |
@@ -810,6 +818,7 @@ Tre rilievi, tutti su casi che il salvataggio ordinario non produce, corretti al
 | Allegato con altra grafia | `ATTACHMENT` | `uguale()`, stessa regola | C-250 |
 | Altra tabella nella stessa richiesta | un altro sito | regole lette ogni volta | C-255 |
 | Stessa tabella con altre regole nella stessa richiesta | tabella temporanea omonima | regole lette ogni volta | C-256 |
+| Colonna dal nome simile prima di quella del tipo | `postXtype` | colonna cercata per nome esatto | C-258 |
 | Regole della colonna non leggibili | banca dati che non risponde | ripiego: maiuscole e spazi in coda | C-248; limite dichiarato sugli accenti |
 | Connessione con insieme di caratteri diverso dalla tabella | configurazione fuori da WordPress | fuori: dichiarato sopra | nessuna |
 
@@ -835,12 +844,13 @@ Tre rilievi, tutti su casi che il salvataggio ordinario non produce, corretti al
 | C-255 | Nella stessa richiesta, prima una tabella che distingue le maiuscole e poi quella vera: la risposta data per la prima non vale per la seconda, e il contenuto scaduto resta fuori dalla ricerca |
 | C-256 | Tipo registrato in WordPress con il nome non ridotto: i suoi contenuti sono gestiti. Tabella temporanea con lo stesso nome e altre regole, poi tolta: vale sempre la tabella del momento |
 | C-257 | Tipo gestito di sole cifre, e una sua grafia a larghezza piena: riconosciuto, con la sua sezione |
+| C-258 | Regole lette dalla colonna del tipo per nome esatto: una colonna dal nome simile, messa prima, non ne prende il posto |
 
 Le prove chiedono alla banca dati di prova che cosa trova e pretendono che core risponda allo
 stesso modo; dove hanno senso solo se la banca dati ignora le maiuscole, lo asseriscono, così
 su una banca dati diversa diventano rosse invece di passare senza aver provato niente. Sul
 codice di prima di questa unità tutte e quindici le prime sono rosse; C-255 è rossa sul
-codice del primo giro, C-256 e C-257 su quello del secondo.
+codice del primo giro, C-256 e C-257 su quello del secondo, C-258 su quello del terzo.
 
 **Guasti di prova**, ciascuno introdotto a mano e tolto, con le prove che diventano rosse:
 
@@ -858,3 +868,4 @@ codice del primo giro, C-256 e C-257 su quello del secondo.
 | G10: nomi dei tipi gestiti restituiti come chiavi, numeri compresi | C-257 |
 | G11: regole della colonna ricordate per la richiesta | C-248 (ripiego), C-255, C-256 |
 | G12: alfabeto delle scorciatoie che ammette le maiuscole | C-248, C-249, C-250, C-255, C-256 |
+| G13: colonna del tipo cercata con `LIKE` invece che per nome esatto | C-258 |

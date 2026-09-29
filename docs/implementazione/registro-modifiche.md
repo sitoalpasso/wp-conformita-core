@@ -751,4 +751,4 @@ senza badare alle maiuscole. Ora la data di fine si legge in un posto solo,
 criterio della banca dati in `Conformita_Core_Tipi::canonico()`. Una correzione a quanto
 scritto qui prima: WordPress riduce il tipo con `sanitize_key` al salvataggio, quindi un tipo
 in maiuscolo arriva solo da una scrittura diretta nella banca dati o da un componente che
-toglie quella riduzione. Scheda del motore di scadenza, punto 16; righe C-248..C-257.
+toglie quella riduzione. Scheda del motore di scadenza, punto 16; righe C-248..C-258.

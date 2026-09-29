@@ -1,7 +1,7 @@
 <?php
 /**
  * Un solo criterio per la chiave della fine pubblicazione e per il tipo
- * gestito, righe C-248..C-257 del catalogo.
+ * gestito, righe C-248..C-258 del catalogo.
  *
  * Core leggeva la stessa cosa in due modi. La chiave della fine pubblicazione:
  * la scadenza la leggeva dalla memoria di WordPress, che distingue le
@@ -703,5 +703,36 @@ class Conformita_Core_Criterio_Unico_Test extends WP_UnitTestCase {
 		$this->assertSame( '123', Conformita_Core_Tipi::canonico( $grafia ) );
 		$this->assertSame( '123', Conformita_Core_Tipi::canonico( '123' ) );
 		$this->assertSame( self::SEZIONE, Conformita_Core_Tipi::sezione( $grafia ) );
+	}
+
+	/**
+	 * C-258: le regole si leggono dalla colonna del tipo e da nessun'altra.
+	 *
+	 * Una colonna aggiunta da un componente con un nome che differisce da
+	 * `post_type` in un solo carattere, messa prima e con il confronto binario,
+	 * non deve prendere il posto della colonna vera nella lettura delle regole.
+	 */
+	public function test_c258_regole_dalla_colonna_giusta() {
+		global $wpdb;
+
+		$vera     = $wpdb->posts;
+		$appoggio = $vera . '_appoggio';
+		$colonna  = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$vera} WHERE Field = 'post_type'", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: struttura della tabella.
+		$insieme  = strtok( (string) $colonna['Collation'], '_' );
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- prova: le tabelle temporanee non chiudono la transazione della prova.
+		$wpdb->query( "CREATE TEMPORARY TABLE {$appoggio} LIKE {$vera}" );
+		$wpdb->query( "ALTER TABLE {$appoggio} ADD COLUMN postXtype VARCHAR(20) CHARACTER SET {$insieme} COLLATE {$insieme}_bin NOT NULL DEFAULT '' FIRST" );
+		$wpdb->query( "CREATE TEMPORARY TABLE {$vera} LIKE {$appoggio}" );
+
+		try {
+			$simile = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$vera} LIKE 'post_type'", ARRAY_A );
+			$this->assertSame( 'postXtype', $simile['Field'], 'La colonna aggiunta deve essere la prima che la somiglianza trova: senza, la prova non proverebbe niente.' );
+			$this->assertSame( self::TIPO, Conformita_Core_Tipi::canonico( 'PROVA_CRITERIO' ), 'Le regole sono quelle della colonna del tipo, che non distingue le maiuscole.' );
+		} finally {
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$vera}" );
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$appoggio}" );
+		}
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange
 	}
 }

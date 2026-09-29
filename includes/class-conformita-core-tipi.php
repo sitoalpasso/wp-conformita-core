@@ -436,16 +436,22 @@ final class Conformita_Core_Tipi {
 	 * richiesta la tabella dei contenuti può cambiare nome (un altro sito della
 	 * stessa installazione) o struttura (una tabella temporanea con lo stesso
 	 * nome, una modifica delle regole), e una risposta ricordata varrebbe per
-	 * una tabella che non c'è più. Righe C-255 e C-256.
+	 * una tabella che non c'è più. Righe C-255, C-256 e C-258.
 	 *
 	 * @return array{insieme: string, ordinamento: string}|null
 	 */
 	private static function regole_della_colonna() {
 		global $wpdb;
 
+		/*
+		 * La colonna si cerca per nome esatto e non per somiglianza: in LIKE il
+		 * trattino basso vale per qualunque carattere, e una colonna aggiunta da
+		 * un componente, come `postXtype`, verrebbe presa al posto di quella del
+		 * tipo. Il nome letto si ricontrolla. Riga C-258.
+		 */
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Il nome della tabella viene da WordPress; la domanda riguarda la struttura, non i dati.
-		$colonna     = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$wpdb->posts} LIKE 'post_type'", ARRAY_A );
-		$ordinamento = is_array( $colonna ) && isset( $colonna['Collation'] ) && is_string( $colonna['Collation'] ) ? $colonna['Collation'] : '';
+		$colonna     = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$wpdb->posts} WHERE Field = 'post_type'", ARRAY_A );
+		$ordinamento = is_array( $colonna ) && isset( $colonna['Field'], $colonna['Collation'] ) && 'post_type' === $colonna['Field'] && is_string( $colonna['Collation'] ) ? $colonna['Collation'] : '';
 		$insieme     = strtok( $ordinamento, '_' );
 
 		return preg_match( '/^[A-Za-z0-9_]+$/D', $ordinamento ) && is_string( $insieme ) && '' !== $insieme
