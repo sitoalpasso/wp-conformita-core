@@ -1,7 +1,7 @@
 # Meccanismo di indicizzazione: scheda di lavorazione
 
 **Repository: `wp-conformita-core`.** Unità S9 del piano, righe di collaudo C-80..C-85 e
-C-225..C-230, elencate al punto 11.
+C-225..C-237, elencate al punto 11.
 
 **Nel componente dell'albo pretorio non si implementa niente di tutto questo.** L'albo
 dichiara già la propria politica (`vietata`) quando registra la sua sezione: da questa
@@ -9,8 +9,8 @@ versione quella dichiarazione produce effetti. L'albo, in un'altra unità, dovr�
 richiedere la versione `1.4.0` dell'interfaccia, perché è la prima che garantisce il
 divieto.
 
-**Stato: costruita, prove verdi in locale, verifica continua in corso.** Le sezioni sono al
-passato e dicono quello che il codice fa.
+**Stato: costruita, primo giro di revisione indipendente recepito (punto 13), in attesa del
+secondo.** Le sezioni sono al passato e dicono quello che il codice fa.
 
 ---
 
@@ -30,8 +30,10 @@ guarda a quale sezione appartiene quello che la pagina mostra, e ne legge la pol
 `X-Robots-Tag`) e dentro la pagina (il metatag `robots`). I due posti servono perché
 ciascuno copre il punto cieco dell'altro: i file e i feed non hanno una "pagina" dove
 scrivere, e certe memorie di pagina dei siti conservano la pagina ma perdono la busta. Il
-file di un allegato risponde per l'atto a cui appartiene. La mappa del sito perde per intero
-i tipi di contenuto delle sezioni vietate. Non si usa `robots.txt`, di proposito: un
+file di un allegato risponde per l'atto a cui appartiene. Un elenco qualsiasi, anche la
+pagina iniziale, porta l'avviso se fra quello che mostra c'è un atto. La mappa del sito perde
+per intero i tipi di contenuto delle sezioni vietate, e nessun'altra parte della mappa può
+elencare un atto. Non si usa `robots.txt`, di proposito: un
 indirizzo escluso lì non viene visitato, quindi il motore non legge mai l'avviso, e se
 qualcuno lo collega da fuori l'indirizzo può finire nell'indice lo stesso.
 
@@ -39,7 +41,7 @@ qualcuno lo collega da fuori l'indirizzo può finire nell'indice lo stesso.
 due sezioni finte con politiche opposte e controllano sempre le due insieme: la pagina
 vietata deve avere l'avviso, quella consentita non deve averlo, e le pagine normali del sito
 nemmeno. Per dimostrare che le prove non sono di cartone, il codice è stato rotto di
-proposito in tredici modi diversi (avviso tolto dalla pagina, avviso messo dappertutto,
+proposito in ventitré modi diversi (avviso tolto dalla pagina, avviso messo dappertutto,
 mappa non filtrata, feed dimenticati, allegati che non risalgono all'atto, `robots.txt`
 toccato, spegnimento a metà, e altri): ogni volta almeno una prova è diventata rossa. La
 tabella è al punto 12.
@@ -54,7 +56,7 @@ tabella è al punto 12.
 | `conformita-core.php` | carica e accende il meccanismo; versione dell'interfaccia da `1.3.0` a `1.4.0` |
 | `includes/class-conformita-core-sezioni.php` | la registrazione di una sezione rifiuta a meccanismo spento (C-85) |
 | `includes/class-conformita-core-consegna.php` | il file di un contenuto vietato esce con `X-Robots-Tag: noindex` (C-228) |
-| `tests/indicizzazione-test.php` | nuovo: C-80..C-85, C-225..C-227, C-229, C-230 |
+| `tests/indicizzazione-test.php` | nuovo: C-80..C-85, C-225..C-227, C-229..C-237 |
 | `tests/consegna-test.php` | C-228 |
 | `tests/filtro-scadenza-test.php`, `tests/filtro-scadenza-non-vacuita-test.php` | la sezione usata dalle prove sulla scadenza nella mappa diventa `consentita` (punto 7) |
 | `tests/allegati-test.php` | C-153 non fissa più la versione esatta, ma "almeno 1.3.0" (punto 3) |
@@ -88,35 +90,61 @@ accadere, perché il meccanismo si accende al caricamento del file di core.
 ## 4. Come funziona
 
 Si accende al caricamento del file di core, subito dopo il motore di scadenza e per la
-stessa ragione: non dipende dall'ordine in cui WordPress carica i plugin. Tre agganci, in un
-elenco solo letto sia dall'accensione sia dallo spegnimento (C-230):
+stessa ragione: non dipende dall'ordine in cui WordPress carica i plugin (C-235). Cinque
+agganci, in un elenco solo letto dall'accensione, dallo spegnimento e dalla domanda "è
+acceso?" (C-230):
 
 | Aggancio | Che cosa fa |
 |---|---|
 | `wp_robots` | aggiunge `noindex` al metatag `robots` nel sorgente, e toglie un eventuale `index` |
-| `wp_headers` | aggiunge `noindex` all'intestazione `X-Robots-Tag`, senza cancellare quello che c'era |
-| `wp_sitemaps_post_types` | toglie dalla mappa del sito i tipi delle sezioni vietate |
+| `wp_headers` | compone l'intestazione `X-Robots-Tag` con il divieto generale (C-232) |
+| `send_headers` | emette su righe proprie le direttive che un altro componente aveva rivolto a un motore specifico (C-232) |
+| `wp_sitemaps_post_types` | toglie dalla mappa del sito i tipi delle sezioni vietate (C-82) |
+| `the_posts` | mentre si costruisce la mappa, toglie i contenuti vietati dalle pagine della mappa degli altri tipi (C-237) |
 
-Priorità alta (9999): sui contenuti vietati il divieto è l'ultima parola anche se un altro
-componente, prima, ha scritto il contrario. Sugli altri contenuti gli agganci restituiscono
-quello che ricevono.
+**"È acceso" guarda gli agganci, non una variabile.** Se un altro componente ne toglie uno,
+il meccanismo non risulta acceso e la registrazione di una sezione è rifiutata; riaccenderlo
+rimette quello che manca (C-234). Lo spegnimento esiste per le prove e nessuna funzione
+pubblica lo espone: chiamato in esercizio dopo le registrazioni, lascerebbe le pagine senza
+divieto, perché la guardia vale al momento della registrazione. È lo stesso limite dello
+spegnimento del motore di scadenza.
+
+**Priorità: la più alta che WordPress ammette.** Il divieto passa dopo ogni filtro
+registrato a una priorità minore, quindi un componente che prima ha scritto il contrario
+viene corretto. **Non è una garanzia assoluta**: un filtro registrato alla stessa priorità
+dopo core passa dopo di lui e può togliere il divieto, e nessuna priorità lo impedisce. Per
+questo la prova sul sito vero (punto 9) guarda la risposta finale e non il codice. Sugli
+altri contenuti gli agganci restituiscono quello che ricevono.
+
+**Come si compone l'intestazione.** Il nome si riconosce senza badare a maiuscole e ne resta
+uno solo. Un valore generale già presente si conserva e riceve `noindex` in coda, se non lo
+contiene già (anche `none` lo contiene). Un valore rivolto a un motore specifico, come
+`googlebot: nofollow`, non si mescola al divieto generale, dove varrebbe per quel motore
+soltanto: la riga generale diventa `noindex`, e il valore altrui esce intatto su una riga
+propria.
 
 **Quali richieste portano il divieto.** Si decide dopo l'interrogazione principale (da
 WordPress 6.1 le intestazioni si preparano dopo di essa; la minima dichiarata è 6.5):
 
-1. la pagina di un contenuto di un tipo vietato, compreso il feed dei commenti
-   di quel contenuto (C-80);
-2. la pagina di un allegato, se il contenuto a cui appartiene è di un tipo vietato (C-227);
-3. l'elenco di un tipo vietato (C-225);
-4. il feed di un tipo vietato; un feed che mescola tipi vietati e consentiti porta il divieto,
-   perché elenca comunque i titoli dei contenuti vietati (C-226).
+1. la pagina di un contenuto di un tipo vietato, compresi il feed dei commenti e
+   l'incorporamento di quel contenuto (C-80, C-236);
+2. la pagina di un allegato, se il contenuto a cui appartiene è di un tipo vietato. Un
+   allegato il cui contenuto non esiste più non prende la politica di nessuno (C-227, C-233);
+3. l'elenco e il feed di un tipo vietato, anche vuoti (C-225, C-226);
+4. ogni altra richiesta che mostra anche un solo contenuto vietato: la pagina iniziale, gli
+   elenchi per autore o per data, i feed generali, che un tema o un componente possono
+   allargare ai tipi vietati. Vince il divieto, perché l'elenco espone comunque titoli e
+   riassunti; le pagine dei contenuti consentiti restano indicizzabili una per una (C-226,
+   C-231).
 
 **Il file consegnato** esce dal punto di consegna di S5 prima che WordPress prepari le
 intestazioni della pagina, quindi il divieto si aggiunge lì, con la stessa funzione
 (C-228).
 
-**La mappa** perde il tipo intero, non i singoli contenuti: un tipo appartiene a una sezione
-sola, e togliendolo sparisce anche la sua voce nell'indice della mappa (C-82).
+**La mappa** perde il tipo intero: un tipo appartiene a una sezione sola, e togliendolo
+sparisce anche la sua voce nell'indice della mappa (C-82). Se un componente allarga la mappa
+di un altro tipo ai tipi vietati, i contenuti vietati si tolgono da quelle pagine della mappa,
+e soltanto mentre la mappa si costruisce (C-237).
 
 ## 5. Dati letti e scritti
 
@@ -131,9 +159,12 @@ non dipende da chi guarda la pagina.
 ## 7. Test
 
 Tutte le prove registrano due sezioni finte con politiche opposte nello stesso sito. Il
-sorgente si legge stampando quello che WordPress stampa nella testata della pagina; le
-intestazioni si leggono dal filtro con cui WordPress le prepara, dopo aver eseguito la
-richiesta.
+sorgente si legge stampando il metatag, e soltanto se la testata della pagina lo stampa
+davvero: se un tema o un componente lo toglie dalla testata, per la prova il divieto nel
+sorgente manca, come sulla pagina vera. La testata intera non si stampa perché nell'ambiente
+di prova costruito dai sorgenti di WordPress porta con sé il caricatore degli script, che
+fallisce per un motivo estraneo. Le intestazioni si leggono dal filtro con cui WordPress le
+prepara, dopo aver eseguito la richiesta: è il valore che WordPress manda, riga per riga.
 
 | Riga | Prova |
 |---|---|
@@ -149,13 +180,21 @@ richiesta.
 | C-228 | `consegna-test.php`, `test_c228_divieto_di_indicizzazione_sui_file` |
 | C-229 | `test_c229_robots_txt_intatto` |
 | C-230 | `test_c230_accensione_e_spegnimento` |
+| C-225, C-226 (vuoti) | `test_c225_c226_elenco_e_feed_vuoti` |
+| C-231 | `test_c231_elenchi_misti` |
+| C-232 | `test_c232_composizione_dell_intestazione` |
+| C-233 | `test_c233_padre_inesistente` |
+| C-234 | `test_c234_aggancio_tolto_da_fuori` |
+| C-235 | `test_c235_accensione_al_caricamento` |
+| C-236 | `test_c236_percorso_della_pagina` |
+| C-237 | `test_c237_mappa_allargata_da_un_componente` |
 
 **Tre prove di S4 toccate, e perché.** C-14, C-92 e C-108 controllano che un contenuto
 scaduto sparisca dalla mappa del sito, e lo facevano su sezioni dichiarate `vietata`. Da
 questa unità una sezione vietata non è nella mappa affatto, quindi quelle prove non vi
 trovavano più nemmeno il contenuto valido e sono diventate rosse. Non è un difetto del filtro
 di scadenza, che non legge la politica di indicizzazione: è che la scadenza nella mappa conta
-solo per le sezioni che nella mappa ci sono. Le due prove ora girano su una sezione
+solo per le sezioni che nella mappa ci sono. Le tre prove ora girano su una sezione
 `consentita`, che è il caso reale (la trasparenza).
 
 ## 8. Cosa deliberatamente NON fa
@@ -171,6 +210,8 @@ solo per le sezioni che nella mappa ci sono. Le due prove ora girano su una sezi
 - **Non copre le risposte dell'interfaccia informatica (REST)**: sono dati per programmi, non
   pagine, e i motori non le trattano come pagine. Il divieto nella busta si potrà aggiungere
   lì se un giorno servirà.
+- **Non impedisce a un filtro registrato dopo di lui, alla stessa priorità massima, di
+  togliere il divieto** (punto 4). La prova sul sito vero lo scopre.
 - **Non copre le tassonomie.** Core non ne registra; quelle dell'albo sono già non pubbliche,
   quindi senza pagine e fuori dalla mappa.
 - **I risultati della ricerca interna** li copre già WordPress, che mette `noindex` su ogni
@@ -207,16 +248,20 @@ Tre prove, da aggiungere al collaudo di rilascio.
 | Il file del meccanismo non viene caricato | nessuna sezione si registra (C-85): l'albo non parte, invece di partire con le pagine indicizzabili |
 | Il tema non stampa la testata della pagina | resta il divieto nella busta, che i motori rispettano allo stesso modo |
 | Una memoria di pagina perde le intestazioni | resta il metatag nel sorgente |
-| Un altro componente scrive `index` sui contenuti vietati | il meccanismo passa per ultimo e lo toglie |
+| Un altro componente scrive `index` sui contenuti vietati prima del meccanismo | il meccanismo passa dopo e lo toglie |
+| Un altro componente toglie il divieto dopo il meccanismo, alla stessa priorità | il divieto manca: lo scopre solo la prova sul sito vero (punto 9) |
+| Un altro componente toglie un aggancio del meccanismo | il meccanismo non risulta acceso e le sezioni nuove non si registrano (C-234) |
+| Un altro componente ha già scritto `X-Robots-Tag` per un motore specifico | la riga generale porta `noindex`, quella altrui esce intatta a parte (C-232) |
+| Un allegato punta a un contenuto che non esiste più | nessun divieto preso in prestito da altri contenuti (C-233) |
 | Un plugin SEO sostituisce mappa e metatag | resta la busta; la mappa si controlla a mano (punto 9) |
 | Un tipo vietato e uno consentito nello stesso elenco | vince il divieto sull'elenco; le pagine consentite restano indicizzabili una per una |
 
 ## 11. Le righe di collaudo di questa unità
 
-C-80..C-85 sono le righe del catalogo scritte quando l'unità è stata pianificata. Le sei righe
-nuove le ha fatte emergere il lavoro, cercando ogni strada da cui un motore arriva ai
-contenuti di una sezione: numerazione continuata dopo C-224, l'ultima del registro delle
-modifiche, per non sovrapporsi a un ramo ancora aperto.
+C-80..C-85 sono le righe del catalogo scritte quando l'unità è stata pianificata. C-225..C-230
+le ha fatte emergere il lavoro, cercando ogni strada da cui un motore arriva ai contenuti di
+una sezione; C-231..C-237 il primo giro di revisione (punto 13). Numerazione continuata dopo
+C-224, l'ultima del registro delle modifiche, per non sovrapporsi a un ramo ancora aperto.
 
 | Riga | Stato | Cosa verifica |
 |---|---|---|
@@ -226,12 +271,19 @@ modifiche, per non sovrapporsi a un ramo ancora aperto.
 | C-83 | fatto | Due sezioni con politiche opposte, registrate nei due ordini: ciascuna ottiene la propria |
 | C-84 | fatto | Articoli, pagine e pagina iniziale: nessun divieto, e restano nella mappa |
 | C-85 | fatto | A meccanismo spento la registrazione di una sezione è rifiutata con errore che nomina l'indicizzazione; riacceso, la stessa registrazione riesce |
-| C-225 | fatto | Elenco di un tipo vietato: divieto nei due segnali; elenco di un tipo consentito: nessun divieto |
-| C-226 | fatto | Feed di un tipo vietato, feed dei commenti di un contenuto vietato, feed misto: divieto nell'intestazione. Feed di un tipo consentito, dei commenti di un contenuto consentito, feed generale: nessun divieto |
+| C-225 | fatto | Elenco di un tipo vietato, anche vuoto: divieto nei due segnali; elenco di un tipo consentito, anche vuoto: nessun divieto |
+| C-226 | fatto | Feed di un tipo vietato (anche vuoto, anche di un tipo senza elenco proprio), feed dei commenti di un contenuto vietato, feed misto: divieto nell'intestazione. Feed di un tipo consentito, dei commenti di un contenuto consentito, feed generale: nessun divieto |
 | C-227 | fatto | Pagina di un allegato: divieto se il contenuto a cui appartiene è vietato; nessun divieto per l'allegato di un contenuto consentito, di un articolo, o senza contenuto |
 | C-228 | fatto | File consegnato dal punto di consegna: `X-Robots-Tag: noindex` se il contenuto è vietato, nessuna intestazione se è consentito; le due consegne riescono tutte e due |
 | C-229 | fatto | `robots.txt` identico a meccanismo acceso e spento, senza il tipo vietato |
-| C-230 | fatto | Acceso, i tre agganci rispondono alla loro priorità; spento, nessuno risponde e il divieto sparisce; riacceso, torna |
+| C-230 | fatto | Acceso, i cinque agganci rispondono alla loro priorità; spento, nessuno risponde e il divieto sparisce; riacceso, torna |
+| C-231 | fatto | Pagina iniziale ed elenco per autore allargati da un componente ai tipi vietati, feed di tutti i tipi: divieto, dopo aver verificato che il contenuto vietato sia davvero mostrato; gli stessi elenchi senza contenuti vietati: nessun divieto |
+| C-232 | fatto | Composizione di `X-Robots-Tag` con un valore già scritto da altri: generale senza e con `noindex`, `none`, direttiva con valore, nome in minuscolo, valore rivolto a un motore con `noindex` e con `nofollow`. Una sola riga generale con il divieto, e il valore per il motore messo da parte intatto; sui contenuti consentiti niente cambia |
+| C-233 | fatto | Allegato con un padre che non esiste più, con un contenuto vietato o l'allegato stesso come contenuto globale: nessun divieto preso in prestito; nemmeno con identificativo zero o vuoto |
+| C-234 | fatto | Tolto da fuori un aggancio qualsiasi dei cinque: il meccanismo non risulta acceso, la registrazione di una sezione è rifiutata, la riaccensione rimette l'aggancio |
+| C-235 | fatto | Caricare il file di core accende il meccanismo senza altre chiamate; la versione dell'interfaccia è almeno `1.4.0` e coincide con quella della funzione pubblica |
+| C-236 | fatto | Incorporamento di un contenuto vietato: divieto nell'intestazione, di uno consentito: nessuno. Metatag tolto dalla testata: resta l'intestazione |
+| C-237 | fatto | Mappa degli articoli allargata da un componente al tipo vietato: il contenuto vietato non c'è, l'articolo sì; a meccanismo spento il vietato c'era; fuori dalla mappa la stessa interrogazione allargata non si tocca |
 
 "Fatto" vuol dire verde nella suite locale (WordPress 6.5, PHP 8.4). Diventa definitivo con
 la verifica continua verde sul commit di punta.
@@ -256,12 +308,49 @@ loro verifica è questa tabella.
 | G10. File consegnati senza divieto | C-228 |
 | G11. Esclusione aggiunta a `robots.txt` | C-229, C-230 |
 | G12. Spegnimento che toglie un aggancio solo | C-82, C-230 |
-| G13. Feed misto: vince il consentito | C-226 |
+| G13. Feed misto: vince il consentito | C-226, C-231 |
+| G14. Elenchi misti: i contenuti mostrati non si guardano | C-231 |
+| G15. Direttiva per un motore presa per generale | C-232 |
+| G16. Nome dell'intestazione riconosciuto solo con le maiuscole giuste | C-232 |
+| G17. Padre inesistente: si ricade sul contenuto globale | C-233 |
+| G18. "Acceso" guardando un aggancio solo | C-234 |
+| G19. Accensione tolta dal file di core | C-235 e ogni prova che registra una sezione |
+| G20. Versione riportata a `1.3.0` | C-235 |
+| G21. La riaccensione non rimette l'aggancio mancante | C-234 |
+| G22. Mappa allargata non filtrata | C-237 |
+| G23. Contenuti filtrati anche fuori dalla mappa | C-237, e tre prove di S4 sulle interrogazioni |
 
-## 13. Cosa manca
+Dopo le correzioni del primo giro le righe G1..G13 sono state rieseguite sul codice nuovo.
+G7 e G8 all'inizio sono rimaste verdi: la regola nuova sugli elenchi misti copriva anche gli
+elenchi e i feed del tipo, finché contenevano un atto. È per questo che esiste la prova
+sugli elenchi e i feed vuoti, che adesso le fa diventare rosse.
+
+## 13. Il primo giro di revisione indipendente
+
+Sul commit `0319771`, sette rilievi e la richiesta dei due file della consegna per intero,
+che il secondo giro riceve. Come sono stati chiusi:
+
+1. **Elenchi che mostrano atti senza essere l'elenco del tipo** (pagina iniziale, elenchi per
+   autore o data allargati da un componente, feed di tutti i tipi). Si guardano ora anche i
+   contenuti mostrati dall'interrogazione principale. C-231. Lo stesso caso sulla mappa del
+   sito, non segnalato, è chiuso da C-237.
+2. **Intestazione composta male con valori per un motore specifico.** Riscritta la
+   composizione, con il nome riconosciuto senza maiuscole e le direttive per un motore su una
+   riga propria. C-232.
+3. **Allegato con un padre che non esiste più**, che prendeva la politica del contenuto
+   globale. Niente più ricorsione né ricaduta sul contenuto globale. C-233.
+4. **"Acceso" ricordato da una variabile.** Adesso guarda gli agganci e la riaccensione ripara.
+   Lo spegnimento dopo le registrazioni resta un limite dichiarato (punto 4). C-234.
+5. **"Passa per ultimo" promesso senza poterlo garantire.** Priorità portata alla massima, e
+   il limite scritto nei punti 4, 8 e 10.
+6. **Accensione al caricamento e versione non sorvegliate.** C-235.
+7. **Le prove non attraversavano il percorso vero.** Il sorgente ora pretende che la testata
+   stampi il metatag; aggiunti incorporamento e testata senza metatag. C-236.
+
+## 14. Cosa manca
 
 - La verifica continua sul commit di punta: da riportare quando arriva.
-- La revisione indipendente.
+- Il secondo giro di revisione indipendente.
 - L'albo deve richiedere `1.4.0` (unità A10 del piano, che verifica il divieto sulle pagine
   vere dell'albo).
 - Le tre prove del punto 9 vanno aggiunte al collaudo di rilascio.
