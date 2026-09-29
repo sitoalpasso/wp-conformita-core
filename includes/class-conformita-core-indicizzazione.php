@@ -532,18 +532,22 @@ final class Conformita_Core_Indicizzazione {
 	 * `pre_get_posts` passa sempre. La restrizione toglie soltanto quello che
 	 * la politica vieta, contenuto per contenuto, e mai quello che le sta
 	 * accanto: un contenuto consentito escluso dalla mappa e' un danno, non
-	 * una prudenza (C-245, C-246).
+	 * una prudenza (C-245..C-247).
 	 *
 	 * 1. Se la lettura sceglie un contenuto per identificativo, conta quello
 	 *    che WordPress sceglie davvero, con le sue precedenze
 	 *    (`scelto_da_wordpress()`): se e' vietato la lettura si svuota,
 	 *    altrimenti non si tocca niente.
-	 * 2. Si tolgono i tipi vietati dall'elenco dei tipi letti, anche quando
+	 * 2. Se la lettura sceglie un contenuto per percorso, conta quello che
+	 *    WordPress trova (`scelto_per_percorso()`), anche quando e' un
+	 *    allegato e fa cambiare il tipo interrogato: stessa regola del punto
+	 *    1 (C-247).
+	 * 3. Si tolgono i tipi vietati dall'elenco dei tipi letti, anche quando
 	 *    l'elenco e' `any` o manca con una tassonomia, che WordPress allarga a
 	 *    tutti i tipi ricercabili. Se non resta nessun tipo la lettura si
 	 *    svuota: un elenco di tipi vuoto, per WordPress, vorrebbe dire gli
 	 *    articoli.
-	 * 3. Se possono entrare allegati, si escludono per identificativo gli
+	 * 4. Se possono entrare allegati, si escludono per identificativo gli
 	 *    allegati dei contenuti vietati, e soltanto quelli: i vincoli sul padre
 	 *    varrebbero anche per gli altri tipi della lettura.
 	 *
@@ -573,6 +577,22 @@ final class Conformita_Core_Indicizzazione {
 
 		if ( $scelto > 0 ) {
 			if ( self::contenuto_vietato( $scelto ) ) {
+				self::svuota( $interrogazione );
+			}
+
+			return;
+		}
+
+		/*
+		 * Un percorso che WordPress risolve restringe la lettura a quel solo
+		 * contenuto, e se e' un allegato cambia anche il tipo interrogato: la
+		 * decisione spetta al contenuto trovato, non ai tipi chiesti. Riga
+		 * C-247.
+		 */
+		$percorso = self::scelto_per_percorso( $interrogazione );
+
+		if ( null !== $percorso ) {
+			if ( self::contenuto_vietato( $percorso ) ) {
 				self::svuota( $interrogazione );
 			}
 
@@ -639,6 +659,85 @@ final class Conformita_Core_Indicizzazione {
 		$allegato = absint( $interrogazione->get( 'attachment_id' ) );
 
 		return $allegato > 0 ? $allegato : absint( $interrogazione->get( 'p' ) );
+	}
+
+	/**
+	 * Il contenuto che WordPress sceglie per percorso, null se la lettura non
+	 * passa di li'.
+	 *
+	 * Si seguono le regole di `WP_Query`: la variabile di un tipo nell'elenco
+	 * diventa nome o percorso secondo che il tipo sia gerarchico, il nome
+	 * prevale sul percorso, il percorso gia' risolto durante l'analisi della
+	 * lettura vale per primo, altrimenti si cerca fra i tipi gerarchici
+	 * chiesti (allegati compresi), e la pagina degli articoli con la pagina
+	 * iniziale statica non restringe niente. Quando il percorso vale, la
+	 * lettura restituisce al piu' il contenuto trovato: zero se nessuno.
+	 * Riga C-247.
+	 *
+	 * @param WP_Query $interrogazione Interrogazione in preparazione.
+	 * @return int|null
+	 */
+	private static function scelto_per_percorso( WP_Query $interrogazione ) {
+		$tipi     = $interrogazione->get( 'post_type' );
+		$nome     = (string) $interrogazione->get( 'name' );
+		$percorso = (string) $interrogazione->get( 'pagename' );
+
+		if ( ! empty( $tipi ) && 'any' !== $tipi ) {
+			foreach ( (array) $tipi as $tipo ) {
+				$oggetto = get_post_type_object( $tipo );
+
+				if ( ! $oggetto || ! $oggetto->query_var || empty( $interrogazione->get( $oggetto->query_var ) ) ) {
+					continue;
+				}
+
+				if ( $oggetto->hierarchical ) {
+					$percorso = (string) $interrogazione->get( $oggetto->query_var );
+					$nome     = '';
+				} else {
+					$nome = (string) $interrogazione->get( $oggetto->query_var );
+				}
+
+				break;
+			}
+		}
+
+		if ( '' !== $nome || '' === $percorso ) {
+			return null;
+		}
+
+		if ( isset( $interrogazione->queried_object_id ) ) {
+			$trovato = (int) $interrogazione->queried_object_id;
+		} else {
+			$trovato = null;
+
+			if ( 'page' !== $tipi ) {
+				foreach ( (array) $tipi as $tipo ) {
+					$oggetto = get_post_type_object( $tipo );
+
+					if ( ! $oggetto || ! $oggetto->hierarchical ) {
+						continue;
+					}
+
+					$trovato = get_page_by_path( $percorso, OBJECT, $tipo );
+
+					if ( $trovato ) {
+						break;
+					}
+				}
+			} else {
+				$trovato = get_page_by_path( $percorso );
+			}
+
+			$trovato = $trovato instanceof WP_Post ? (int) $trovato->ID : 0;
+		}
+
+		$articoli = (int) get_option( 'page_for_posts' );
+
+		if ( 'page' === get_option( 'show_on_front' ) && $articoli > 0 && $trovato === $articoli ) {
+			return null;
+		}
+
+		return $trovato;
 	}
 
 	/**

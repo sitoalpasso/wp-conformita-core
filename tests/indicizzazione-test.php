@@ -1,7 +1,7 @@
 <?php
 /**
  * Il meccanismo di indicizzazione: righe C-80..C-85, C-225..C-230,
- * C-232..C-239, C-241..C-246.
+ * C-232..C-239, C-241..C-247.
  *
  * Le righe C-228 e C-240, il divieto sui file consegnati, stanno in
  * `consegna-test.php`, perche' li' ci sono gli strumenti per chiedere un file
@@ -1361,6 +1361,186 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 		list( $spento, $acceso ) = $this->mappa_personalizzata( $misto + array( 'post__in' => array( $allegato ) ) );
 		$this->assertSame( array( get_permalink( $allegato ) ), $spento, 'Precondizione: l\'inclusione del solo allegato lo porta nella mappa.' );
 		$this->assertSame( array(), $acceso, 'Inclusione del solo allegato vietato: la lettura e\' vuota.' );
+	}
+
+	/**
+	 * C-247: la mappa letta scegliendo un contenuto per percorso, con i filtri
+	 * spenti. WordPress risolve il percorso anche fra gli allegati e cambia il
+	 * tipo interrogato: decide il contenuto trovato, non i tipi chiesti.
+	 * L'allegato consentito resta anche se la lettura chiede un tipo vietato,
+	 * quello vietato sparisce anche se la lettura chiede tipi consentiti.
+	 */
+	public function test_c247_contenuto_scelto_per_percorso() {
+		$pagina     = self::factory()->post->create(
+			array(
+				'post_type'   => 'page',
+				'post_status' => 'publish',
+				'post_name'   => 'pagina-ordinaria',
+			)
+		);
+		$consentiti = array(
+			'allegato di una pagina' => array(
+				self::factory()->attachment->create_object(
+					'consentito.pdf',
+					$pagina,
+					array(
+						'post_mime_type' => 'application/pdf',
+						'post_name'      => 'allegato-consentito',
+					)
+				),
+				'pagina-ordinaria/allegato-consentito',
+			),
+			'allegato senza padre'   => array(
+				self::factory()->attachment->create_object(
+					'sciolto.pdf',
+					0,
+					array(
+						'post_mime_type' => 'application/pdf',
+						'post_name'      => 'allegato-sciolto',
+					)
+				),
+				'allegato-sciolto',
+			),
+		);
+
+		foreach ( $consentiti as $nome => $dati ) {
+			list( $allegato, $percorso ) = $dati;
+
+			$this->assertFalse( Conformita_Core_Indicizzazione::contenuto_vietato( $allegato ), $nome . ': precondizione, allegato consentito.' );
+
+			list( $spento, $acceso ) = $this->mappa_personalizzata(
+				array(
+					'post_type'        => self::TIPO_CHIUSO,
+					'pagename'         => $percorso,
+					'post_status'      => 'inherit',
+					'suppress_filters' => true,
+				)
+			);
+
+			$this->assertSame( array( get_permalink( $allegato ) ), $spento, $nome . ': precondizione, senza il meccanismo il percorso porta all\'allegato.' );
+			$this->assertSame( $spento, $acceso, $nome . ': con il meccanismo l\'allegato consentito resta.' );
+		}
+
+		$gerarchico = 'prova_chiusa_albero';
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				$gerarchico,
+				array(
+					'sezione'      => self::SEZIONE_CHIUSA,
+					'show_in_rest' => false,
+					'argomenti'    => array(
+						'public'       => true,
+						'hierarchical' => true,
+						'rewrite'      => array( 'slug' => $gerarchico ),
+					),
+				)
+			),
+			'Il tipo gerarchico di prova deve registrarsi.'
+		);
+
+		$atto     = self::factory()->post->create(
+			array(
+				'post_type'   => $gerarchico,
+				'post_status' => 'publish',
+				'post_name'   => 'atto-chiuso',
+			)
+		);
+		$allegato = self::factory()->attachment->create_object(
+			'vietato.pdf',
+			$atto,
+			array(
+				'post_mime_type' => 'application/pdf',
+				'post_name'      => 'allegato-vietato',
+			)
+		);
+
+		$this->assertTrue( Conformita_Core_Indicizzazione::contenuto_vietato( $allegato ), 'Precondizione: allegato vietato.' );
+
+		/*
+		 * Il nome prevale sul percorso: un percorso che porta a un allegato
+		 * consentito non apre la lettura di un atto chiesto per nome.
+		 */
+		$chiuso = $this->contenuto( self::TIPO_CHIUSO );
+
+		list( $spento, $acceso ) = $this->mappa_personalizzata(
+			array(
+				'post_type'        => self::TIPO_CHIUSO,
+				'name'             => get_post_field( 'post_name', $chiuso ),
+				'pagename'         => 'allegato-sciolto',
+				'suppress_filters' => true,
+			)
+		);
+
+		$this->assertSame( array( get_permalink( $chiuso ) ), $spento, 'Nome e percorso: precondizione, senza il meccanismo entra l\'atto.' );
+		$this->assertSame( array(), $acceso, 'Nome e percorso: con il meccanismo la lettura e\' vuota.' );
+
+		$casi = array(
+			'percorso'           => array( 'pagename' => 'atto-chiuso/allegato-vietato' ),
+			'variabile del tipo' => array( $gerarchico => 'atto-chiuso/allegato-vietato' ),
+		);
+
+		foreach ( $casi as $nome => $selettore ) {
+			list( $spento, $acceso ) = $this->mappa_personalizzata(
+				$selettore + array(
+					'post_type'        => array( 'page', $gerarchico ),
+					'post_status'      => 'inherit',
+					'suppress_filters' => true,
+				)
+			);
+
+			$this->assertSame( array( get_permalink( $allegato ) ), $spento, $nome . ': precondizione, senza il meccanismo il percorso porta all\'allegato vietato.' );
+			$this->assertSame( array(), $acceso, $nome . ': con il meccanismo la lettura e\' vuota.' );
+		}
+
+		/*
+		 * Il percorso che WordPress ha gia' risolto vale per primo: una pagina
+		 * consentita con lo stesso nome di un atto resta, anche se l'atto
+		 * viene prima nell'elenco dei tipi. E la variabile di un tipo vietato
+		 * che porta a un allegato consentito non si perde togliendo il tipo.
+		 */
+		$sciolto = $consentiti['allegato senza padre'][0];
+		$omonima = self::factory()->post->create(
+			array(
+				'post_type'   => 'page',
+				'post_status' => 'publish',
+				'post_name'   => 'stesso-nome',
+			)
+		);
+		self::factory()->post->create(
+			array(
+				'post_type'   => $gerarchico,
+				'post_status' => 'publish',
+				'post_name'   => 'stesso-nome',
+			)
+		);
+
+		$altri = array(
+			'stesso percorso su due tipi'          => array(
+				array(
+					'pagename'    => 'stesso-nome',
+					'post_type'   => array( $gerarchico, 'page' ),
+					'post_status' => 'publish',
+				),
+				$omonima,
+			),
+			'variabile del tipo verso un allegato' => array(
+				array(
+					$gerarchico   => 'allegato-sciolto',
+					'post_type'   => array( $gerarchico, 'page' ),
+					'post_status' => 'inherit',
+				),
+				$sciolto,
+			),
+		);
+
+		foreach ( $altri as $nome => $dati ) {
+			list( $argomenti, $atteso ) = $dati;
+
+			list( $spento, $acceso ) = $this->mappa_personalizzata( $argomenti + array( 'suppress_filters' => true ) );
+
+			$this->assertSame( array( get_permalink( $atteso ) ), $spento, $nome . ': precondizione, senza il meccanismo la lettura trova il contenuto consentito.' );
+			$this->assertSame( $spento, $acceso, $nome . ': con il meccanismo il contenuto consentito resta.' );
+		}
 	}
 
 	/**
