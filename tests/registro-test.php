@@ -932,6 +932,45 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 			$voci(),
 			'Allegato diventato contenuto.'
 		);
+
+		// Le stesse due conversioni con la funzione che cambia solo il tipo, con la copia in memoria.
+		$id = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'publish',
+				'post_parent' => $padre,
+			)
+		);
+		$this->assertSame( self::TIPO, get_post( $id )->post_type, 'Precondizione: il contenuto e\' stato letto.' );
+		$this->segna();
+		set_post_type( $id, 'attachment' );
+		$this->assertSame(
+			array(
+				array( 'cambio_tipo', $id, 'uscita' ),
+				array( 'allegato_aggiunto', $padre, $id ),
+			),
+			$voci(),
+			'Contenuto diventato allegato con la funzione diretta.'
+		);
+
+		$allegato = self::factory()->attachment->create_object(
+			array(
+				'file'           => 'diretto.pdf',
+				'post_parent'    => $padre,
+				'post_mime_type' => 'application/pdf',
+			)
+		);
+		$this->assertSame( 'attachment', get_post( $allegato )->post_type, 'Precondizione: l\'allegato e\' stato letto.' );
+		$this->segna();
+		set_post_type( $allegato, self::TIPO );
+		$this->assertSame(
+			array(
+				array( 'cambio_tipo', $allegato, 'ingresso' ),
+				array( 'allegato_eliminato', $padre, $allegato ),
+			),
+			$voci(),
+			'Allegato diventato contenuto con la funzione diretta.'
+		);
 	}
 
 	/**

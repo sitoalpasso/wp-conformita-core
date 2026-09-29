@@ -597,15 +597,6 @@ final class Conformita_Core_Registro_Automatico {
 				: self::campi_cambiati( $prima, $dopo, $richiesta );
 
 			self::cambio_tipo( $prima, $dopo, $cambiati );
-
-			if ( 'attachment' === $prima->post_type ) {
-				self::allegato( $dopo->ID, (int) $prima->post_parent, 'allegato_eliminato' );
-			}
-
-			if ( 'attachment' === $dopo->post_type ) {
-				self::allegato( $dopo->ID, (int) $dopo->post_parent, 'allegato_aggiunto' );
-			}
-
 			return;
 		}
 
@@ -679,6 +670,12 @@ final class Conformita_Core_Registro_Automatico {
 	 * cambio di stato: è il contenuto che lascia la sezione. Non si registra
 	 * per la bozza automatica mai nata.
 	 *
+	 * Se una delle due parti è un allegato, il contenuto entra in un padre o
+	 * ne esce: il padre ha la voce dell'allegato aggiunto o tolto. Si scrive
+	 * qui, e non in chi chiama, perché il cambio di tipo arriva da due strade,
+	 * il salvataggio e l'istruzione diretta, e le conseguenze devono essere
+	 * le stesse.
+	 *
 	 * @param WP_Post            $prima    Contenuto prima, con il tipo di prima.
 	 * @param WP_Post            $dopo     Contenuto dopo, con il tipo nuovo.
 	 * @param array<int, string> $cambiati Altri campi cambiati.
@@ -698,6 +695,14 @@ final class Conformita_Core_Registro_Automatico {
 
 		self::scrivi( $prima, 'cambio_tipo', array( 'verso' => 'uscita' ) + $dettagli, true );
 		self::scrivi( $dopo, 'cambio_tipo', array( 'verso' => 'ingresso' ) + $dettagli );
+
+		if ( 'attachment' === $prima->post_type ) {
+			self::allegato( $dopo->ID, (int) $prima->post_parent, 'allegato_eliminato' );
+		}
+
+		if ( 'attachment' === $dopo->post_type ) {
+			self::allegato( $dopo->ID, (int) $dopo->post_parent, 'allegato_aggiunto' );
+		}
 	}
 
 	/**
