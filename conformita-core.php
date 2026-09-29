@@ -44,6 +44,7 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-sezioni.
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-tipi.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-scadenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-filtro-scadenza.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-intestazioni.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-indicizzazione.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-deposito-fermato.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-allegati.php';

@@ -1,9 +1,11 @@
 <?php
 /**
- * Il meccanismo di indicizzazione: righe C-80..C-85 e C-225..C-230.
+ * Il meccanismo di indicizzazione: righe C-80..C-85, C-225..C-230,
+ * C-232..C-239.
  *
- * La riga C-228, il divieto sui file consegnati, sta in `consegna-test.php`,
- * perche' li' ci sono gli strumenti per chiedere un file al punto di consegna.
+ * Le righe C-228 e C-240, il divieto sui file consegnati, stanno in
+ * `consegna-test.php`, perche' li' ci sono gli strumenti per chiedere un file
+ * al punto di consegna.
  *
  * **Perche' ogni prova guarda due pagine.** Una pagina senza `noindex` ha lo
  * stesso aspetto di una pagina con `noindex`, e un meccanismo che mettesse il
@@ -15,9 +17,12 @@
  *
  * **Come si leggono i due segnali.** Il sorgente si legge stampando quello che
  * WordPress stampa nell'intestazione HTML della pagina. Le intestazioni della
- * risposta si leggono dal filtro con cui WordPress le prepara, dopo aver
- * eseguito la richiesta: emetterle davvero, dentro una prova, non si puo',
- * perche' la suite ha gia' scritto sull'uscita.
+ * risposta si leggono in due modi. Il primo e' il filtro con cui WordPress le
+ * prepara, dopo aver eseguito la richiesta. Il secondo, per la riga C-239, e'
+ * la risposta che esce: le righe che WordPress manda e quelle che mandano gli
+ * agganci di `send_headers`, raccolte con le regole di sostituzione di
+ * `header()`, perche' emetterle davvero, dentro una prova, non si puo': la
+ * suite ha gia' scritto sull'uscita.
  *
  * @package Conformita_Core
  */
@@ -76,6 +81,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	 */
 	public function tear_down() {
 		Conformita_Core_Indicizzazione::avvia();
+		Conformita_Core_Intestazioni::azzera_emettitore();
 		update_option( 'blog_public', $this->pubblico_originale );
 		$this->set_permalink_structure( '' );
 
@@ -170,6 +176,71 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	 */
 	private function intestazioni() {
 		return apply_filters( 'wp_headers', array(), $GLOBALS['wp'] );
+	}
+
+	/**
+	 * Le righe `X-Robots-Tag` che escono per la richiesta appena eseguita.
+	 *
+	 * Si rifa' quello che fa WordPress: manda una riga per ogni intestazione
+	 * preparata, in sostituzione, e poi esegue `send_headers`. Le righe che
+	 * core manda da se' passano dall'emettitore sostituito; quelle del
+	 * componente concorrente, se c'e', dalla stessa registrazione e con le
+	 * stesse regole, come farebbe `header()`.
+	 *
+	 * @param callable|null $concorrente Aggancio ordinario di `send_headers`,
+	 *                                   riceve la registrazione.
+	 * @return array<int, string>
+	 */
+	private function righe_emesse( $concorrente = null ) {
+		$risposta = new Conformita_Core_Risposta_Registrata();
+
+		Conformita_Core_Intestazioni::fissa_emettitore( array( $risposta, 'registra' ) );
+
+		foreach ( $this->intestazioni() as $nome => $valore ) {
+			$risposta->registra( $nome . ': ' . $valore, true );
+		}
+
+		$aggancio = null;
+
+		if ( null !== $concorrente ) {
+			$aggancio = function () use ( $concorrente, $risposta ) {
+				call_user_func( $concorrente, $risposta );
+			};
+			add_action( 'send_headers', $aggancio );
+		}
+
+		do_action_ref_array( 'send_headers', array( &$GLOBALS['wp'] ) );
+
+		if ( null !== $aggancio ) {
+			remove_action( 'send_headers', $aggancio );
+		}
+
+		Conformita_Core_Intestazioni::azzera_emettitore();
+
+		return $risposta->valori( 'X-Robots-Tag' );
+	}
+
+	/**
+	 * Fra le righe c'e' un divieto generale: una riga che non nomina nessun
+	 * motore e contiene `noindex` o `none`.
+	 *
+	 * Il riconoscimento qui e' scritto a parte e non chiede al meccanismo, che
+	 * e' cio' che si sta provando.
+	 *
+	 * @param array<int, string> $righe Valori delle righe `X-Robots-Tag`.
+	 * @return bool
+	 */
+	private function divieto_generale( array $righe ) {
+		foreach ( $righe as $riga ) {
+			$parti = array_map( 'trim', explode( ',', strtolower( $riga ) ) );
+			$nomi  = preg_grep( '/^(?!max-snippet|max-image-preview|max-video-preview|unavailable_after)[a-z0-9_.-]+\s*:/', $parti );
+
+			if ( empty( $nomi ) && ( in_array( 'noindex', $parti, true ) || in_array( 'none', $parti, true ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -539,7 +610,7 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 	public function test_c230_accensione_e_spegnimento() {
 		$agganci = Conformita_Core_Indicizzazione::agganci();
 
-		$this->assertCount( 5, $agganci );
+		$this->assertCount( 6, $agganci );
 
 		foreach ( $agganci as $aggancio ) {
 			$this->assertSame(
@@ -647,6 +718,9 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 			'nome minuscolo'       => array( array( 'x-robots-tag' => 'nofollow' ), 'nofollow, noindex', array() ),
 			'motore con noindex'   => array( array( 'X-Robots-Tag' => 'googlebot: noindex' ), 'noindex', array( 'googlebot: noindex' ) ),
 			'motore con nofollow'  => array( array( 'X-Robots-Tag' => 'googlebot: nofollow' ), 'noindex', array( 'googlebot: nofollow' ) ),
+			'misto'                => array( array( 'X-Robots-Tag' => 'nofollow, googlebot: nofollow' ), 'noindex', array( 'nofollow, googlebot: nofollow' ) ),
+			'misto con noindex'    => array( array( 'X-Robots-Tag' => 'nofollow, googlebot: nofollow, noindex' ), 'noindex', array( 'nofollow, googlebot: nofollow, noindex' ) ),
+			'misto con valore'     => array( array( 'X-Robots-Tag' => 'max-snippet: 20, bingbot: noarchive' ), 'noindex', array( 'max-snippet: 20, bingbot: noarchive' ) ),
 		);
 
 		foreach ( $casi as $nome => $caso ) {
@@ -800,15 +874,94 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 
 	/**
 	 * C-238: la mappa di un altro tipo, allargata da un componente ai tipi
-	 * vietati, non elenca i contenuti vietati.
+	 * vietati, non elenca i contenuti vietati, nemmeno se il componente chiede
+	 * la lettura con i filtri spenti.
 	 *
 	 * La richiesta simulata e' quella di WordPress quando costruisce la mappa:
 	 * la variabile `sitemap` e' valorizzata, e la lettura dei contenuti passa da
-	 * un'interrogazione secondaria.
+	 * un'interrogazione secondaria. Ogni caso verifica prima che, a meccanismo
+	 * spento, il vietato entri davvero nella mappa.
+	 *
+	 * I casi sono le strade dell'allargamento: i tipi aggiunti a mano, con i
+	 * filtri accesi e spenti; `any`, che WordPress allarga a tutti i tipi
+	 * ricercabili; gli allegati, che entrano solo se il componente allarga
+	 * anche lo stato; il tipo della mappa sostituito con quello vietato, che
+	 * lascerebbe la lettura senza nessun tipo ammesso; e un
+	 * allargamento fatto dopo la restrizione, che resta al filtro sui contenuti
+	 * restituiti.
 	 */
 	public function test_c238_mappa_allargata_da_un_componente() {
 		$vietato  = $this->contenuto( self::TIPO_CHIUSO );
 		$articolo = $this->contenuto( 'post' );
+
+		$allegato_vietato  = self::factory()->attachment->create_object( 'vietato.pdf', $vietato, array( 'post_mime_type' => 'application/pdf' ) );
+		$allegato_articolo = self::factory()->attachment->create_object( 'articolo.pdf', $articolo, array( 'post_mime_type' => 'application/pdf' ) );
+
+		$spenti = array( 'suppress_filters' => true );
+
+		$casi = array(
+			'tipi aggiunti'           => array( 'post', array( 'post_type' => array( 'post', self::TIPO_CHIUSO ) ), false ),
+			'tipi aggiunti, spenti'   => array( 'post', array( 'post_type' => array( 'post', self::TIPO_CHIUSO ) ) + $spenti, false ),
+			'tutti i tipi, spenti'    => array( 'post', array( 'post_type' => 'any' ) + $spenti, false ),
+			'tipo sostituito, spenti' => array( 'post', array( 'post_type' => self::TIPO_CHIUSO ) + $spenti, false ),
+			'allegati, spenti'        => array(
+				'post',
+				array(
+					'post_type'   => array( 'post', 'attachment' ),
+					'post_status' => array( 'publish', 'inherit' ),
+				) + $spenti,
+				false,
+			),
+			'dopo la restrizione'     => array( 'post', array( 'post_type' => array( 'post', self::TIPO_CHIUSO ) ), true ),
+		);
+
+		set_query_var( 'sitemap', 'posts' );
+
+		foreach ( $casi as $nome => $caso ) {
+			list( $tipo, $argomenti, $dopo ) = $caso;
+
+			$allarga_argomenti = function ( $originali ) use ( $argomenti ) {
+				return array_merge( $originali, $argomenti );
+			};
+			$allarga_dopo      = function ( $interrogazione ) use ( $argomenti ) {
+				foreach ( $argomenti as $chiave => $valore ) {
+					$interrogazione->set( $chiave, $valore );
+				}
+			};
+
+			if ( $dopo ) {
+				Conformita_Core_Indicizzazione::azzera_avvio();
+				add_action( 'pre_get_posts', $allarga_dopo, PHP_INT_MAX );
+				$spento = $this->indirizzi_in_mappa( $tipo );
+				Conformita_Core_Indicizzazione::avvia();
+				remove_action( 'pre_get_posts', $allarga_dopo, PHP_INT_MAX );
+				add_action( 'pre_get_posts', $allarga_dopo, PHP_INT_MAX );
+				$acceso = $this->indirizzi_in_mappa( $tipo );
+				remove_action( 'pre_get_posts', $allarga_dopo, PHP_INT_MAX );
+			} else {
+				add_filter( 'wp_sitemaps_posts_query_args', $allarga_argomenti );
+				Conformita_Core_Indicizzazione::azzera_avvio();
+				$spento = $this->indirizzi_in_mappa( $tipo );
+				Conformita_Core_Indicizzazione::avvia();
+				$acceso = $this->indirizzi_in_mappa( $tipo );
+				remove_filter( 'wp_sitemaps_posts_query_args', $allarga_argomenti );
+			}
+
+			if ( 'allegati, spenti' === $nome ) {
+				$this->assertContains( get_permalink( $allegato_vietato ), $spento, $nome . ': precondizione, senza il meccanismo l\'allegato del vietato entra.' );
+				$this->assertNotContains( get_permalink( $allegato_vietato ), $acceso, $nome . ': l\'allegato del vietato non c\'e\'.' );
+				$this->assertContains( get_permalink( $allegato_articolo ), $acceso, $nome . ': l\'allegato dell\'articolo resta.' );
+			} else {
+				$this->assertContains( get_permalink( $vietato ), $spento, $nome . ': precondizione, senza il meccanismo il vietato entra.' );
+				$this->assertNotContains( get_permalink( $vietato ), $acceso, $nome . ': il vietato non c\'e\'.' );
+			}
+
+			if ( 'tipo sostituito, spenti' === $nome ) {
+				$this->assertSame( array(), $acceso, $nome . ': senza tipi ammessi la lettura non restituisce niente.' );
+			} else {
+				$this->assertContains( get_permalink( $articolo ), $acceso, $nome . ': l\'articolo resta.' );
+			}
+		}
 
 		$allarga = function ( $interrogazione ) {
 			if ( ! $interrogazione->is_main_query() && 'post' === $interrogazione->get( 'post_type' ) ) {
@@ -816,13 +969,6 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 			}
 		};
 		add_action( 'pre_get_posts', $allarga );
-
-		set_query_var( 'sitemap', 'posts' );
-
-		Conformita_Core_Indicizzazione::azzera_avvio();
-		$spento = $this->indirizzi_in_mappa( 'post' );
-		Conformita_Core_Indicizzazione::avvia();
-		$acceso = $this->indirizzi_in_mappa( 'post' );
 
 		set_query_var( 'sitemap', '' );
 		$fuori = wp_list_pluck(
@@ -838,9 +984,53 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 
 		remove_action( 'pre_get_posts', $allarga );
 
-		$this->assertContains( get_permalink( $vietato ), $spento, 'Precondizione: senza il meccanismo il componente porta il vietato nella mappa degli articoli.' );
-		$this->assertNotContains( get_permalink( $vietato ), $acceso, 'Con il meccanismo il vietato non c\'e\'.' );
-		$this->assertContains( get_permalink( $articolo ), $acceso, 'L\'articolo resta.' );
 		$this->assertContains( $vietato, $fuori, 'Fuori dalla mappa le interrogazioni altrui non si toccano.' );
+	}
+
+	/**
+	 * C-239: la risposta che esce da una pagina vietata porta un divieto
+	 * generale anche se un altro componente, su `send_headers`, sostituisce
+	 * l'intestazione, e le righe per un motore escono intere accanto a lui.
+	 * Da una pagina consentita non esce niente di core.
+	 */
+	public function test_c239_riga_propria_nella_risposta() {
+		$vietato    = $this->contenuto( self::TIPO_CHIUSO );
+		$consentito = $this->contenuto( self::TIPO_APERTO );
+
+		$sostituisce = function ( $valore ) {
+			return function ( Conformita_Core_Risposta_Registrata $risposta ) use ( $valore ) {
+				$risposta->registra( 'X-Robots-Tag: ' . $valore, true );
+			};
+		};
+
+		$this->go_to( get_permalink( $vietato ) );
+
+		$righe = $this->righe_emesse();
+		$this->assertTrue( $this->divieto_generale( $righe ), 'Senza concorrenti: ' . implode( ' | ', $righe ) );
+
+		foreach ( array( 'googlebot: nofollow', 'nofollow, googlebot: nofollow', 'index, follow' ) as $valore ) {
+			$righe = $this->righe_emesse( $sostituisce( $valore ) );
+
+			$this->assertContains( $valore, $righe, $valore . ': la riga del concorrente resta com\'e\'.' );
+			$this->assertTrue( $this->divieto_generale( $righe ), $valore . ': ' . implode( ' | ', $righe ) );
+		}
+
+		$misto = function ( $intestazioni ) {
+			$intestazioni['X-Robots-Tag'] = 'nofollow, googlebot: nofollow';
+
+			return $intestazioni;
+		};
+		add_filter( 'wp_headers', $misto );
+		$righe = $this->righe_emesse( $sostituisce( 'bingbot: noarchive' ) );
+		remove_filter( 'wp_headers', $misto );
+
+		$this->assertContains( 'nofollow, googlebot: nofollow', $righe, 'La riga mista preparata esce intera.' );
+		$this->assertContains( 'bingbot: noarchive', $righe, 'La riga del concorrente resta.' );
+		$this->assertTrue( $this->divieto_generale( $righe ), implode( ' | ', $righe ) );
+
+		$this->go_to( get_permalink( $consentito ) );
+
+		$this->assertSame( array(), $this->righe_emesse(), 'Consentito: nessuna riga.' );
+		$this->assertSame( array( 'googlebot: nofollow' ), $this->righe_emesse( $sostituisce( 'googlebot: nofollow' ) ), 'Consentito: resta solo la riga altrui.' );
 	}
 }

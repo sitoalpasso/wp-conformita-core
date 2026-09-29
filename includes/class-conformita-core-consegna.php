@@ -201,10 +201,10 @@ final class Conformita_Core_Consegna {
 	/**
 	 * Sostituisce l'emissione della risposta.
 	 *
-	 * @internal Solo per le prove. In esercizio l'emissione manda le
+	 * @internal Solo per le prove. In esercizio l'emissione, dopo le
 	 *           intestazioni, riversa i byte ed esce: uscire dentro una prova
-	 *           ucciderebbe il processo. Tutto quello che viene prima
-	 *           dell'emissione gira davvero anche nelle prove.
+	 *           ucciderebbe il processo. Tutto quello che viene prima, righe
+	 *           di intestazione comprese, gira davvero anche nelle prove.
 	 *
 	 * @param callable $emettitore Funzione che riceve la risposta.
 	 */
@@ -720,16 +720,21 @@ final class Conformita_Core_Consegna {
 	 * @param array<string, mixed> $risposta Risposta da emettere.
 	 */
 	private static function emetti( array $risposta ) {
+		status_header( $risposta['stato'] );
+
+		/*
+		 * Le intestazioni escono anche quando le prove sostituiscono il resto
+		 * dell'emissione: le righe che partono davvero, compreso il divieto di
+		 * indicizzazione, sono cio' che la riga C-240 verifica.
+		 */
+		foreach ( $risposta['intestazioni'] as $nome => $valore ) {
+			Conformita_Core_Intestazioni::manda( $nome . ': ' . $valore );
+		}
+
 		if ( null !== self::$emettitore ) {
 			call_user_func( self::$emettitore, $risposta );
 
 			return;
-		}
-
-		status_header( $risposta['stato'] );
-
-		foreach ( $risposta['intestazioni'] as $nome => $valore ) {
-			header( $nome . ': ' . $valore );
 		}
 
 		while ( ob_get_level() > 0 ) {

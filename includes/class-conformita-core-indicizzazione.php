@@ -100,12 +100,17 @@ final class Conformita_Core_Indicizzazione {
 			),
 			array(
 				'aggancio'  => 'send_headers',
-				'metodo'    => 'emetti_specifiche',
+				'metodo'    => 'emetti_divieto',
 				'argomenti' => 0,
 			),
 			array(
 				'aggancio'  => 'wp_sitemaps_post_types',
 				'metodo'    => 'filtra_tipi_mappa',
+				'argomenti' => 1,
+			),
+			array(
+				'aggancio'  => 'pre_get_posts',
+				'metodo'    => 'restringi_mappa',
 				'argomenti' => 1,
 			),
 			array(
@@ -316,21 +321,36 @@ final class Conformita_Core_Indicizzazione {
 	}
 
 	/**
-	 * Emette le direttive per un motore specifico, una riga ciascuna.
+	 * Emette il divieto su righe proprie, dopo che WordPress ha mandato le sue.
 	 *
-	 * WordPress manda le intestazioni una per nome, quindi una seconda riga
-	 * `X-Robots-Tag` si aggiunge qui, dopo di lui, senza sostituire la prima.
+	 * Sulle pagine vietate escono qui, aggiunte e mai in sostituzione, le
+	 * direttive per un motore specifico messe da parte e, sempre, una riga
+	 * generale `X-Robots-Tag: noindex` autonoma. La riga autonoma serve perche'
+	 * la composizione in `wp_headers` non basta: un altro componente che su
+	 * `send_headers` chiama `header()` con lo stesso nome sostituisce la riga
+	 * che WordPress ha appena mandato, divieto compreso. Questo aggancio passa
+	 * dopo di lui, alla priorita' piu' alta, e aggiunge senza togliere. Riga
+	 * C-239.
+	 *
+	 * La richiesta si valuta di nuovo qui e non si ricorda da `wp_headers`: e'
+	 * la stessa interrogazione, e il divieto non dipende dall'essere passati
+	 * da un altro aggancio.
 	 *
 	 * @internal Aggancio di `send_headers`.
 	 */
-	public static function emetti_specifiche() {
-		if ( ! headers_sent() ) {
-			foreach ( self::$specifiche as $valore ) {
-				header( 'X-Robots-Tag: ' . $valore, false );
-			}
+	public static function emetti_divieto() {
+		$specifiche       = self::$specifiche;
+		self::$specifiche = array();
+
+		if ( ! self::richiesta_vietata() ) {
+			return;
 		}
 
-		self::$specifiche = array();
+		foreach ( $specifiche as $valore ) {
+			Conformita_Core_Intestazioni::manda( 'X-Robots-Tag: ' . $valore, false );
+		}
+
+		Conformita_Core_Intestazioni::manda( 'X-Robots-Tag: noindex', false );
 	}
 
 	/**
@@ -365,10 +385,13 @@ final class Conformita_Core_Indicizzazione {
 	 * Il nome dell'intestazione si riconosce senza badare a maiuscole e
 	 * minuscole, e ne resta uno solo. Il valore generale gia' presente si
 	 * conserva, e `noindex` si aggiunge se non c'e' gia' come direttiva a se'
-	 * (anche `none` lo contiene). Un valore rivolto a un motore specifico, come
-	 * `googlebot: nofollow`, non conta come divieto generale e non riceve il
-	 * divieto in coda, dove varrebbe per quel motore soltanto: si restituisce a
-	 * parte. Riga C-233.
+	 * (anche `none` lo contiene). Un valore che nomina un motore in qualunque
+	 * punto, come `googlebot: nofollow` ma anche `nofollow, googlebot: nofollow`,
+	 * non si tocca: dopo il nome del motore le direttive valgono per quel
+	 * motore soltanto, quindi un `noindex` aggiunto in coda non varrebbe per
+	 * gli altri, e un `noindex` gia' presente in coda non e' un divieto
+	 * generale. Il valore si restituisce a parte, intero, e il divieto
+	 * generale lo porta la riga propria. Righe C-233 e C-239.
 	 *
 	 * @param array<string, string> $intestazioni Intestazioni.
 	 * @return array{intestazioni: array<string, string>, specifiche: array<int, string>}
@@ -412,22 +435,28 @@ final class Conformita_Core_Indicizzazione {
 	}
 
 	/**
-	 * Il valore comincia con il nome di un motore seguito dai due punti.
+	 * Il valore nomina un motore in qualunque punto: una delle sue parti,
+	 * separate dalle virgole, comincia con un nome seguito dai due punti.
 	 *
 	 * Le direttive generali che hanno un valore dopo i due punti non sono nomi
-	 * di motori, e restano generali.
+	 * di motori, e restano generali. Nel dubbio il valore conta come rivolto a
+	 * un motore: costa soltanto una riga in piu', perche' il divieto generale
+	 * esce comunque su una riga propria.
 	 *
 	 * @param string $valore Valore di `X-Robots-Tag`.
 	 * @return bool
 	 */
 	private static function rivolto_a_un_motore( $valore ) {
-		if ( ! preg_match( '/^\s*([A-Za-z0-9_.-]+)\s*:/', $valore, $parti ) ) {
-			return false;
-		}
-
 		$direttive_con_valore = array( 'max-snippet', 'max-image-preview', 'max-video-preview', 'unavailable_after' );
 
-		return ! in_array( strtolower( $parti[1] ), $direttive_con_valore, true );
+		foreach ( explode( ',', $valore ) as $parte ) {
+			if ( preg_match( '/^\s*([A-Za-z0-9_.-]+)\s*:/', $parte, $parti )
+				&& ! in_array( strtolower( $parti[1] ), $direttive_con_valore, true ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -474,6 +503,98 @@ final class Conformita_Core_Indicizzazione {
 	}
 
 	/**
+	 * Le interrogazioni della mappa non leggono i tipi vietati.
+	 *
+	 * Prima difesa sulla mappa allargata, riga C-238. Il filtro sui contenuti
+	 * restituiti non basta da solo: un componente che chiede la lettura con
+	 * `suppress_filters` spegne `the_posts`, mentre `pre_get_posts` passa
+	 * sempre. Si tolgono i tipi vietati dall'elenco dei tipi letti, anche
+	 * quando l'elenco e' `any` o manca con una tassonomia, che WordPress
+	 * allarga a tutti i tipi ricercabili. Se non resta nessun tipo,
+	 * l'interrogazione non restituisce niente: un elenco di tipi vuoto,
+	 * per WordPress, vorrebbe dire gli articoli. Se fra i tipi letti ci sono
+	 * gli allegati, si escludono quelli appesi a un contenuto vietato. Stessi
+	 * confini del filtro sui contenuti: solo durante la mappa e solo sulle
+	 * interrogazioni secondarie.
+	 *
+	 * **Limite dichiarato.** Un componente che interviene su `pre_get_posts`
+	 * dopo questo aggancio, o che scrive l'elenco degli indirizzi da se' con
+	 * `wp_sitemaps_posts_pre_url_list`, resta fuori dalla sua portata; il
+	 * primo caso lo ripara ancora `the_posts`, se non e' spento.
+	 *
+	 * @internal Aggancio di `pre_get_posts`.
+	 *
+	 * @param mixed $interrogazione Interrogazione in preparazione.
+	 */
+	public static function restringi_mappa( $interrogazione ) {
+		if ( ! $interrogazione instanceof WP_Query || $interrogazione->is_main_query() ) {
+			return;
+		}
+
+		if ( '' === (string) get_query_var( 'sitemap' ) ) {
+			return;
+		}
+
+		$vietati = array_values( array_filter( Conformita_Core_Tipi::identificativi(), array( __CLASS__, 'tipo_vietato' ) ) );
+
+		if ( empty( $vietati ) ) {
+			return;
+		}
+
+		$tipi = $interrogazione->get( 'post_type' );
+
+		if ( 'any' === $tipi || ( empty( $tipi ) && ! empty( $interrogazione->get( 'tax_query' ) ) ) ) {
+			$tipi = array_values( get_post_types( array( 'exclude_from_search' => false ) ) );
+		}
+
+		if ( empty( $tipi ) ) {
+			return;
+		}
+
+		$tipi    = (array) $tipi;
+		$rimasti = array_values( array_diff( $tipi, $vietati ) );
+
+		if ( empty( $rimasti ) ) {
+			$interrogazione->set( 'post__in', array( 0 ) );
+
+			return;
+		}
+
+		if ( $rimasti !== $tipi ) {
+			$interrogazione->set( 'post_type', $rimasti );
+		}
+
+		if ( in_array( 'attachment', $rimasti, true ) ) {
+			$padri = self::contenuti_dei_tipi( $vietati );
+
+			if ( ! empty( $padri ) ) {
+				$interrogazione->set( 'post_parent__not_in', array_merge( (array) $interrogazione->get( 'post_parent__not_in' ), $padri ) );
+			}
+		}
+	}
+
+	/**
+	 * Gli identificativi dei contenuti dei tipi indicati, in ogni stato.
+	 *
+	 * Si legge la tabella direttamente e non con `get_posts()`: questa lettura
+	 * avviene dentro `pre_get_posts`, e una nuova interrogazione ripasserebbe
+	 * da qui.
+	 *
+	 * @param array<int, string> $tipi Tipi di contenuto.
+	 * @return array<int, int>
+	 */
+	private static function contenuti_dei_tipi( array $tipi ) {
+		global $wpdb;
+
+		$segnaposto = implode( ', ', array_fill( 0, count( $tipi ), '%s' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- lettura dentro pre_get_posts, vedi sopra; i segnaposto sono costruiti qui e i valori passano da prepare().
+		$identificativi = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_type IN ( {$segnaposto} )", $tipi ) );
+
+		return array_map( 'intval', $identificativi );
+	}
+
+	/**
 	 * Nessun contenuto vietato nelle pagine della mappa degli altri tipi.
 	 *
 	 * Togliere il tipo dalla mappa non basta se un tema o un componente
@@ -483,7 +604,8 @@ final class Conformita_Core_Indicizzazione {
 	 * sul percorso della mappa. Si agisce soltanto mentre WordPress costruisce
 	 * la mappa, riconoscibile dalla variabile `sitemap` della richiesta, e
 	 * soltanto sulle interrogazioni secondarie, che sono quelle con cui la
-	 * mappa legge i contenuti. Riga C-238.
+	 * mappa legge i contenuti. Riga C-238. E' la seconda difesa: la prima e'
+	 * `restringi_mappa()`, che vale anche con `suppress_filters`.
 	 *
 	 * @internal Aggancio di `the_posts`.
 	 *
