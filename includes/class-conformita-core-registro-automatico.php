@@ -398,16 +398,21 @@ final class Conformita_Core_Registro_Automatico {
 	 * La bozza automatica che WordPress crea all'apertura dell'editor non è
 	 * ancora un contenuto, e la sua nascita non si registra. Un contenuto che
 	 * esiste già e viene rimesso in bozza automatica, invece, esce dal suo
-	 * stato come verso qualunque altro.
+	 * stato come verso qualunque altro, e quando ne riesce non nasce una
+	 * seconda volta: vedi `mai_nato()`.
 	 *
 	 * @param string  $nuovo      Stato nuovo.
 	 * @param string  $precedente Stato precedente.
 	 * @param WP_Post $post       Contenuto.
 	 */
 	private static function stato( $nuovo, $precedente, $post ) {
-		$nascita = in_array( $precedente, array( 'new', 'auto-draft' ), true );
+		if ( ! $post instanceof WP_Post || $nuovo === $precedente ) {
+			return;
+		}
 
-		if ( ! $post instanceof WP_Post || $nuovo === $precedente || ( 'auto-draft' === $nuovo && $nascita ) ) {
+		$nascita = self::mai_nato( (int) $post->ID, $precedente );
+
+		if ( 'auto-draft' === $nuovo && $nascita ) {
 			return;
 		}
 
@@ -427,6 +432,41 @@ final class Conformita_Core_Registro_Automatico {
 		} elseif ( ! $nascita ) {
 			self::scrivi( $post, 'cambio_stato', $dettagli );
 		}
+	}
+
+	/**
+	 * Il contenuto, in quello stato, non è ancora nato.
+	 *
+	 * "Nuovo" è il contenuto che non esiste ancora. La bozza automatica è
+	 * quella che WordPress crea all'apertura dell'editor, ma può essere anche
+	 * un contenuto che esisteva e che un componente vi ha rimesso: quello ha
+	 * una storia. Il criterio che la distingue è il registro stesso, che
+	 * dura da una richiesta all'altra: una bozza automatica senza nessuna
+	 * voce non è mai nata. La lettura avviene solo quando lo stato è la
+	 * bozza automatica. Se il registro non si legge, la bozza si tratta come
+	 * mai nata, come prima di questa distinzione.
+	 *
+	 * @param int    $post_id Identificativo del contenuto.
+	 * @param string $stato   Stato in cui si trova, o da cui esce.
+	 * @return bool
+	 */
+	private static function mai_nato( $post_id, $stato ) {
+		if ( 'new' === $stato ) {
+			return true;
+		}
+
+		if ( 'auto-draft' !== $stato ) {
+			return false;
+		}
+
+		$voci = Conformita_Core_Registro::voci(
+			array(
+				'contenuto'  => (int) $post_id,
+				'per_pagina' => 1,
+			)
+		);
+
+		return ! is_array( $voci ) || array() === $voci;
 	}
 
 	/**
@@ -662,7 +702,7 @@ final class Conformita_Core_Registro_Automatico {
 
 		self::leggi_spostamenti( $post );
 
-		if ( ! Conformita_Core_Tipi::registrato( $post->post_type ) || in_array( $post->post_status, array( 'new', 'auto-draft' ), true ) ) {
+		if ( ! Conformita_Core_Tipi::registrato( $post->post_type ) || self::mai_nato( (int) $post->ID, (string) $post->post_status ) ) {
 			return;
 		}
 
@@ -799,7 +839,7 @@ final class Conformita_Core_Registro_Automatico {
 	 * che la esclude dalle modifiche, i salvataggi automatici, non vale per
 	 * un'eliminazione, e una bozza può avere una storia: un contenuto
 	 * pubblicato, riportato in bozza e poi eliminato sparirebbe senza traccia
-	 * proprio nell'ultimo passo. Resta fuori solo la bozza automatica, che non
+	 * proprio nell'ultimo passo. Resta fuori solo la bozza automatica che non
 	 * è mai diventata un contenuto.
 	 *
 	 * La voce si scrive dopo che la banca dati ha cancellato la riga, non

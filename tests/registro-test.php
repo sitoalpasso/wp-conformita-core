@@ -194,6 +194,53 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Come se cominciasse un'altra richiesta: le voci automatiche ripartono
+	 * senza niente in memoria, e i contenuti si rileggono dalla banca dati.
+	 */
+	private function nuova_richiesta() {
+		$classe = new ReflectionClass( 'Conformita_Core_Registro_Automatico' );
+
+		foreach ( $classe->getProperties( ReflectionProperty::IS_STATIC ) as $proprieta ) {
+			$proprieta->setAccessible( true );
+
+			// Gli ascoltatori restano agganciati: e' la memoria della richiesta che riparte vuota.
+			if ( 'ascoltatori' !== $proprieta->getName() && is_array( $proprieta->getValue() ) ) {
+				$proprieta->setValue( null, array() );
+			}
+		}
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * C-195, seconda parte: la pubblicazione senza salvataggio.
+	 *
+	 * La funzione di WordPress che pubblica un contenuto programmato cambia
+	 * lo stato con un'istruzione diretta, e lo annuncia solo come cambio di
+	 * stato. La voce e' la stessa.
+	 */
+	public function test_c195_pubblicazione_senza_salvataggio() {
+		wp_set_current_user( $this->utente() );
+
+		$id = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => 'future',
+				'post_title'  => 'Programmato',
+				'post_date'   => '2030-01-01 10:00:00',
+			)
+		);
+		$this->assertSame( 'future', get_post_status( $id ), 'Precondizione: il contenuto e\' programmato.' );
+
+		$this->segna();
+		wp_publish_post( $id );
+
+		$this->assertSame( 'publish', get_post_status( $id ) );
+		$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove() );
+		$this->assertSame( 'future', $this->nuove()[0]['dettagli']['stato_precedente'] );
+	}
+
+	/**
 	 * C-195: pubblicare un contenuto gestito scrive una voce, e una sola, con
 	 * chi, che cosa e quando.
 	 */
@@ -696,6 +743,62 @@ class Conformita_Core_Registro_Test extends WP_UnitTestCase {
 		}
 
 		$this->assertSame( 'auto-draft', get_post_status( $nascita ) );
+	}
+
+	/**
+	 * C-198 e C-200: un contenuto che e' tornato in bozza automatica ha una
+	 * storia, e la tiene. Ripubblicato e' una pubblicazione e non una nascita;
+	 * eliminato ha la sua voce di eliminazione. Vale anche quando il passo
+	 * dopo arriva in un'altra richiesta, senza niente in memoria.
+	 */
+	public function test_c198_storia_dopo_bozza_automatica() {
+		wp_set_current_user( $this->utente() );
+
+		foreach ( array( 'stessa richiesta', 'altra richiesta' ) as $caso ) {
+			$ripreso   = $this->contenuto( 'publish' );
+			$eliminato = $this->contenuto( 'publish' );
+
+			foreach ( array( $ripreso, $eliminato ) as $id ) {
+				wp_update_post(
+					array(
+						'ID'          => $id,
+						'post_status' => 'auto-draft',
+					)
+				);
+			}
+
+			if ( 'altra richiesta' === $caso ) {
+				$this->nuova_richiesta();
+			}
+
+			$this->segna();
+			wp_update_post(
+				array(
+					'ID'          => $ripreso,
+					'post_status' => 'publish',
+				)
+			);
+			$this->assertSame( array( 'pubblicazione' ), $this->azioni_nuove(), "Caso {$caso}: ripubblicato, nessuna seconda nascita." );
+
+			$this->segna();
+			$this->assertInstanceOf( WP_Post::class, wp_delete_post( $eliminato, true ) );
+			$this->assertSame( array( 'eliminazione' ), $this->azioni_nuove(), "Caso {$caso}: eliminato, la sua voce." );
+			$this->assertSame( 'auto-draft', $this->nuove()[0]['dettagli']['stato'] );
+		}
+
+		// Controllo negativo: la bozza automatica mai nata resta fuori, salvata o eliminata.
+		$mai_nata = $this->contenuto( 'auto-draft' );
+		$salvata  = $this->contenuto( 'auto-draft' );
+
+		$this->segna();
+		wp_update_post(
+			array(
+				'ID'          => $salvata,
+				'post_status' => 'draft',
+			)
+		);
+		wp_delete_post( $mai_nata, true );
+		$this->assertSame( array( 'creazione' ), $this->azioni_nuove(), 'La prima uscita dalla bozza automatica e\' una nascita, e l\'eliminazione di una mai nata non si registra.' );
 	}
 
 	/**
