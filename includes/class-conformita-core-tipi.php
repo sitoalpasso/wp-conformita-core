@@ -33,18 +33,24 @@ final class Conformita_Core_Tipi {
 	private static $tipi = array();
 
 	/**
-	 * Nomi già chiesti alla banca dati in questa richiesta, con la risposta.
+	 * Nomi già chiesti alla banca dati in questa richiesta, con la risposta,
+	 * per tabella dei contenuti.
 	 *
-	 * @var array<string, string|null>
+	 * La risposta vale per la tabella a cui è stata chiesta: la stessa
+	 * richiesta può passare da una tabella all'altra (un altro sito della
+	 * stessa installazione, una prova), e le regole di confronto possono
+	 * essere diverse. Per questo la chiave esterna è l'identità della tabella.
+	 *
+	 * @var array<string, array<string, string|null>>
 	 */
 	private static $confronti = array();
 
 	/**
-	 * Regole della colonna del tipo: false finché non sono state lette.
+	 * Regole della colonna del tipo, per tabella dei contenuti.
 	 *
-	 * @var array{insieme: string, ordinamento: string}|null|false
+	 * @var array<string, array{insieme: string, ordinamento: string}|null>
 	 */
-	private static $regole = false;
+	private static $regole = array();
 
 	/**
 	 * Argomenti di registrazione che core impone e non accetta dal componente.
@@ -312,8 +318,9 @@ final class Conformita_Core_Tipi {
 	 * caratteri non sono uguali per nessun confronto della banca dati. Così un
 	 * sito sano non fa mai la domanda alla banca dati.
 	 *
-	 * Tutti gli altri nomi si chiedono alla banca dati, una volta per richiesta:
-	 * vedi `confronta_nella_banca_dati()`. Righe C-248..C-250.
+	 * Tutti gli altri nomi si chiedono alla banca dati, una volta per richiesta
+	 * e per tabella dei contenuti: vedi `riconduci()`. Righe C-248..C-250 e
+	 * C-255.
 	 *
 	 * @internal Pubblica solo per le altre classi di core.
 	 *
@@ -335,11 +342,13 @@ final class Conformita_Core_Tipi {
 			return null;
 		}
 
-		if ( ! array_key_exists( $tipo, self::$confronti ) ) {
-			self::$confronti[ $tipo ] = self::riconduci( $tipo, array_keys( self::$tipi ) );
+		$tabella = self::tabella();
+
+		if ( ! isset( self::$confronti[ $tabella ] ) || ! array_key_exists( $tipo, self::$confronti[ $tabella ] ) ) {
+			self::$confronti[ $tabella ][ $tipo ] = self::riconduci( $tipo, array_keys( self::$tipi ) );
 		}
 
-		return self::$confronti[ $tipo ];
+		return self::$confronti[ $tabella ][ $tipo ];
 	}
 
 	/**
@@ -432,16 +441,18 @@ final class Conformita_Core_Tipi {
 	/**
 	 * Insieme di caratteri e ordinamento della colonna del tipo.
 	 *
-	 * Letti una volta per richiesta, con la stessa istruzione che WordPress usa
-	 * per conoscere le regole delle proprie colonne.
+	 * Letti una volta per richiesta e per tabella, con la stessa istruzione che
+	 * WordPress usa per conoscere le regole delle proprie colonne.
 	 *
 	 * @return array{insieme: string, ordinamento: string}|null
 	 */
 	private static function regole_della_colonna() {
 		global $wpdb;
 
-		if ( false !== self::$regole ) {
-			return self::$regole;
+		$tabella = self::tabella();
+
+		if ( array_key_exists( $tabella, self::$regole ) ) {
+			return self::$regole[ $tabella ];
 		}
 
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Il nome della tabella viene da WordPress; la domanda riguarda la struttura, non i dati.
@@ -449,14 +460,26 @@ final class Conformita_Core_Tipi {
 		$ordinamento = is_array( $colonna ) && isset( $colonna['Collation'] ) && is_string( $colonna['Collation'] ) ? $colonna['Collation'] : '';
 		$insieme     = strtok( $ordinamento, '_' );
 
-		self::$regole = preg_match( '/^[A-Za-z0-9_]+$/', $ordinamento ) && is_string( $insieme ) && '' !== $insieme
+		self::$regole[ $tabella ] = preg_match( '/^[A-Za-z0-9_]+$/', $ordinamento ) && is_string( $insieme ) && '' !== $insieme
 			? array(
 				'insieme'     => $insieme,
 				'ordinamento' => $ordinamento,
 			)
 			: null;
 
-		return self::$regole;
+		return self::$regole[ $tabella ];
+	}
+
+	/**
+	 * L'identità della tabella dei contenuti che WordPress sta usando adesso:
+	 * banca dati e nome della tabella, letti a ogni domanda, non ricordati.
+	 *
+	 * @return string
+	 */
+	private static function tabella() {
+		global $wpdb;
+
+		return (string) $wpdb->dbname . '.' . (string) $wpdb->posts;
 	}
 
 	/**
@@ -560,6 +583,6 @@ final class Conformita_Core_Tipi {
 
 		self::$tipi      = array();
 		self::$confronti = array();
-		self::$regole    = false;
+		self::$regole    = array();
 	}
 }

@@ -505,4 +505,60 @@ class Conformita_Core_Criterio_Unico_Test extends WP_UnitTestCase {
 
 		remove_filter( 'get_post_metadata', $bugiardo, 10 );
 	}
+
+	/**
+	 * C-255: le risposte ricordate valgono per la tabella a cui sono state
+	 * chieste.
+	 *
+	 * Nella stessa richiesta WordPress può passare da una tabella dei contenuti
+	 * all'altra, e le due tabelle possono confrontare il tipo con regole
+	 * diverse. Qui la prima è una copia temporanea con il confronto binario, che
+	 * distingue le maiuscole; la seconda è quella vera. La risposta "non
+	 * gestito" data per la prima non deve valere per la seconda, dove la
+	 * ricerca del sito trova il contenuto.
+	 */
+	public function test_c255_risposte_ricordate_per_tabella() {
+		global $wpdb;
+
+		$scaduto = $this->atto( '2026-09-01' );
+		$valido  = $this->atto( '2026-12-31' );
+
+		foreach ( array( $scaduto, $valido ) as $post_id ) {
+			$this->tipo_nella_riga( $post_id, 'PROVA_CRITERIO' );
+		}
+
+		$vera    = $wpdb->posts;
+		$copia   = $vera . '_binaria';
+		$colonna = $wpdb->get_row( "SHOW FULL COLUMNS FROM {$vera} LIKE 'post_type'", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: struttura della tabella.
+		$insieme = strtok( (string) $colonna['Collation'], '_' );
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- prova: una tabella temporanea non chiude la transazione della prova.
+		$wpdb->query( "CREATE TEMPORARY TABLE {$copia} LIKE {$vera}" );
+		$wpdb->query( "ALTER TABLE {$copia} MODIFY post_type VARCHAR(20) CHARACTER SET {$insieme} COLLATE {$insieme}_bin NOT NULL DEFAULT 'post'" );
+		$wpdb->query( "INSERT INTO {$copia} SELECT * FROM {$vera} WHERE ID IN ( {$scaduto}, {$valido} )" );
+		$trovati_nella_copia = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$copia} WHERE post_type = %s", self::TIPO ) );
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange
+
+		try {
+			$wpdb->posts = $copia;
+
+			$this->assertSame( 0, $trovati_nella_copia, 'Nella copia binaria la ricerca per il tipo gestito non trova la grafia in maiuscolo.' );
+			$this->assertNull( Conformita_Core_Tipi::canonico( 'PROVA_CRITERIO' ), 'Per la copia binaria il nome non è di un tipo gestito.' );
+		} finally {
+			$wpdb->posts = $vera;
+			$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$copia}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange -- prova: pulizia della tabella temporanea.
+		}
+
+		$this->assertSame( self::TIPO, Conformita_Core_Tipi::canonico( 'PROVA_CRITERIO' ), 'Tornati alla tabella vera, vale la risposta della tabella vera.' );
+
+		$ricerca = $this->trovati(
+			array(
+				'post_type' => 'any',
+				's'         => 'cercabile',
+			)
+		);
+
+		$this->assertContains( $valido, $ricerca );
+		$this->assertNotContains( $scaduto, $ricerca, 'La risposta ricordata per l\'altra tabella non lascia passare il contenuto scaduto.' );
+	}
 }

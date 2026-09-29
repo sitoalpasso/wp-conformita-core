@@ -383,7 +383,7 @@ usa.
 | C-113 | Vicino con data corrotta: mai il vicino, e le date valide restano |
 | C-114 | Più di un valore per la chiave: anomalia, e la scrittura ripara |
 
-Le righe C-248..C-254 sono dell'unità del punto 16 e sono elencate là.
+Le righe C-248..C-255 sono dell'unità del punto 16 e sono elencate là.
 
 **Righe che NON appartengono a questa unità**: C-91 e C-96, che sono l'unità S10. Il catalogo
 le tiene in una sezione a parte proprio perché non si contino qui.
@@ -669,7 +669,7 @@ andrebbe misurata sulle prestazioni. È una unità sua, non una riga di questa.
 ## 16. Un solo criterio per la chiave della data di fine e per il tipo gestito
 
 Unità a parte, aperta dopo il registro delle modifiche, che aveva trovato il difetto leggendo
-la chiave in maiuscolo (scheda del registro, nota in fondo al punto 13). Righe C-248..C-254,
+la chiave in maiuscolo (scheda del registro, nota in fondo al punto 13). Righe C-248..C-255,
 prove in `tests/criterio-unico-test.php`.
 
 ### Il difetto: la stessa domanda fatta in due modi
@@ -730,7 +730,7 @@ ricerca, riceve la stessa risposta e il nome registrato con cui cercare le propr
   trattino, e due nomi diversi scritti solo con quei caratteri non sono uguali per nessun
   confronto della banca dati. Così su un sito sano la domanda non parte mai.
 - Ogni altro nome si chiede alla banca dati, con le regole della colonna del tipo (insieme di
-  caratteri e ordinamento, letti una volta per richiesta), una volta per nome per richiesta.
+  caratteri e ordinamento), una volta per nome, per richiesta e per tabella dei contenuti.
   Le risposte ricordate si azzerano a ogni nuova registrazione di un tipo.
 - Se le regole della colonna non si possono leggere, il ripiego ignora maiuscole e spazi in
   coda. **Limite dichiarato**: nel ripiego una lettera accentata resta diversa, mentre molti
@@ -763,6 +763,17 @@ scaduto come gli altri.
   confronto qui usa le regole della colonna, WordPress in qualche caso quelle della
   connessione. WordPress crea tabelle e connessione con le stesse regole.
 
+### Il primo giro di revisione
+
+Un rilievo, corretto. Le risposte ricordate (il tipo ricondotto e le regole della colonna)
+valevano per tutta la richiesta, ma la stessa richiesta può passare da una tabella dei
+contenuti all'altra, e due tabelle possono confrontare il tipo con regole diverse: una
+risposta "non gestito" data per una tabella che distingue le maiuscole restava valida anche
+tornati su una che non le distingue, e il ricontrollo lasciava passare un contenuto scaduto.
+Il plugin non supporta il multisito, dove il caso è ordinario, ma la correzione non costa
+niente: le due memorie sono ora tenute per tabella, identificata da banca dati e nome, letti
+a ogni domanda. Riga C-255.
+
 ### Le righe
 
 | Riga | Cosa verifica |
@@ -774,11 +785,13 @@ scaduto come gli altri.
 | C-252 | Due righe, chiave vera e chiave in maiuscolo: anomalia di C-114 per la scadenza, per le interrogazioni e per il vicino |
 | C-253 | La scrittura dall'API ripara anche la riga in maiuscolo, e dichiara successo solo se ne resta una |
 | C-254 | Un filtro di WordPress che mente sulla data non sposta la scadenza |
+| C-255 | Nella stessa richiesta, prima una tabella che distingue le maiuscole e poi quella vera: la risposta data per la prima non vale per la seconda, e il contenuto scaduto resta fuori dalla ricerca |
 
 Le prove chiedono alla banca dati di prova che cosa trova e pretendono che core risponda allo
 stesso modo; dove hanno senso solo se la banca dati ignora le maiuscole, lo asseriscono, così
 su una banca dati diversa diventano rosse invece di passare senza aver provato niente. Sul
-codice di prima di questa unità tutte e quindici sono rosse.
+codice di prima di questa unità tutte e quindici le prime sono rosse; C-255 è rossa sul
+codice del primo giro.
 
 **Guasti di prova**, ciascuno introdotto a mano e tolto, con le prove che diventano rosse:
 
@@ -791,3 +804,4 @@ codice di prima di questa unità tutte e quindici sono rosse.
 | G5: sezione e politica cercate senza il nome registrato | C-248, C-249 |
 | G6: ripiego che non ignora gli spazi in coda | C-248 |
 | G7: la scrittura legge le righe dalla memoria prima di riparare | C-253 |
+| G8: risposte ricordate per tutta la richiesta, senza la tabella | C-255 |
