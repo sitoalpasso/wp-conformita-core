@@ -869,3 +869,89 @@ codice del primo giro, C-256 e C-257 su quello del secondo, C-258 su quello del 
 | G11: regole della colonna ricordate per la richiesta | C-248 (ripiego), C-255, C-256 |
 | G12: alfabeto delle scorciatoie che ammette le maiuscole | C-248, C-249, C-250, C-255, C-256 |
 | G13: colonna del tipo cercata con `LIKE` invece che per nome esatto | C-258 |
+
+## 17. Allegati, commenti e rifiuto indistinguibile
+
+Unità a parte, aperta dopo le prove dell'albo sugli atti scaduti, che con il tipo aperto da
+un altro componente hanno trovato quattro strade ancora aperte. Righe C-259..C-267, prove in
+`tests/filtro-scadenza-allegati-commenti-test.php`. Versione dell'interfaccia da `1.5.0` a
+`1.6.0`.
+
+### Il difetto: il filtro risaliva al padre in un posto solo
+
+Un allegato e un commento non hanno una data di fine propria: scadono con il contenuto a cui
+appartengono. Il filtro lo sapeva nell'elenco dei risultati (C-19), ma le strade che leggono
+il singolo allegato chiedevano a `da_nascondere()` dell'allegato stesso, che non è di un tipo
+gestito, e la risposta era "da mostrare". Ne uscivano, dopo la scadenza:
+
+- la scheda dell'allegato nell'interfaccia informatica (`/wp/v2/media/<numero>`), con il nome
+  del file caricato, che chi carica sceglie e che può contenere un nome di persona;
+- l'anteprima incorporata della pagina dell'allegato, con titolo e codice da incorporare;
+- la descrizione dell'allegato nella pubblicazione remota (`wp.getMediaItem`).
+
+I commenti si leggono con un'interrogazione propria, che non passa dai due strati dei
+contenuti: uscivano dall'elenco dei commenti dell'interfaccia informatica, dal singolo
+commento, dalle letture del sito come il riquadro degli ultimi commenti e dai feed dei
+commenti, quello generale e quello della ricerca.
+
+Un quarto punto non riguardava la scadenza ma il modo di rifiutare: il singolo contenuto
+scaduto rispondeva 404 con un codice proprio, diverso da quello di un numero che non esiste.
+Chi prova i numeri uno per uno capiva che dietro un numero c'era stato qualcosa. Lo stesso
+valeva per la richiesta di sole intestazioni, che WordPress serve con la funzione della
+lettura e che il filtro non guardava: rispondeva 200 con l'indirizzo del contenuto, che
+contiene il titolo.
+
+### La correzione
+
+| Strada | Come | Righe |
+|---|---|---|
+| Ogni strada che chiede a `da_nascondere()` di un allegato | l'allegato segue il padre, di un solo livello: un padre che è a sua volta un allegato non porta a nessun tipo gestito, e fermarsi lì toglie anche il caso di due allegati padri l'uno dell'altro | C-19, C-259, C-260, C-266 |
+| Pubblicazione remota dell'allegato | `xmlrpc_prepare_media_item`, stesso trattamento di `xmlrpc_prepare_post` (C-18) | C-266 |
+| Commenti letti con `WP_Query` nei feed | in `the_posts`, che è il primo punto in cui commenti e contenuti sono tutti e due presenti; il conteggio segue i commenti rimasti | C-265 |
+| Commenti letti con `WP_Comment_Query` | `the_comments`, sulla sola superficie pubblica: nell'amministrazione restano | C-263, C-264 |
+| Singolo commento nell'interfaccia informatica | `rest_request_before_callbacks`, come il singolo contenuto | C-263 |
+| Rifiuto del singolo | è quello che il controllo dei permessi della rotta dà per un numero negativo, cioè per un numero che non esiste: codice, messaggio, stato e intestazioni identici | C-261, C-263 |
+| Richiesta di sole intestazioni | trattata come la lettura | C-262 |
+
+**Perché il rifiuto si chiede alla rotta.** Scriverlo qui con il codice di WordPress sarebbe
+bastato oggi, ma una versione che cambiasse codice o messaggio avrebbe riaperto la differenza
+senza che nessuna riga di core cambiasse. Il controllo dei permessi della rotta rifiuta un
+numero negativo prima ancora di cercarlo, quindi la risposta non dipende dalla banca dati. Il
+rifiuto scritto a mano resta solo come ripiego per un controllore che non rispondesse "non
+trovato". Le prove non confrontano con un codice scritto: confrontano con la risposta per un
+numero inesistente, con lo stesso utente e nello stesso momento.
+
+### Che cosa resta fuori, dichiarato
+
+- `get_comment()` sul singolo commento, come `get_post()` sul singolo contenuto.
+- Le letture dei commenti che chiedono solo il conteggio o solo gli identificativi: non
+  passano dal ricontrollo. Il totale che l'interfaccia informatica dichiara per l'elenco dei
+  commenti può quindi contare anche quelli tolti; il numero non dice di quale contenuto
+  fossero.
+- Le richieste asincrone dell'amministrazione contano come superficie pubblica, come per i
+  contenuti (punto 3): l'elenco dei commenti che l'amministrazione ricarica per quella via
+  non mostra quelli dei contenuti scaduti. Nell'elenco normale ci sono.
+
+### Le righe
+
+| Riga | Cosa verifica |
+|---|---|
+| C-259 | Scheda dell'allegato di un contenuto scaduto nell'interfaccia informatica: identica a un numero inesistente, per il visitatore e per chi gestisce il tipo, e senza il nome del file. Rispondono la scheda dell'allegato di un contenuto valido e quella dell'allegato di un articolo |
+| C-260 | Anteprima incorporata della pagina dell'allegato di un contenuto scaduto: rifiutata, anche chiamata direttamente; quella dell'allegato di un contenuto valido è servita |
+| C-261 | Singolo contenuto scaduto: stato, corpo e intestazioni identici a un numero inesistente, per il visitatore e per chi gestisce il tipo |
+| C-262 | Richiesta di sole intestazioni sul singolo contenuto scaduto e sulla scheda del suo allegato: identica a un numero inesistente; sul contenuto valido risponde |
+| C-263 | Commenti di un contenuto scaduto e del suo allegato: fuori dall'elenco e dall'elenco per contenuto; il singolo identico a un commento inesistente; il commento di un contenuto valido resta |
+| C-264 | Letture dei commenti del sito pubblico senza quelli dei contenuti scaduti; nell'amministrazione ci sono |
+| C-265 | Feed generale dei commenti e feed della ricerca con i commenti: senza i commenti del contenuto scaduto e del suo allegato, con il conteggio allineato |
+| C-266 | Pubblicazione remota: l'allegato di un contenuto scaduto non è descritto, quello di un contenuto valido sì |
+| C-267 | Versione dell'interfaccia 1.6.0 |
+
+Sul codice di prima di questa unità le prime otto sono rosse. La riga C-98, che conta gli
+agganci del motore, ne conosce due in più: `xmlrpc_prepare_media_item` e `the_comments`. La
+prova della versione nel meccanismo di indicizzazione non fissa più la versione esatta ma
+"almeno 1.5.0", come era già successo alla riga C-223 del registro.
+
+**Per chi usa core.** Il rifiuto del singolo contenuto scaduto nell'interfaccia informatica
+non ha più il codice `conformita_core_contenuto_non_trovato`: è quello di WordPress per un
+numero inesistente. Un componente che nelle proprie prove pretendeva il vecchio codice deve
+confrontare con la risposta per un numero inesistente.

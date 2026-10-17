@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sulle strade che passano da un allegato o da un
  * commento, e il rifiuto che non si distingue da un indirizzo sbagliato: righe
- * C-259..C-266 del catalogo.
+ * C-259..C-267 del catalogo.
  *
  * **Che cosa avevano in comune i buchi.** Un allegato e un commento non hanno
  * una data di fine propria: la loro scadenza e' quella del contenuto a cui
@@ -465,6 +465,17 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 			$this->assertNotContains( $morto_allegato, $commenti, 'Nemmeno quello del suo allegato, da ' . $indirizzo . '.' );
 			$this->assertSame( count( $commenti ), $GLOBALS['wp_query']->comment_count, 'Il conteggio segue i commenti rimasti.' );
 		}
+	}
+
+	/**
+	 * C-267: la versione dell'interfaccia sale a 1.6.0.
+	 *
+	 * E' la prima che garantisce le strade di questo file: un componente che
+	 * conta su di esse, per esempio per pretendere nelle proprie prove il
+	 * rifiuto identico a un numero inesistente, deve poterla chiedere.
+	 */
+	public function test_c267_versione_dell_interfaccia() {
+		$this->assertSame( '1.6.0', conformita_core_versione_api() );
 	}
 
 	/**
