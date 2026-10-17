@@ -1170,6 +1170,8 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 			'rest_request_before_callbacks' => 'filtra_richiesta_rest',
 			'oembed_response_data'          => 'filtra_anteprima_incorporata',
 			'xmlrpc_prepare_post'           => 'filtra_dato_xmlrpc',
+			'xmlrpc_prepare_media_item'     => 'filtra_dato_xmlrpc',
+			'the_comments'                  => 'filtra_commenti',
 			'get_previous_post_where'       => 'filtra_vicino',
 			'get_next_post_where'           => 'filtra_vicino',
 		);
@@ -1231,6 +1233,8 @@ class Conformita_Core_Filtro_Scadenza_Test extends WP_UnitTestCase {
 			'rest_request_before_callbacks' => 1,
 			'oembed_response_data'          => 1,
 			'xmlrpc_prepare_post'           => 1,
+			'xmlrpc_prepare_media_item'     => 1,
+			'the_comments'                  => 1,
 			'get_previous_post_where'       => 1,
 			'get_next_post_where'           => 1,
 		);
