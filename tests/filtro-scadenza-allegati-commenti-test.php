@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sulle strade che passano da un allegato o da un
  * commento, e il rifiuto che non si distingue da un indirizzo sbagliato: righe
- * C-259..C-269 del catalogo.
+ * C-259..C-271 del catalogo.
  *
  * **Che cosa avevano in comune i buchi.** Un allegato e un commento non hanno
  * una data di fine propria: la loro scadenza e' quella del contenuto a cui
@@ -577,6 +577,82 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 		$commenti = array_map( 'intval', wp_list_pluck( get_comments( array( 'status' => 'approve' ) ), 'comment_ID' ) );
 
 		$this->assertContains( $orfano, $commenti, 'Il commento senza contenuto non eredita la scadenza del contenuto corrente.' );
+	}
+
+	/**
+	 * C-270: la richiesta di opzioni sul singolo scaduto, contenuto, allegato o
+	 * commento, risponde come per un numero inesistente, anche
+	 * nell'intestazione che dice quali metodi sono permessi.
+	 */
+	public function test_c270_richiesta_di_opzioni() {
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30' );
+		$scaduto = $this->contenuto( '2026-09-08' );
+
+		$strade = array(
+			'/wp/v2/' . self::TIPO => array( $valido, $scaduto ),
+			'/wp/v2/media'         => array( $this->allegato_di( $valido ), $this->allegato_di( $scaduto ) ),
+			'/wp/v2/comments'      => array( $this->commento_su( $valido, 'Visibile' ), $this->commento_su( $scaduto, 'Nascosto' ) ),
+		);
+
+		foreach ( array( 0, $this->utente_autorizzato() ) as $utente ) {
+			wp_set_current_user( $utente );
+
+			foreach ( $strade as $base => $numeri ) {
+				$buona = $this->chiedi( $base . '/' . $numeri[0], array(), 'OPTIONS' );
+				$this->assertSame( 200, $buona->get_status() );
+				$this->assertStringContainsString( 'GET', (string) ( $buona->get_headers()['Allow'] ?? '' ), 'Per il valido la lettura e\' permessa: senza, il confronto sotto non misurerebbe niente. ' . $base );
+
+				$riferimento = $this->chiedi( $base . '/' . $this->numero_inesistente(), array(), 'OPTIONS' );
+				$this->assertStringNotContainsString( 'GET', (string) ( $riferimento->get_headers()['Allow'] ?? '' ), 'Per il numero inesistente la lettura non e\' permessa. ' . $base );
+
+				$this->assertSame(
+					$this->visibile( $riferimento ),
+					$this->visibile( $this->chiedi( $base . '/' . $numeri[1], array(), 'OPTIONS' ) ),
+					'La richiesta di opzioni su ' . $base . ' risponde come per un numero inesistente, per l\'utente ' . $utente . '.'
+				);
+			}
+		}
+	}
+
+	/**
+	 * C-271: la pubblicazione remota non restituisce il commento di un
+	 * contenuto scaduto, ne' del suo allegato, ne' nel singolo ne' nell'elenco.
+	 */
+	public function test_c271_commento_nella_pubblicazione_remota() {
+		require_once ABSPATH . WPINC . '/class-IXR.php';
+		require_once ABSPATH . WPINC . '/class-wp-xmlrpc-server.php';
+		add_filter( 'xmlrpc_enabled', '__return_true' );
+
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30' );
+		$scaduto = $this->contenuto( '2026-09-08' );
+
+		$buono          = $this->commento_su( $valido, 'Commento visibile' );
+		$morto          = $this->commento_su( $scaduto, 'Commento nascosto' );
+		$morto_allegato = $this->commento_su( $this->allegato_di( $scaduto ), 'Commento sull\'allegato nascosto' );
+
+		$this->utente_autorizzato();
+
+		$server = new wp_xmlrpc_server();
+
+		$singolo = $server->wp_getComment( array( 1, self::UTENTE, self::PAROLA, $buono ) );
+		$this->assertIsArray( $singolo );
+		$this->assertArrayHasKey( 'comment_id', $singolo, 'Il commento di un contenuto valido arriva con i suoi dati.' );
+
+		$this->assertSame( array(), $server->wp_getComment( array( 1, self::UTENTE, self::PAROLA, $morto ) ) );
+		$this->assertSame( array(), $server->wp_getComment( array( 1, self::UTENTE, self::PAROLA, $morto_allegato ) ) );
+
+		$elenco = $server->wp_getComments( array( 1, self::UTENTE, self::PAROLA, array( 'number' => 50 ) ) );
+		$this->assertIsArray( $elenco );
+
+		$numeri = array_map( 'intval', wp_list_pluck( $elenco, 'comment_id' ) );
+
+		$this->assertContains( $buono, $numeri );
+		$this->assertNotContains( $morto, $numeri );
+		$this->assertNotContains( $morto_allegato, $numeri );
 	}
 
 	/**

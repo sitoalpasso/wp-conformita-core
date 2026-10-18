@@ -188,6 +188,11 @@ final class Conformita_Core_Filtro_Scadenza {
 				'argomenti' => 2,
 			),
 			array(
+				'aggancio'  => 'xmlrpc_prepare_comment',
+				'metodo'    => 'filtra_commento_xmlrpc',
+				'argomenti' => 2,
+			),
+			array(
 				'aggancio'  => 'the_comments',
 				'metodo'    => 'filtra_commenti',
 				'argomenti' => 1,
@@ -660,14 +665,7 @@ final class Conformita_Core_Filtro_Scadenza {
 			return $risposta;
 		}
 
-		if ( $controllore instanceof WP_REST_Comments_Controller ) {
-			$commento = get_comment( (int) $richiesta['id'] );
-			$nascosto = $commento instanceof WP_Comment && self::da_nascondere( (int) $commento->comment_post_ID );
-		} else {
-			$nascosto = self::da_nascondere( (int) $richiesta['id'] );
-		}
-
-		if ( ! $nascosto ) {
+		if ( ! self::singolo_da_nascondere( $controllore, $richiesta['id'] ) ) {
 			return $risposta;
 		}
 
@@ -717,14 +715,18 @@ final class Conformita_Core_Filtro_Scadenza {
 	 *               la richiesta era stata rifiutata qui.
 	 */
 	public static function normalizza_risposta_rest( $risposta, $server = null, $richiesta = null ) {
-		if ( null === self::$rifiutate || ! $richiesta instanceof WP_REST_Request || ! isset( self::$rifiutate[ $richiesta ] ) ) {
+		if ( ! $richiesta instanceof WP_REST_Request ) {
 			return $risposta;
 		}
 
-		$finta = self::$rifiutate[ $richiesta ];
-		unset( self::$rifiutate[ $richiesta ] );
+		if ( null !== self::$rifiutate && isset( self::$rifiutate[ $richiesta ] ) ) {
+			$finta = self::$rifiutate[ $richiesta ];
+			unset( self::$rifiutate[ $richiesta ] );
+		} else {
+			$finta = self::paragone_della_richiesta_di_opzioni( $risposta, $server, $richiesta );
+		}
 
-		if ( ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
+		if ( null === $finta || ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
 			return $risposta;
 		}
 
@@ -733,6 +735,78 @@ final class Conformita_Core_Filtro_Scadenza {
 		$risposta->set_headers( $intestazioni );
 
 		return rest_send_allow_header( $risposta, $server, $finta );
+	}
+
+	/**
+	 * La richiesta di paragone per una richiesta di opzioni sul singolo
+	 * scaduto, se è quel caso.
+	 *
+	 * La richiesta di opzioni (`OPTIONS`) WordPress la serve da sé, prima di
+	 * ogni controllore, con la descrizione della rotta: la descrizione è la
+	 * stessa per ogni numero, ma l'intestazione `Allow` si calcola con il numero
+	 * vero, e direbbe che lo scaduto si può leggere. Qui si riconosce la rotta
+	 * del singolo dalla funzione che ne servirebbe la lettura, come per le altre
+	 * richieste, e si decide con lo stesso criterio. Riga C-270.
+	 *
+	 * @param mixed           $risposta  Risposta pronta.
+	 * @param mixed           $server    Server dell'interfaccia.
+	 * @param WP_REST_Request $richiesta Richiesta servita.
+	 * @return WP_REST_Request|null La richiesta di paragone, oppure null.
+	 */
+	private static function paragone_della_richiesta_di_opzioni( $risposta, $server, WP_REST_Request $richiesta ) {
+		if ( 'OPTIONS' !== $richiesta->get_method() || ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
+			return null;
+		}
+
+		$rotte = $server->get_routes();
+		$rotta = $risposta->get_matched_route();
+
+		if ( ! is_string( $rotta ) || ! isset( $rotte[ $rotta ] ) || ! is_array( $rotte[ $rotta ] ) ) {
+			return null;
+		}
+
+		foreach ( $rotte[ $rotta ] as $gestore ) {
+			$controllore = self::controllore_del_singolo( $gestore );
+
+			if ( null === $controllore ) {
+				continue;
+			}
+
+			if ( ! self::singolo_da_nascondere( $controllore, $richiesta['id'] ) ) {
+				return null;
+			}
+
+			$finta = clone $richiesta;
+			$finta->set_param( 'id', -1 );
+
+			return $finta;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Il singolo che la rotta servirebbe è da togliere di mezzo.
+	 *
+	 * Per il controllore dei commenti si guarda il contenuto a cui il commento
+	 * appartiene, per gli altri il contenuto stesso.
+	 *
+	 * @param WP_REST_Posts_Controller|WP_REST_Comments_Controller $controllore Chi servirebbe la rotta.
+	 * @param mixed                                                $numero      Numero chiesto.
+	 * @return bool
+	 */
+	private static function singolo_da_nascondere( $controllore, $numero ) {
+		if ( ! is_numeric( $numero ) ) {
+			return false;
+		}
+
+		if ( $controllore instanceof WP_REST_Comments_Controller ) {
+			$commento = (int) $numero > 0 ? get_comment( (int) $numero ) : null;
+
+			return $commento instanceof WP_Comment && self::da_nascondere( (int) $commento->comment_post_ID );
+		}
+
+		return self::da_nascondere( (int) $numero );
 	}
 
 	/**
@@ -986,6 +1060,30 @@ final class Conformita_Core_Filtro_Scadenza {
 	 */
 	public static function filtra_dato_xmlrpc( $dati, $contenuto = null ) {
 		return self::da_nascondere( $contenuto ) ? array() : $dati;
+	}
+
+	/**
+	 * L'interfaccia di pubblicazione remota non restituisce il commento di un
+	 * contenuto scaduto.
+	 *
+	 * Il singolo commento lo legge con `get_comment()`, che non passa dal
+	 * ricontrollo dei commenti, e lo prepara di qui. Stessa scelta prudente e
+	 * stesso esito della riga C-18 per il contenuto: l'insieme vuoto. L'elenco
+	 * dei commenti della stessa interfaccia passa invece da `the_comments`.
+	 * Riga C-271.
+	 *
+	 * @internal Aggancio di `xmlrpc_prepare_comment`.
+	 *
+	 * @param mixed $dati     Dati preparati da WordPress.
+	 * @param mixed $commento Commento a cui si riferiscono.
+	 * @return mixed I dati invariati, oppure l'insieme vuoto.
+	 */
+	public static function filtra_commento_xmlrpc( $dati, $commento = null ) {
+		if ( ! $commento instanceof WP_Comment ) {
+			return $dati;
+		}
+
+		return self::da_nascondere( (int) $commento->comment_post_ID ) ? array() : $dati;
 	}
 
 	/**
