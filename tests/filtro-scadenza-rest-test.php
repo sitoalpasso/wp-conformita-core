@@ -294,8 +294,9 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 	 * apriva, quindi non era correggibile: l'esatto contrario di quello che la
 	 * riga C-101 pretende.
 	 *
-	 * Le tre asserzioni vanno lette insieme. L'anonimo non passa, quindi il
-	 * contesto di modifica non e' una porta di servizio. L'autorizzato passa,
+	 * Le tre asserzioni vanno lette insieme. L'anonimo non passa, e riceve il
+	 * rifiuto di un numero inesistente, quindi il contesto di modifica non e'
+	 * una porta di servizio e non dice che il contenuto c'e'. L'autorizzato passa,
 	 * quindi l'atto si corregge. Lo stesso autorizzato con il contesto pubblico
 	 * **non** passa, quindi l'esenzione e' del contesto e non dell'utente.
 	 */
@@ -309,10 +310,13 @@ class Conformita_Core_Filtro_Scadenza_Rest_Test extends WP_UnitTestCase {
 		$anonimo = $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto, array( 'context' => 'edit' ) );
 
 		$this->assertNotSame( 200, $anonimo->get_status(), 'Il contesto di modifica non e\' una porta di servizio per chi non ha permessi.' );
-		$this->assertContains(
-			$anonimo->get_status(),
-			array( 401, 403 ),
-			'Il rifiuto e\' quello normale di WordPress sui permessi, e arriva prima che si sappia se il contenuto sia scaduto. Motivo: ' . $this->motivo( $anonimo )
+
+		$inesistente = $this->chiedi( '/wp/v2/' . self::TIPO . '/' . PHP_INT_MAX, array( 'context' => 'edit' ) );
+
+		$this->assertSame(
+			array( $inesistente->get_status(), $inesistente->get_data() ),
+			array( $anonimo->get_status(), $anonimo->get_data() ),
+			'A chi non puo\' modificare il contenuto scaduto risponde come un numero inesistente: un "non hai il permesso" direbbe che il contenuto c\'e\'. Riga C-268. Motivo: ' . $this->motivo( $anonimo )
 		);
 
 		wp_set_current_user( $this->utente_autorizzato() );

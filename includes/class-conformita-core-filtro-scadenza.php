@@ -44,8 +44,10 @@
  * sul sito di qualcun altro. Righe C-93 e C-102.
  *
  * **Che cosa resta scoperto e non è coperto da nessuno**: `get_post()` sul
- * singolo identificativo, le interrogazioni SQL dirette, la lettura diretta dei
- * metadati e le pagine servite da una memoria che risponde prima di WordPress.
+ * singolo identificativo, `get_comment()` sul singolo commento, le letture dei
+ * commenti che chiedono solo il conteggio o solo gli identificativi, le
+ * interrogazioni SQL dirette, la lettura diretta dei metadati e le pagine
+ * servite da una memoria che risponde prima di WordPress.
  * Il controllo non avviene ogni volta che qualcuno chiede il contenuto: avviene
  * ogni volta che la richiesta arriva a WordPress.
  *
@@ -56,7 +58,7 @@
  * impreciso a un contenuto scaduto visibile.
  *
  * Righe di collaudo C-10, C-11, C-12, C-13, C-14, C-21, C-22, C-89, C-90,
- * C-92, C-93, C-97, C-98, C-101, C-102, C-103 e C-104.
+ * C-92, C-93, C-97, C-98, C-101, C-102, C-103, C-104 e C-259..C-275.
  *
  * @package Conformita_Core
  */
@@ -74,6 +76,18 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * @var bool
 	 */
 	private static $avviato = false;
+
+	/**
+	 * Il filtro è sospeso per una lettura fatta da core stesso.
+	 *
+	 * Serve solo a `filtra_reindirizzamento()`, che deve sapere a quale
+	 * contenuto porta un indirizzo anche quando quel contenuto è scaduto: con
+	 * il filtro acceso la risposta sarebbe "a nessuno". Si accende e si spegne
+	 * nella stessa funzione.
+	 *
+	 * @var bool
+	 */
+	private static $sospeso = false;
 
 	/**
 	 * Aggancia i filtri del motore.
@@ -110,7 +124,7 @@ final class Conformita_Core_Filtro_Scadenza {
 		self::$avviato = true;
 
 		foreach ( self::agganci() as $aggancio ) {
-			add_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), 10, $aggancio['argomenti'] );
+			add_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), self::priorita( $aggancio ), $aggancio['argomenti'] );
 		}
 	}
 
@@ -152,6 +166,28 @@ final class Conformita_Core_Filtro_Scadenza {
 				'argomenti' => 3,
 			),
 			array(
+				'aggancio'  => 'rest_post_dispatch',
+				'metodo'    => 'normalizza_risposta_rest',
+				'argomenti' => 3,
+				// Dopo rest_send_allow_header(), che WordPress aggancia a 10.
+				'priorita'  => 11,
+			),
+			array(
+				'aggancio'  => 'redirect_canonical',
+				'metodo'    => 'filtra_reindirizzamento',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'old_slug_redirect_post_id',
+				'metodo'    => 'filtra_vecchio_nome',
+				'argomenti' => 1,
+			),
+			array(
+				'aggancio'  => 'rest_comment_query',
+				'metodo'    => 'filtra_commenti_rest',
+				'argomenti' => 1,
+			),
+			array(
 				'aggancio'  => 'oembed_response_data',
 				'metodo'    => 'filtra_anteprima_incorporata',
 				'argomenti' => 2,
@@ -160,6 +196,21 @@ final class Conformita_Core_Filtro_Scadenza {
 				'aggancio'  => 'xmlrpc_prepare_post',
 				'metodo'    => 'filtra_dato_xmlrpc',
 				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'xmlrpc_prepare_media_item',
+				'metodo'    => 'filtra_dato_xmlrpc',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'xmlrpc_prepare_comment',
+				'metodo'    => 'filtra_commento_xmlrpc',
+				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'the_comments',
+				'metodo'    => 'filtra_commenti',
+				'argomenti' => 1,
 			),
 			array(
 				'aggancio'  => 'get_previous_post_where',
@@ -172,6 +223,17 @@ final class Conformita_Core_Filtro_Scadenza {
 				'argomenti' => 5,
 			),
 		);
+	}
+
+	/**
+	 * La priorità di un aggancio dell'elenco: 10, salvo dove l'elenco dice
+	 * altrimenti.
+	 *
+	 * @param array<string, mixed> $aggancio Voce di `agganci()`.
+	 * @return int
+	 */
+	private static function priorita( array $aggancio ) {
+		return isset( $aggancio['priorita'] ) ? (int) $aggancio['priorita'] : 10;
 	}
 
 	/**
@@ -197,7 +259,7 @@ final class Conformita_Core_Filtro_Scadenza {
 		}
 
 		foreach ( self::agganci() as $aggancio ) {
-			remove_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), 10 );
+			remove_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), self::priorita( $aggancio ) );
 		}
 
 		self::$avviato = false;
@@ -233,6 +295,10 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * @return bool
 	 */
 	private static function superficie_pubblica() {
+		if ( self::$sospeso ) {
+			return false;
+		}
+
 		return ! ( is_admin() && ! wp_doing_ajax() );
 	}
 
@@ -451,6 +517,12 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * indirizzo protetto è l'unità della consegna allegati, e finché non c'è, il
 	 * file resta scaricabile dal suo indirizzo diretto. Riga C-19.
 	 *
+	 * **Nei feed dei commenti toglie anche i commenti.** WordPress li legge con
+	 * un'interrogazione propria, prima dei contenuti per il feed generale e
+	 * dopo per quello di un contenuto solo, ma in tutti e due i casi prima di
+	 * questo aggancio: e' il primo punto in cui sono tutti e due sul tavolo.
+	 * Riga C-265.
+	 *
 	 * @internal Aggancio di `the_posts`.
 	 *
 	 * @param mixed $contenuti      Contenuti restituiti dall'interrogazione.
@@ -458,13 +530,16 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * @return mixed Contenuti senza quelli scaduti.
 	 */
 	public static function filtra_risultati( $contenuti, $interrogazione = null ) {
-		unset( $interrogazione );
-
-		if ( ! is_array( $contenuti ) || empty( $contenuti ) ) {
+		if ( ! self::superficie_pubblica() ) {
 			return $contenuti;
 		}
 
-		if ( ! self::superficie_pubblica() ) {
+		if ( $interrogazione instanceof WP_Query && is_array( $interrogazione->comments ) && ! empty( $interrogazione->comments ) ) {
+			$interrogazione->comments      = self::filtra_commenti( $interrogazione->comments );
+			$interrogazione->comment_count = count( $interrogazione->comments );
+		}
+
+		if ( ! is_array( $contenuti ) || empty( $contenuti ) ) {
 			return $contenuti;
 		}
 
@@ -483,7 +558,7 @@ final class Conformita_Core_Filtro_Scadenza {
 			 * il padre come gli altri. Riga C-250.
 			 */
 			if ( Conformita_Core_Tipi::uguale( $contenuto->post_type, 'attachment' ) ) {
-				if ( ! self::da_nascondere( (int) $contenuto->post_parent ) ) {
+				if ( ! self::padre_da_nascondere( (int) $contenuto->post_parent ) ) {
 					$rimasti[] = $contenuto;
 				}
 
@@ -594,11 +669,22 @@ final class Conformita_Core_Filtro_Scadenza {
 			return $risposta;
 		}
 
-		if ( ! $richiesta instanceof WP_REST_Request || 'GET' !== $richiesta->get_method() ) {
+		/*
+		 * La richiesta di sole intestazioni WordPress la serve con la stessa
+		 * funzione della lettura, e la risposta porta l'indirizzo del contenuto,
+		 * che contiene il titolo: e' una lettura come l'altra. Riga C-262.
+		 */
+		if ( ! $richiesta instanceof WP_REST_Request || ! in_array( $richiesta->get_method(), array( 'GET', 'HEAD' ), true ) ) {
 			return $risposta;
 		}
 
-		if ( ! self::e_lettura_di_un_singolo( $gestore ) ) {
+		$controllore = self::controllore_del_singolo( $gestore );
+
+		if ( null === $controllore ) {
+			return $risposta;
+		}
+
+		if ( ! self::singolo_da_nascondere( $controllore, $richiesta['id'] ) ) {
 			return $risposta;
 		}
 
@@ -609,54 +695,222 @@ final class Conformita_Core_Filtro_Scadenza {
 		 * correggere, cioe' l'esatto contrario di quello che l'amministrazione
 		 * deve garantire.
 		 *
-		 * Lasciarlo passare non apre niente a nessuno: per quel contesto
-		 * WordPress pretende gia' il permesso di modifica sul contenuto, e a chi
-		 * non ce l'ha risponde con il proprio rifiuto. Il rifiuto arriva prima
-		 * che si sappia se il contenuto sia scaduto, quindi non dice niente a chi
-		 * non deve saperlo.
+		 * **Si lascia passare solo chi la rotta autorizza davvero.** A chi non
+		 * puo' modificare, WordPress risponderebbe "non hai il permesso" per un
+		 * contenuto che esiste e "non trovato" per uno che non esiste: bastava
+		 * aggiungere il contesto alla richiesta per sapere che dietro un numero
+		 * c'era stato qualcosa. Il controllo e' quello della rotta stessa, che
+		 * non scrive niente e che WordPress ripeterebbe subito dopo.
 		 *
 		 * Il confronto e' sul valore esatto e non sul suo contrario: un contesto
 		 * sconosciuto o assente ricade nel trattamento pubblico, che e' la
-		 * direzione sicura. Righe C-16 e C-112.
+		 * direzione sicura. Righe C-16, C-112 e C-268.
 		 */
-		if ( 'edit' === $richiesta['context'] ) {
+		if ( 'edit' === $richiesta['context'] && true === $controllore->get_item_permissions_check( $richiesta ) ) {
 			return $risposta;
 		}
 
-		if ( ! self::da_nascondere( (int) $richiesta['id'] ) ) {
-			return $risposta;
-		}
-
-		return new WP_Error(
-			'conformita_core_contenuto_non_trovato',
-			__( 'Contenuto non trovato.', 'conformita-core' ),
-			array( 'status' => 404 )
-		);
+		return self::rifiuto_come_inesistente( $controllore, $richiesta );
 	}
 
 	/**
-	 * La rotta in corso è la lettura di un singolo contenuto.
+	 * Ogni risposta sul singolo scaduto porta le stesse intestazioni di un
+	 * numero che non esiste.
+	 *
+	 * Prima di spedire la risposta WordPress aggiunge l'intestazione `Allow`,
+	 * e per farlo chiede di nuovo i permessi di ogni metodo della rotta con il
+	 * numero della richiesta. Per un contenuto scaduto ma esistente la lettura
+	 * risulterebbe permessa, per un numero inesistente no: l'intestazione
+	 * direbbe quello che il rifiuto tace. Qui la si ricalcola con la richiesta
+	 * di paragone.
+	 *
+	 * **Si decide dalla rotta e dal numero, non da chi ha risposto.** La prima
+	 * stesura ricalcolava l'intestazione solo dove il rifiuto era venuto da
+	 * questo filtro, e la seconda vi aggiungeva la richiesta di opzioni. Ma la
+	 * risposta può arrivare anche da altrove prima di questo filtro, per esempio
+	 * dalla verifica dei parametri, che rifiuta un contesto sconosciuto con lo
+	 * stesso 400 per ogni numero: l'intestazione restava quella del numero vero.
+	 * Ora vale per qualunque lettura o richiesta di opzioni sul singolo da
+	 * togliere di mezzo, tranne il contesto di modifica di chi la rotta
+	 * autorizza, che riceve il contenuto vero. Righe C-259, C-261, C-262,
+	 * C-263, C-270 e C-272.
+	 *
+	 * @internal Aggancio di `rest_post_dispatch`, dopo `rest_send_allow_header()`.
+	 *
+	 * @param mixed $risposta  Risposta pronta.
+	 * @param mixed $server    Server dell'interfaccia.
+	 * @param mixed $richiesta Richiesta servita.
+	 * @return mixed La risposta, con le intestazioni del numero inesistente se
+	 *               riguarda un singolo da togliere di mezzo.
+	 */
+	public static function normalizza_risposta_rest( $risposta, $server = null, $richiesta = null ) {
+		if ( ! $richiesta instanceof WP_REST_Request || ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
+			return $risposta;
+		}
+
+		$finta = self::paragone_del_singolo( $risposta, $server, $richiesta );
+
+		if ( null === $finta ) {
+			return $risposta;
+		}
+
+		$intestazioni = $risposta->get_headers();
+		unset( $intestazioni['Allow'] );
+		$risposta->set_headers( $intestazioni );
+
+		return rest_send_allow_header( $risposta, $server, $finta );
+	}
+
+	/**
+	 * La richiesta di paragone per una risposta sul singolo da togliere di
+	 * mezzo, se è quel caso.
+	 *
+	 * La rotta si riconosce da quella che la risposta dichiara di aver servito
+	 * e dalla funzione che ne leggerebbe il singolo, come nel filtro della
+	 * richiesta: vale anche per la richiesta di opzioni, che WordPress serve da
+	 * sé con la descrizione della rotta, uguale per ogni numero (C-270), e per
+	 * un rifiuto della verifica dei parametri (C-272).
+	 *
+	 * @param WP_REST_Response $risposta  Risposta pronta.
+	 * @param WP_REST_Server   $server    Server dell'interfaccia.
+	 * @param WP_REST_Request  $richiesta Richiesta servita.
+	 * @return WP_REST_Request|null La richiesta di paragone, oppure null.
+	 */
+	private static function paragone_del_singolo( WP_REST_Response $risposta, WP_REST_Server $server, WP_REST_Request $richiesta ) {
+		$metodo = $richiesta->get_method();
+
+		if ( ! in_array( $metodo, array( 'GET', 'HEAD', 'OPTIONS' ), true ) ) {
+			return null;
+		}
+
+		$rotte = $server->get_routes();
+		$rotta = $risposta->get_matched_route();
+
+		if ( ! is_string( $rotta ) || ! isset( $rotte[ $rotta ] ) || ! is_array( $rotte[ $rotta ] ) ) {
+			return null;
+		}
+
+		foreach ( $rotte[ $rotta ] as $gestore ) {
+			$controllore = self::controllore_del_singolo( $gestore );
+
+			if ( null === $controllore ) {
+				continue;
+			}
+
+			if ( ! self::singolo_da_nascondere( $controllore, $richiesta['id'] ) ) {
+				return null;
+			}
+
+			// Il contesto di modifica di chi la rotta autorizza ha ricevuto il contenuto vero.
+			if ( 'OPTIONS' !== $metodo && 'edit' === $richiesta['context'] && true === $controllore->get_item_permissions_check( $richiesta ) ) {
+				return null;
+			}
+
+			$finta = clone $richiesta;
+			$finta->set_param( 'id', -1 );
+
+			return $finta;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Il singolo che la rotta servirebbe è da togliere di mezzo.
+	 *
+	 * Per il controllore dei commenti si guarda il contenuto a cui il commento
+	 * appartiene, per gli altri il contenuto stesso.
+	 *
+	 * @param WP_REST_Posts_Controller|WP_REST_Comments_Controller $controllore Chi servirebbe la rotta.
+	 * @param mixed                                                $numero      Numero chiesto.
+	 * @return bool
+	 */
+	private static function singolo_da_nascondere( $controllore, $numero ) {
+		if ( ! is_numeric( $numero ) ) {
+			return false;
+		}
+
+		if ( $controllore instanceof WP_REST_Comments_Controller ) {
+			$commento = (int) $numero > 0 ? get_comment( (int) $numero ) : null;
+
+			return $commento instanceof WP_Comment && self::da_nascondere( (int) $commento->comment_post_ID );
+		}
+
+		return self::da_nascondere( (int) $numero );
+	}
+
+	/**
+	 * Il controllore che servirebbe la lettura di un singolo contenuto o di un
+	 * singolo commento, se la rotta in corso è quella.
 	 *
 	 * Si riconosce da chi la servirebbe, non dalla forma dell'indirizzo: la
 	 * forma degli indirizzi è una convenzione che cambia, mentre la funzione che
-	 * legge un contenuto singolo è la stessa per ogni tipo. Così la collezione
-	 * resta fuori senza doverla escludere a mano.
+	 * legge un contenuto singolo è la stessa per ogni tipo, allegati compresi.
+	 * Così la collezione resta fuori senza doverla escludere a mano.
 	 *
 	 * @param mixed $gestore Descrizione della funzione che servirebbe la rotta.
-	 * @return bool
+	 * @return WP_REST_Posts_Controller|WP_REST_Comments_Controller|null
 	 */
-	private static function e_lettura_di_un_singolo( $gestore ) {
+	private static function controllore_del_singolo( $gestore ) {
 		if ( ! is_array( $gestore ) || ! isset( $gestore['callback'] ) ) {
-			return false;
+			return null;
 		}
 
 		$funzione = $gestore['callback'];
 
-		if ( ! is_array( $funzione ) || ! isset( $funzione[0], $funzione[1] ) ) {
-			return false;
+		if ( ! is_array( $funzione ) || ! isset( $funzione[0], $funzione[1] ) || 'get_item' !== $funzione[1] ) {
+			return null;
 		}
 
-		return $funzione[0] instanceof WP_REST_Posts_Controller && 'get_item' === $funzione[1];
+		if ( $funzione[0] instanceof WP_REST_Posts_Controller || $funzione[0] instanceof WP_REST_Comments_Controller ) {
+			return $funzione[0];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Il rifiuto che WordPress darebbe per un numero che non esiste.
+	 *
+	 * **Perché lo stesso rifiuto e non uno nostro.** Un "non trovato" con un
+	 * codice proprio dice a chi prova i numeri uno per uno che dietro quel
+	 * numero c'era qualcosa, anche se non ne mostra niente. Il rifiuto deve
+	 * essere quello di un numero sbagliato, parola per parola.
+	 *
+	 * **Perché lo si chiede al controllore invece di scriverlo qui.** Per un
+	 * numero che non esiste WordPress risponde dal controllo dei permessi, che
+	 * cerca il contenuto e non lo trova; un numero negativo lo rifiuta prima
+	 * ancora di cercarlo, quindi non dipende da che cosa c'è nella banca dati.
+	 * Chiedere a quel controllo la risposta per un numero negativo dà il rifiuto
+	 * esatto di quella rotta, nella lingua del sito, e resta esatto se una
+	 * versione futura di WordPress cambia codice o messaggio. Il rifiuto scritto
+	 * qui sotto è solo il ripiego per un controllore che non rispondesse con un
+	 * "non trovato", ed è quello di WordPress per i contenuti. Righe C-261 e
+	 * C-263.
+	 *
+	 * @param WP_REST_Posts_Controller|WP_REST_Comments_Controller $controllore Chi servirebbe la rotta.
+	 * @param WP_REST_Request                                      $richiesta   Richiesta in corso.
+	 * @return WP_Error
+	 */
+	private static function rifiuto_come_inesistente( $controllore, WP_REST_Request $richiesta ) {
+		$finta = clone $richiesta;
+		$finta->set_param( 'id', -1 );
+
+		$rifiuto = $controllore->get_item_permissions_check( $finta );
+
+		if ( is_wp_error( $rifiuto ) ) {
+			$dati = $rifiuto->get_error_data();
+
+			if ( is_array( $dati ) && isset( $dati['status'] ) && 404 === (int) $dati['status'] ) {
+				return $rifiuto;
+			}
+		}
+
+		return new WP_Error(
+			'rest_post_invalid_id',
+			__( 'Invalid post ID.' ), // phpcs:ignore WordPress.WP.I18n.MissingArgDomain -- e' il messaggio di WordPress, e deve restare identico al suo.
+			array( 'status' => 404 )
+		);
 	}
 
 	/**
@@ -682,14 +936,25 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * @return bool
 	 */
 	private static function da_nascondere( $contenuto ) {
+		/*
+		 * Il numero zero, per `get_post()`, e' il contenuto corrente della
+		 * pagina: un commento che non appartiene a nessun contenuto ne
+		 * erediterebbe la scadenza. Un numero che non e' positivo non e' di
+		 * nessun contenuto. Riga C-269.
+		 */
 		if ( is_array( $contenuto ) ) {
-			$contenuto = isset( $contenuto['ID'] ) ? get_post( (int) $contenuto['ID'] ) : null;
+			$numero    = isset( $contenuto['ID'] ) ? (int) $contenuto['ID'] : 0;
+			$contenuto = $numero > 0 ? get_post( $numero ) : null;
 		} elseif ( is_numeric( $contenuto ) ) {
-			$contenuto = get_post( (int) $contenuto );
+			$contenuto = (int) $contenuto > 0 ? get_post( (int) $contenuto ) : null;
 		}
 
 		if ( ! $contenuto instanceof WP_Post ) {
 			return false;
+		}
+
+		if ( Conformita_Core_Tipi::uguale( $contenuto->post_type, 'attachment' ) ) {
+			return self::padre_da_nascondere( (int) $contenuto->post_parent );
 		}
 
 		if ( ! Conformita_Core_Tipi::registrato( $contenuto->post_type ) ) {
@@ -701,6 +966,191 @@ final class Conformita_Core_Filtro_Scadenza {
 		}
 
 		return Conformita_Core_Scadenza::scaduto( (int) $contenuto->ID );
+	}
+
+	/**
+	 * Il padre di un allegato è un contenuto da togliere di mezzo.
+	 *
+	 * Un allegato non ha una data di fine propria: la sua scadenza è quella del
+	 * contenuto a cui appartiene, su ogni strada che legge l'allegato, non
+	 * soltanto nell'elenco dei risultati. Prima di questa riga la scheda
+	 * dell'allegato nell'interfaccia informatica, la sua anteprima incorporata e
+	 * la pubblicazione remota guardavano l'allegato stesso, che non è di un tipo
+	 * gestito, e lo lasciavano passare con il nome del file caricato.
+	 *
+	 * Si risale di un solo livello: il padre che è a sua volta un allegato non
+	 * porta a nessun tipo gestito, e fermarsi lì toglie di mezzo anche il caso
+	 * di due allegati padri l'uno dell'altro, che altrimenti girerebbe senza
+	 * fine. Righe C-19, C-259, C-260 e C-266.
+	 *
+	 * @param int $padre Identificativo del padre.
+	 * @return bool
+	 */
+	private static function padre_da_nascondere( $padre ) {
+		if ( $padre <= 0 ) {
+			return false;
+		}
+
+		$contenuto = get_post( $padre );
+
+		if ( ! $contenuto instanceof WP_Post || Conformita_Core_Tipi::uguale( $contenuto->post_type, 'attachment' ) ) {
+			return false;
+		}
+
+		return self::da_nascondere( $contenuto );
+	}
+
+	/**
+	 * I commenti di un contenuto scaduto non escono dalla superficie pubblica.
+	 *
+	 * Un commento non ha una data di fine propria, come un allegato: segue il
+	 * contenuto a cui è scritto, e quello di un allegato segue il padre
+	 * dell'allegato. WordPress legge i commenti con un'interrogazione propria,
+	 * che non passa dai due strati dei contenuti, quindi senza questo aggancio
+	 * il commento di un atto scaduto continuerebbe a uscire dall'elenco
+	 * dell'interfaccia informatica, dal riquadro degli ultimi commenti e dalle
+	 * altre letture del sito. Nell'amministrazione resta, come il contenuto.
+	 *
+	 * **Il limite, dichiarato.** È un ricontrollo dei commenti restituiti, come
+	 * il secondo strato dei contenuti, senza un primo strato nell'interrogazione:
+	 * le letture che chiedono solo il conteggio o solo gli identificativi non
+	 * passano da qui, e il totale che l'interfaccia informatica dichiara può
+	 * contare anche i commenti tolti. Il numero non dice niente di quale
+	 * contenuto fossero. Righe C-263 e C-264.
+	 *
+	 * @internal Aggancio di `the_comments`, e aiuto di filtra_risultati().
+	 *
+	 * @param mixed $commenti Commenti restituiti.
+	 * @return mixed I commenti senza quelli dei contenuti scaduti.
+	 */
+	public static function filtra_commenti( $commenti ) {
+		if ( ! is_array( $commenti ) || empty( $commenti ) || ! self::superficie_pubblica() ) {
+			return $commenti;
+		}
+
+		$rimasti = array();
+
+		foreach ( $commenti as $commento ) {
+			if ( is_object( $commento ) && isset( $commento->comment_post_ID ) && self::da_nascondere( (int) $commento->comment_post_ID ) ) {
+				continue;
+			}
+
+			$rimasti[] = $commento;
+		}
+
+		return $rimasti;
+	}
+
+	/**
+	 * Il reindirizzamento automatico non porta a un contenuto da togliere di
+	 * mezzo.
+	 *
+	 * Quando una pagina non si trova, WordPress prova a indovinare dove si
+	 * voleva andare: legge il numero chiesto nell'indirizzo, oppure cerca un
+	 * contenuto il cui nome cominci come l'indirizzo, e manda il visitatore lì.
+	 * Tutte e due le strade leggono la banca dati direttamente, senza passare
+	 * dal filtro. Per uno scaduto l'indirizzo di destinazione, che contiene il
+	 * titolo, uscirebbe nel reindirizzamento, mentre per un numero inesistente
+	 * la pagina resta "non trovata".
+	 *
+	 * La decisione guarda la destinazione e non la strada che l'ha trovata:
+	 * il numero chiesto, se ce n'è uno, e il contenuto a cui porta l'indirizzo
+	 * di arrivo, letto con il filtro sospeso perché altrimenti uno scaduto non
+	 * porterebbe a niente. Se l'uno o l'altro è da togliere di mezzo, il
+	 * reindirizzamento si annulla e la pagina resta "non trovata". Riga C-273.
+	 *
+	 * @internal Aggancio di `redirect_canonical`.
+	 *
+	 * @param mixed $destinazione Indirizzo di arrivo scelto da WordPress.
+	 * @param mixed $richiesto    Indirizzo chiesto.
+	 * @return mixed L'indirizzo di arrivo, oppure false.
+	 */
+	public static function filtra_reindirizzamento( $destinazione, $richiesto = '' ) {
+		unset( $richiesto );
+
+		if ( ! is_string( $destinazione ) || '' === $destinazione || ! self::superficie_pubblica() ) {
+			return $destinazione;
+		}
+
+		foreach ( array( 'p', 'page_id', 'attachment_id' ) as $variabile ) {
+			if ( self::da_nascondere( (int) get_query_var( $variabile ) ) ) {
+				return false;
+			}
+		}
+
+		self::$sospeso = true;
+
+		try {
+			$arrivo = url_to_postid( $destinazione );
+		} finally {
+			self::$sospeso = false;
+		}
+
+		return self::da_nascondere( (int) $arrivo ) ? false : $destinazione;
+	}
+
+	/**
+	 * Il vecchio nome di un contenuto da togliere di mezzo non porta al suo
+	 * indirizzo nuovo.
+	 *
+	 * Quando un contenuto cambia nome WordPress conserva quello vecchio e manda
+	 * chi apre il vecchio indirizzo a quello nuovo. Il vecchio nome si cerca
+	 * direttamente nella banca dati, senza passare dal filtro: per uno scaduto
+	 * il reindirizzamento direbbe che il contenuto esiste e quale è il suo
+	 * indirizzo. Con il numero azzerato WordPress rinuncia e la pagina resta
+	 * "non trovata", come per un nome mai esistito. Riga C-274.
+	 *
+	 * @internal Aggancio di `old_slug_redirect_post_id`.
+	 *
+	 * @param mixed $numero Contenuto trovato dal vecchio nome.
+	 * @return mixed Il numero invariato, oppure 0.
+	 */
+	public static function filtra_vecchio_nome( $numero ) {
+		if ( ! self::superficie_pubblica() || ! is_numeric( $numero ) ) {
+			return $numero;
+		}
+
+		return self::da_nascondere( (int) $numero ) ? 0 : $numero;
+	}
+
+	/**
+	 * L'elenco dei commenti chiesto per un contenuto da togliere di mezzo è
+	 * quello di un contenuto che non esiste.
+	 *
+	 * Togliere i commenti restituiti, come fa filtra_commenti(), non basta qui:
+	 * l'interfaccia informatica conta i commenti con un'interrogazione a parte e
+	 * dichiara il totale nelle intestazioni, che per uno scaduto con dei
+	 * commenti non sarebbe zero. L'interrogazione stessa esclude allora i
+	 * contenuti da togliere di mezzo fra quelli chiesti, e conteggio ed elenco
+	 * vengono tutti e due da quella. Riga C-275.
+	 *
+	 * **Il limite resta per l'elenco senza contenuto.** Lì il totale conta
+	 * ancora i commenti tolti, come dice filtra_commenti(): il numero non dice
+	 * di quale contenuto fossero.
+	 *
+	 * @internal Aggancio di `rest_comment_query`.
+	 *
+	 * @param mixed $argomenti Argomenti dell'interrogazione dei commenti.
+	 * @return mixed Gli argomenti, con i contenuti da togliere di mezzo esclusi.
+	 */
+	public static function filtra_commenti_rest( $argomenti ) {
+		if ( ! is_array( $argomenti ) || empty( $argomenti['post__in'] ) || ! self::superficie_pubblica() ) {
+			return $argomenti;
+		}
+
+		$esclusi = array();
+
+		foreach ( (array) $argomenti['post__in'] as $numero ) {
+			if ( self::da_nascondere( (int) $numero ) ) {
+				$esclusi[] = (int) $numero;
+			}
+		}
+
+		if ( ! empty( $esclusi ) ) {
+			$argomenti['post__not_in'] = array_merge( isset( $argomenti['post__not_in'] ) ? (array) $argomenti['post__not_in'] : array(), $esclusi );
+		}
+
+		return $argomenti;
 	}
 
 	/**
@@ -746,6 +1196,30 @@ final class Conformita_Core_Filtro_Scadenza {
 	 */
 	public static function filtra_dato_xmlrpc( $dati, $contenuto = null ) {
 		return self::da_nascondere( $contenuto ) ? array() : $dati;
+	}
+
+	/**
+	 * L'interfaccia di pubblicazione remota non restituisce il commento di un
+	 * contenuto scaduto.
+	 *
+	 * Il singolo commento lo legge con `get_comment()`, che non passa dal
+	 * ricontrollo dei commenti, e lo prepara di qui. Stessa scelta prudente e
+	 * stesso esito della riga C-18 per il contenuto: l'insieme vuoto. L'elenco
+	 * dei commenti della stessa interfaccia passa invece da `the_comments`.
+	 * Riga C-271.
+	 *
+	 * @internal Aggancio di `xmlrpc_prepare_comment`.
+	 *
+	 * @param mixed $dati     Dati preparati da WordPress.
+	 * @param mixed $commento Commento a cui si riferiscono.
+	 * @return mixed I dati invariati, oppure l'insieme vuoto.
+	 */
+	public static function filtra_commento_xmlrpc( $dati, $commento = null ) {
+		if ( ! $commento instanceof WP_Comment ) {
+			return $dati;
+		}
+
+		return self::da_nascondere( (int) $commento->comment_post_ID ) ? array() : $dati;
 	}
 
 	/**
