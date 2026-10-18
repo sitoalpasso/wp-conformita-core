@@ -1345,7 +1345,8 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-279: chi consulta non apre bozze, contenuti cestinati e allegati
+	 * C-279: chi consulta non apre contenuti privati o in attesa, bozze,
+	 * contenuti cestinati e allegati
 	 * cestinati, che restano a chi gestisce il tipo; il rifiuto e' quello di
 	 * sempre.
 	 */
@@ -1371,7 +1372,14 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			)
 		);
 
+		$privato          = $this->atto( 'private' );
+		$allegato_privato = $this->allegato( $privato );
+		$in_attesa        = $this->atto( 'pending' );
+		$allegato_attesa  = $this->allegato( $in_attesa );
+
 		$casi = array(
+			'privato'             => array( $privato, $allegato_privato ),
+			'in attesa'           => array( $in_attesa, $allegato_attesa ),
 			'bozza'               => array( $bozza, $allegato_bozza ),
 			'contenuto cestinato' => array( $cestinato, $allegato_cestinato ),
 			'allegato cestinato'  => array( $pubblicato, $allegato_ritirato ),

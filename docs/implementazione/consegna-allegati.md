@@ -1910,7 +1910,7 @@ con `conformita_core_`, e il tipo non contiene trattini (riga C-86).
 | C-276 | Il nome del permesso: uno per tipo, diverso per tipi diversi, diverso da ogni permesso della mappa del tipo e da quello del registro; errore per un tipo non registrato |
 | C-277 | Dopo la registrazione del tipo nessun ruolo ha il permesso, amministratore compreso |
 | C-278 | Chi ha solo il permesso di consultazione apre dal punto amministrativo il file di un contenuto pubblicato scaduto e quello di uno valido |
-| C-279 | Chi ha solo il permesso di consultazione non apre il file di una bozza, di un contenuto cestinato, di un allegato cestinato: il rifiuto è quello di sempre; chi gestisce il tipo li apre |
+| C-279 | Chi ha solo il permesso di consultazione non apre il file di un contenuto privato o in attesa, di una bozza, di un contenuto cestinato, di un allegato cestinato: il rifiuto è quello di sempre; chi gestisce il tipo li apre |
 | C-280 | Il permesso di un tipo non apre i file di un altro tipo |
 | C-281 | Chi ha solo il permesso di consultazione non può modificare, cancellare né pubblicare il contenuto, e dal punto pubblico il file scaduto resta chiuso anche per lui |
 | C-282 | Il nonce resta obbligatorio anche per chi consulta; versione dell'interfaccia 1.7.0 |
