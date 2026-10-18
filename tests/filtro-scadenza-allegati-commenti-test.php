@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sulle strade che passano da un allegato o da un
  * commento, e il rifiuto che non si distingue da un indirizzo sbagliato: righe
- * C-259..C-272 del catalogo.
+ * C-259..C-273 del catalogo.
  *
  * **Che cosa avevano in comune i buchi.** Un allegato e un commento non hanno
  * una data di fine propria: la loro scadenza e' quella del contenuto a cui
@@ -657,6 +657,74 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 				}
 			}
 		}
+	}
+
+	/**
+	 * C-273: il reindirizzamento automatico di una pagina non trovata non porta
+	 * all'indirizzo di uno scaduto, del suo allegato, ne' di uno indovinato
+	 * dal nome.
+	 *
+	 * Quando una pagina non si trova, WordPress prova a indovinare dove si
+	 * voleva andare: legge il numero chiesto, o cerca un contenuto il cui nome
+	 * cominci come l'indirizzo, e manda il visitatore all'indirizzo trovato.
+	 * Lo legge direttamente, senza passare dal filtro: per uno scaduto
+	 * l'indirizzo di destinazione, che contiene il titolo, uscirebbe nel
+	 * reindirizzamento, mentre per un numero inesistente non esce niente.
+	 */
+	public function test_c273_reindirizzamento_della_pagina_non_trovata() {
+		$this->set_permalink_structure( '/%postname%/' );
+
+		/*
+		 * Il tipo si registra di nuovo dopo aver acceso gli indirizzi leggibili,
+		 * con la sua variabile d'interrogazione, come su un sito vero: registrato
+		 * prima, i suoi indirizzi resterebbero quelli semplici, e il
+		 * reindirizzamento verso l'allegato non avrebbe un indirizzo diverso da
+		 * quello chiesto, quindi nessun reindirizzamento da misurare.
+		 */
+		unregister_post_type( self::TIPO );
+		Conformita_Core_Tipi::azzera();
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				self::TIPO,
+				array(
+					'sezione'      => self::SEZIONE,
+					'show_in_rest' => true,
+					'argomenti'    => array(
+						'public'      => true,
+						'has_archive' => true,
+					),
+				)
+			)
+		);
+		flush_rewrite_rules();
+
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30', 'Graduatoria valida riservata' );
+		$scaduto = $this->contenuto( '2026-09-08', 'Bando scaduto riservato' );
+
+		$allegato_buono = $this->allegato_di( $valido );
+		$allegato_morto = $this->allegato_di( $scaduto );
+
+		$casi = array(
+			'numero del contenuto'  => array( '/?p=' . $valido, '/?p=' . $scaduto ),
+			'numero dell\'allegato' => array( '/?attachment_id=' . $allegato_buono, '/?attachment_id=' . $allegato_morto ),
+			'nome indovinato'       => array( '/' . self::TIPO . '/graduatoria-val/', '/' . self::TIPO . '/bando-scad/' ),
+		);
+
+		foreach ( $casi as $caso => $indirizzi ) {
+			$this->go_to( home_url( $indirizzi[0] ) );
+			$this->assertNotEmpty( redirect_canonical( home_url( $indirizzi[0] ), false ), 'Per il valido WordPress reindirizza: senza, la prova sotto non misurerebbe niente. Caso: ' . $caso );
+
+			$this->go_to( home_url( $indirizzi[1] ) );
+			$this->assertTrue( is_404(), 'Lo scaduto non si trova. Caso: ' . $caso );
+			$this->assertEmpty( redirect_canonical( home_url( $indirizzi[1] ), false ), 'Nessun reindirizzamento verso lo scaduto. Caso: ' . $caso );
+		}
+
+		$inesistente = home_url( '/?p=' . $this->numero_inesistente() );
+		$this->go_to( $inesistente );
+		$this->assertTrue( is_404() );
+		$this->assertEmpty( redirect_canonical( $inesistente, false ), 'Come per un numero inesistente.' );
 	}
 
 	/**

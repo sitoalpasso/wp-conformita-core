@@ -873,7 +873,7 @@ codice del primo giro, C-256 e C-257 su quello del secondo, C-258 su quello del 
 ## 17. Allegati, commenti e rifiuto indistinguibile
 
 Unità a parte, aperta dopo le prove dell'albo sugli atti scaduti, che con il tipo aperto da
-un altro componente hanno trovato quattro strade ancora aperte. Righe C-259..C-272, prove in
+un altro componente hanno trovato quattro strade ancora aperte. Righe C-259..C-273, prove in
 `tests/filtro-scadenza-allegati-commenti-test.php`. Versione dell'interfaccia da `1.5.0` a
 `1.6.0`.
 
@@ -917,6 +917,7 @@ contiene il titolo.
 | Richiesta di opzioni sul singolo scaduto | WordPress la serve da sé con la descrizione della rotta, uguale per ogni numero: si ricalcola solo `Allow`, riconoscendo la rotta del singolo dalla funzione che ne servirebbe la lettura | C-270 |
 | Singolo commento nella pubblicazione remota | `xmlrpc_prepare_comment`, insieme vuoto come per il contenuto (C-18); l'elenco passa da `the_comments` | C-271 |
 | Contenuto con numero zero o negativo | non è di nessun contenuto: un commento senza contenuto non eredita la scadenza del contenuto corrente della pagina | C-269 |
+| Reindirizzamento della pagina non trovata | `redirect_canonical`: WordPress, davanti a una pagina non trovata, cerca da sé il contenuto dal numero nell'indirizzo (`p`, `page_id`, `attachment_id`) o dal nome, e manda il visitatore al suo indirizzo. Se il numero richiesto o la destinazione è da togliere di mezzo, il reindirizzamento si annulla e resta la pagina non trovata | C-273 |
 
 **Perché il rifiuto si chiede alla rotta.** Scriverlo qui con il codice di WordPress sarebbe
 bastato oggi, ma una versione che cambiasse codice o messaggio avrebbe riaperto la differenza
@@ -955,6 +956,7 @@ numero inesistente, con lo stesso utente e nello stesso momento.
 | C-270 | Richiesta di opzioni sul singolo contenuto, allegato e commento scaduti: identica al numero inesistente, intestazione `Allow` compresa; per il valido la lettura risulta permessa |
 | C-272 | Lettura del singolo contenuto, allegato e commento scaduti con un parametro non valido, con GET e HEAD: identica al numero inesistente, intestazione `Allow` compresa; sul valido l'intestazione dice che la lettura è permessa |
 | C-271 | Pubblicazione remota: il commento dello scaduto e del suo allegato non è restituito, né da solo né nell'elenco; quello del valido sì |
+| C-273 | Con indirizzi leggibili, la pagina dell'allegato di un contenuto scaduto chiesta per numero e il contenuto scaduto chiesto per numero rispondono pagina non trovata senza reindirizzamento, come un numero inesistente; l'allegato di un contenuto valido è reindirizzato al suo indirizzo |
 
 Le prove confrontano le risposte come le riceve chi le chiede da fuori, cioè dopo
 `rest_post_dispatch`, e verificano che il termine di paragone sia il "non trovato" del
@@ -989,6 +991,16 @@ Ora si decide dalla rotta e dal numero, per qualunque risposta. Riga C-272. La r
 agganci del motore, ne conosce due in più: `xmlrpc_prepare_media_item` e `the_comments`. La
 prova della versione nel meccanismo di indicizzazione non fissa più la versione esatta ma
 "almeno 1.5.0", come era già successo alla riga C-223 del registro.
+
+### Il quarto giro di revisione
+
+Un rilievo, vero: con gli indirizzi leggibili, chi chiede la pagina dell'allegato di uno
+scaduto per numero riceve dall'interrogazione una pagina non trovata, ma subito dopo
+WordPress prova a indovinare dove mandarlo, legge l'allegato direttamente e risponde con un
+reindirizzamento al suo indirizzo, che ne contiene il nome. Lo stesso valeva per il numero
+dello scaduto stesso e per la ricerca per nome. Ora il reindirizzamento si annulla quando il
+numero chiesto o la destinazione indovinata sono da togliere di mezzo. Riga C-273. La riga
+C-98 conosce anche `xmlrpc_prepare_comment`, `rest_post_dispatch` e `redirect_canonical`.
 
 **Per chi usa core.** Il rifiuto del singolo contenuto scaduto nell'interfaccia informatica
 non ha più il codice `conformita_core_contenuto_non_trovato`: è quello di WordPress per un

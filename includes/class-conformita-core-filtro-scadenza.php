@@ -78,6 +78,18 @@ final class Conformita_Core_Filtro_Scadenza {
 	private static $avviato = false;
 
 	/**
+	 * Il filtro è sospeso per una lettura fatta da core stesso.
+	 *
+	 * Serve solo a `filtra_reindirizzamento()`, che deve sapere a quale
+	 * contenuto porta un indirizzo anche quando quel contenuto è scaduto: con
+	 * il filtro acceso la risposta sarebbe "a nessuno". Si accende e si spegne
+	 * nella stessa funzione.
+	 *
+	 * @var bool
+	 */
+	private static $sospeso = false;
+
+	/**
 	 * Aggancia i filtri del motore.
 	 *
 	 * @internal Non fa parte dell'interfaccia pubblica verso i componenti. Il
@@ -159,6 +171,11 @@ final class Conformita_Core_Filtro_Scadenza {
 				'argomenti' => 3,
 				// Dopo rest_send_allow_header(), che WordPress aggancia a 10.
 				'priorita'  => 11,
+			),
+			array(
+				'aggancio'  => 'redirect_canonical',
+				'metodo'    => 'filtra_reindirizzamento',
+				'argomenti' => 2,
 			),
 			array(
 				'aggancio'  => 'oembed_response_data',
@@ -268,6 +285,10 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * @return bool
 	 */
 	private static function superficie_pubblica() {
+		if ( self::$sospeso ) {
+			return false;
+		}
+
 		return ! ( is_admin() && ! wp_doing_ajax() );
 	}
 
@@ -1008,6 +1029,54 @@ final class Conformita_Core_Filtro_Scadenza {
 		}
 
 		return $rimasti;
+	}
+
+	/**
+	 * Il reindirizzamento automatico non porta a un contenuto da togliere di
+	 * mezzo.
+	 *
+	 * Quando una pagina non si trova, WordPress prova a indovinare dove si
+	 * voleva andare: legge il numero chiesto nell'indirizzo, oppure cerca un
+	 * contenuto il cui nome cominci come l'indirizzo, e manda il visitatore lì.
+	 * Tutte e due le strade leggono la banca dati direttamente, senza passare
+	 * dal filtro. Per uno scaduto l'indirizzo di destinazione, che contiene il
+	 * titolo, uscirebbe nel reindirizzamento, mentre per un numero inesistente
+	 * la pagina resta "non trovata".
+	 *
+	 * La decisione guarda la destinazione e non la strada che l'ha trovata:
+	 * il numero chiesto, se ce n'è uno, e il contenuto a cui porta l'indirizzo
+	 * di arrivo, letto con il filtro sospeso perché altrimenti uno scaduto non
+	 * porterebbe a niente. Se l'uno o l'altro è da togliere di mezzo, il
+	 * reindirizzamento si annulla e la pagina resta "non trovata". Riga C-273.
+	 *
+	 * @internal Aggancio di `redirect_canonical`.
+	 *
+	 * @param mixed $destinazione Indirizzo di arrivo scelto da WordPress.
+	 * @param mixed $richiesto    Indirizzo chiesto.
+	 * @return mixed L'indirizzo di arrivo, oppure false.
+	 */
+	public static function filtra_reindirizzamento( $destinazione, $richiesto = '' ) {
+		unset( $richiesto );
+
+		if ( ! is_string( $destinazione ) || '' === $destinazione || ! self::superficie_pubblica() ) {
+			return $destinazione;
+		}
+
+		foreach ( array( 'p', 'page_id', 'attachment_id' ) as $variabile ) {
+			if ( self::da_nascondere( (int) get_query_var( $variabile ) ) ) {
+				return false;
+			}
+		}
+
+		self::$sospeso = true;
+
+		try {
+			$arrivo = url_to_postid( $destinazione );
+		} finally {
+			self::$sospeso = false;
+		}
+
+		return self::da_nascondere( (int) $arrivo ) ? false : $destinazione;
 	}
 
 	/**
