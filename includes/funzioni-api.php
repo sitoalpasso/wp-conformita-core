@@ -149,6 +149,24 @@ if ( ! function_exists( 'conformita_core_capacita_tipo' ) ) {
 	}
 }
 
+if ( ! function_exists( 'conformita_core_capacita_consultazione_scaduti' ) ) {
+	/**
+	 * Il permesso di consultare gli scaduti di un tipo registrato.
+	 *
+	 * Apre, dal punto amministrativo di consegna e in sola lettura, i file dei
+	 * contenuti pubblicati del tipo, scaduti compresi. Non dà nessun permesso
+	 * di gestione e non riapre il punto pubblico. Uno per tipo, non compreso
+	 * in conformita_core_capacita_tipo(). Core non lo assegna a nessun ruolo:
+	 * lo assegna il componente.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return string|WP_Error Nome del permesso, oppure errore.
+	 */
+	function conformita_core_capacita_consultazione_scaduti( $tipo ) {
+		return Conformita_Core_Tipi::capacita_consultazione_scaduti( $tipo );
+	}
+}
+
 if ( ! function_exists( 'conformita_core_tipi_registrati' ) ) {
 	/**
 	 * Identificativi dei tipi registrati, nell'ordine di registrazione.

@@ -514,6 +514,31 @@ final class Conformita_Core_Tipi {
 	}
 
 	/**
+	 * Il permesso di consultare gli scaduti di un tipo registrato.
+	 *
+	 * Uno per tipo, e fuori dalla mappa di capacita(): un componente che
+	 * assegna a un ruolo tutta la mappa non deve ritrovarsi a dare anche la
+	 * consultazione senza averlo deciso. Come gli altri permessi di core non è
+	 * assegnato a nessun ruolo.
+	 *
+	 * Il nome non può coincidere con un permesso derivato da un altro tipo:
+	 * quelli cominciano con un verbo di WordPress, questo con il prefisso di
+	 * core, e il tipo non contiene trattini (riga C-86). Riga C-276.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return string|WP_Error Nome del permesso, oppure errore.
+	 */
+	public static function capacita_consultazione_scaduti( $tipo ) {
+		$voce = self::voce( $tipo );
+
+		if ( is_wp_error( $voce ) ) {
+			return $voce;
+		}
+
+		return 'conformita_core_consultare_scaduti_' . self::canonico( $tipo );
+	}
+
+	/**
 	 * Identificativi dei tipi registrati, nell'ordine di registrazione.
 	 *
 	 * @return array<int, string>
