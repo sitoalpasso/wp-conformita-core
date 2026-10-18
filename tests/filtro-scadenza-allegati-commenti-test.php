@@ -814,7 +814,13 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 			$this->assertSame( 1, (int) $elenco->get_headers()['X-WP-Total'] );
 
 			foreach ( array( 'GET', 'HEAD' ) as $metodo ) {
+				$del_valido = $this->chiedi( '/wp/v2/comments', array( 'post' => array( $valido ) ), $metodo );
+				$this->assertSame( 200, $del_valido->get_status(), 'Il metodo ' . $metodo . ' funziona sulla collezione: senza, il confronto sotto potrebbe essere fra due errori uguali.' );
+				$this->assertSame( 1, (int) $del_valido->get_headers()['X-WP-Total'] );
+
 				$inesistente = $this->visibile( $this->chiedi( '/wp/v2/comments', array( 'post' => array( $this->numero_inesistente() ) ), $metodo ) );
+				$this->assertSame( 200, $inesistente['stato'] );
+				$this->assertSame( 0, (int) $inesistente['intestazioni']['X-WP-Total'] );
 
 				foreach ( array( $scaduto, $allegato ) as $nascosto ) {
 					$this->assertSame(

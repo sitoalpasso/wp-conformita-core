@@ -1015,6 +1015,13 @@ dei commenti chiesto per uno scaduto era vuoto, ma il totale nelle intestazioni 
 ancora i suoi commenti, mentre per un contenuto inesistente diceva zero. Lo stato invece era
 lo stesso, 200, nei due casi. Riga C-275.
 
+### Il sesto giro di revisione
+
+Nessun difetto nel codice. Un rilievo sulla prova C-275: con la richiesta di sole intestazioni
+confrontava lo scaduto con l'inesistente senza controllare che la collezione rispondesse, e
+due errori uguali l'avrebbero lasciata verde. Ora per ogni metodo verifica prima che il
+valido risponda con il suo totale e che l'inesistente risponda con totale zero.
+
 **Per chi usa core.** Il rifiuto del singolo contenuto scaduto nell'interfaccia informatica
 non ha più il codice `conformita_core_contenuto_non_trovato`: è quello di WordPress per un
 numero inesistente. Un componente che nelle proprie prove pretendeva il vecchio codice deve
