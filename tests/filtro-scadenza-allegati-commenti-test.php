@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sulle strade che passano da un allegato o da un
  * commento, e il rifiuto che non si distingue da un indirizzo sbagliato: righe
- * C-259..C-271 del catalogo.
+ * C-259..C-272 del catalogo.
  *
  * **Che cosa avevano in comune i buchi.** Un allegato e un commento non hanno
  * una data di fine propria: la loro scadenza e' quella del contenuto a cui
@@ -612,6 +612,49 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 					$this->visibile( $this->chiedi( $base . '/' . $numeri[1], array(), 'OPTIONS' ) ),
 					'La richiesta di opzioni su ' . $base . ' risponde come per un numero inesistente, per l\'utente ' . $utente . '.'
 				);
+			}
+		}
+	}
+
+	/**
+	 * C-272: una lettura del singolo scaduto con un parametro non valido, che
+	 * WordPress rifiuta prima di ogni controllo, risponde come per un numero
+	 * inesistente, intestazioni comprese.
+	 */
+	public function test_c272_parametro_non_valido() {
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30' );
+		$scaduto = $this->contenuto( '2026-09-08' );
+
+		$strade = array(
+			'/wp/v2/' . self::TIPO => array( $valido, $scaduto ),
+			'/wp/v2/media'         => array( $this->allegato_di( $valido ), $this->allegato_di( $scaduto ) ),
+			'/wp/v2/comments'      => array( $this->commento_su( $valido, 'Visibile' ), $this->commento_su( $scaduto, 'Nascosto' ) ),
+		);
+
+		$sbagliato = array( 'context' => 'contesto-che-non-esiste' );
+
+		foreach ( array( 0, $this->utente_autorizzato() ) as $utente ) {
+			wp_set_current_user( $utente );
+
+			foreach ( $strade as $base => $numeri ) {
+				foreach ( array( 'GET', 'HEAD' ) as $metodo ) {
+					$this->assertSame( 200, $this->chiedi( $base . '/' . $numeri[0], array(), $metodo )->get_status(), 'Il valido risponde: ' . $base . ' ' . $metodo );
+
+					$sul_valido = $this->chiedi( $base . '/' . $numeri[0], $sbagliato, $metodo );
+					$this->assertSame( 400, $sul_valido->get_status(), 'Il parametro e\' rifiutato dalla verifica: ' . $base . ' ' . $metodo );
+					$this->assertStringContainsString( 'GET', (string) ( $sul_valido->get_headers()['Allow'] ?? '' ), 'Sul valido l\'intestazione dice che la lettura e\' permessa: senza, il confronto sotto non misurerebbe niente. ' . $base . ' ' . $metodo );
+
+					$riferimento = $this->chiedi( $base . '/' . $this->numero_inesistente(), $sbagliato, $metodo );
+					$this->assertSame( 400, $riferimento->get_status() );
+
+					$this->assertSame(
+						$this->visibile( $riferimento ),
+						$this->visibile( $this->chiedi( $base . '/' . $numeri[1], $sbagliato, $metodo ) ),
+						'Con un parametro non valido ' . $base . ' ' . $metodo . ' risponde come per un numero inesistente, per l\'utente ' . $utente . '.'
+					);
+				}
 			}
 		}
 	}

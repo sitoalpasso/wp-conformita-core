@@ -78,18 +78,6 @@ final class Conformita_Core_Filtro_Scadenza {
 	private static $avviato = false;
 
 	/**
-	 * Le richieste dell'interfaccia informatica rifiutate come inesistenti, con
-	 * la richiesta di paragone per un numero che non esiste.
-	 *
-	 * Serve a `normalizza_risposta_rest()`, che lavora dopo lo smistamento sulla
-	 * risposta già pronta. La mappa è debole: una richiesta finita non resta
-	 * qui dentro.
-	 *
-	 * @var WeakMap<WP_REST_Request, WP_REST_Request>|null
-	 */
-	private static $rifiutate = null;
-
-	/**
 	 * Aggancia i filtri del motore.
 	 *
 	 * @internal Non fa parte dell'interfaccia pubblica verso i componenti. Il
@@ -695,16 +683,26 @@ final class Conformita_Core_Filtro_Scadenza {
 	}
 
 	/**
-	 * La risposta a una richiesta rifiutata come inesistente porta le stesse
-	 * intestazioni di un numero che non esiste.
+	 * Ogni risposta sul singolo scaduto porta le stesse intestazioni di un
+	 * numero che non esiste.
 	 *
 	 * Prima di spedire la risposta WordPress aggiunge l'intestazione `Allow`,
 	 * e per farlo chiede di nuovo i permessi di ogni metodo della rotta con il
 	 * numero della richiesta. Per un contenuto scaduto ma esistente la lettura
 	 * risulterebbe permessa, per un numero inesistente no: l'intestazione
 	 * direbbe quello che il rifiuto tace. Qui la si ricalcola con la richiesta
-	 * di paragone, la stessa usata per il rifiuto. Righe C-259, C-261, C-262 e
-	 * C-263.
+	 * di paragone.
+	 *
+	 * **Si decide dalla rotta e dal numero, non da chi ha risposto.** La prima
+	 * stesura ricalcolava l'intestazione solo dove il rifiuto era venuto da
+	 * questo filtro, e la seconda vi aggiungeva la richiesta di opzioni. Ma la
+	 * risposta può arrivare anche da altrove prima di questo filtro, per esempio
+	 * dalla verifica dei parametri, che rifiuta un contesto sconosciuto con lo
+	 * stesso 400 per ogni numero: l'intestazione restava quella del numero vero.
+	 * Ora vale per qualunque lettura o richiesta di opzioni sul singolo da
+	 * togliere di mezzo, tranne il contesto di modifica di chi la rotta
+	 * autorizza, che riceve il contenuto vero. Righe C-259, C-261, C-262,
+	 * C-263, C-270 e C-272.
 	 *
 	 * @internal Aggancio di `rest_post_dispatch`, dopo `rest_send_allow_header()`.
 	 *
@@ -712,21 +710,16 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * @param mixed $server    Server dell'interfaccia.
 	 * @param mixed $richiesta Richiesta servita.
 	 * @return mixed La risposta, con le intestazioni del numero inesistente se
-	 *               la richiesta era stata rifiutata qui.
+	 *               riguarda un singolo da togliere di mezzo.
 	 */
 	public static function normalizza_risposta_rest( $risposta, $server = null, $richiesta = null ) {
-		if ( ! $richiesta instanceof WP_REST_Request ) {
+		if ( ! $richiesta instanceof WP_REST_Request || ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
 			return $risposta;
 		}
 
-		if ( null !== self::$rifiutate && isset( self::$rifiutate[ $richiesta ] ) ) {
-			$finta = self::$rifiutate[ $richiesta ];
-			unset( self::$rifiutate[ $richiesta ] );
-		} else {
-			$finta = self::paragone_della_richiesta_di_opzioni( $risposta, $server, $richiesta );
-		}
+		$finta = self::paragone_del_singolo( $risposta, $server, $richiesta );
 
-		if ( null === $finta || ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
+		if ( null === $finta ) {
 			return $risposta;
 		}
 
@@ -738,23 +731,24 @@ final class Conformita_Core_Filtro_Scadenza {
 	}
 
 	/**
-	 * La richiesta di paragone per una richiesta di opzioni sul singolo
-	 * scaduto, se è quel caso.
+	 * La richiesta di paragone per una risposta sul singolo da togliere di
+	 * mezzo, se è quel caso.
 	 *
-	 * La richiesta di opzioni (`OPTIONS`) WordPress la serve da sé, prima di
-	 * ogni controllore, con la descrizione della rotta: la descrizione è la
-	 * stessa per ogni numero, ma l'intestazione `Allow` si calcola con il numero
-	 * vero, e direbbe che lo scaduto si può leggere. Qui si riconosce la rotta
-	 * del singolo dalla funzione che ne servirebbe la lettura, come per le altre
-	 * richieste, e si decide con lo stesso criterio. Riga C-270.
+	 * La rotta si riconosce da quella che la risposta dichiara di aver servito
+	 * e dalla funzione che ne leggerebbe il singolo, come nel filtro della
+	 * richiesta: vale anche per la richiesta di opzioni, che WordPress serve da
+	 * sé con la descrizione della rotta, uguale per ogni numero (C-270), e per
+	 * un rifiuto della verifica dei parametri (C-272).
 	 *
-	 * @param mixed           $risposta  Risposta pronta.
-	 * @param mixed           $server    Server dell'interfaccia.
-	 * @param WP_REST_Request $richiesta Richiesta servita.
+	 * @param WP_REST_Response $risposta  Risposta pronta.
+	 * @param WP_REST_Server   $server    Server dell'interfaccia.
+	 * @param WP_REST_Request  $richiesta Richiesta servita.
 	 * @return WP_REST_Request|null La richiesta di paragone, oppure null.
 	 */
-	private static function paragone_della_richiesta_di_opzioni( $risposta, $server, WP_REST_Request $richiesta ) {
-		if ( 'OPTIONS' !== $richiesta->get_method() || ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
+	private static function paragone_del_singolo( WP_REST_Response $risposta, WP_REST_Server $server, WP_REST_Request $richiesta ) {
+		$metodo = $richiesta->get_method();
+
+		if ( ! in_array( $metodo, array( 'GET', 'HEAD', 'OPTIONS' ), true ) ) {
 			return null;
 		}
 
@@ -773,6 +767,11 @@ final class Conformita_Core_Filtro_Scadenza {
 			}
 
 			if ( ! self::singolo_da_nascondere( $controllore, $richiesta['id'] ) ) {
+				return null;
+			}
+
+			// Il contesto di modifica di chi la rotta autorizza ha ricevuto il contenuto vero.
+			if ( 'OPTIONS' !== $metodo && 'edit' === $richiesta['context'] && true === $controllore->get_item_permissions_check( $richiesta ) ) {
 				return null;
 			}
 
@@ -865,12 +864,6 @@ final class Conformita_Core_Filtro_Scadenza {
 	private static function rifiuto_come_inesistente( $controllore, WP_REST_Request $richiesta ) {
 		$finta = clone $richiesta;
 		$finta->set_param( 'id', -1 );
-
-		if ( null === self::$rifiutate ) {
-			self::$rifiutate = new WeakMap();
-		}
-
-		self::$rifiutate[ $richiesta ] = $finta;
 
 		$rifiuto = $controllore->get_item_permissions_check( $finta );
 
