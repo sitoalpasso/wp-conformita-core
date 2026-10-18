@@ -58,7 +58,7 @@
  * impreciso a un contenuto scaduto visibile.
  *
  * Righe di collaudo C-10, C-11, C-12, C-13, C-14, C-21, C-22, C-89, C-90,
- * C-92, C-93, C-97, C-98, C-101, C-102, C-103, C-104 e C-259..C-266.
+ * C-92, C-93, C-97, C-98, C-101, C-102, C-103, C-104 e C-259..C-275.
  *
  * @package Conformita_Core
  */
@@ -176,6 +176,16 @@ final class Conformita_Core_Filtro_Scadenza {
 				'aggancio'  => 'redirect_canonical',
 				'metodo'    => 'filtra_reindirizzamento',
 				'argomenti' => 2,
+			),
+			array(
+				'aggancio'  => 'old_slug_redirect_post_id',
+				'metodo'    => 'filtra_vecchio_nome',
+				'argomenti' => 1,
+			),
+			array(
+				'aggancio'  => 'rest_comment_query',
+				'metodo'    => 'filtra_commenti_rest',
+				'argomenti' => 1,
 			),
 			array(
 				'aggancio'  => 'oembed_response_data',
@@ -1077,6 +1087,70 @@ final class Conformita_Core_Filtro_Scadenza {
 		}
 
 		return self::da_nascondere( (int) $arrivo ) ? false : $destinazione;
+	}
+
+	/**
+	 * Il vecchio nome di un contenuto da togliere di mezzo non porta al suo
+	 * indirizzo nuovo.
+	 *
+	 * Quando un contenuto cambia nome WordPress conserva quello vecchio e manda
+	 * chi apre il vecchio indirizzo a quello nuovo. Il vecchio nome si cerca
+	 * direttamente nella banca dati, senza passare dal filtro: per uno scaduto
+	 * il reindirizzamento direbbe che il contenuto esiste e quale è il suo
+	 * indirizzo. Con il numero azzerato WordPress rinuncia e la pagina resta
+	 * "non trovata", come per un nome mai esistito. Riga C-274.
+	 *
+	 * @internal Aggancio di `old_slug_redirect_post_id`.
+	 *
+	 * @param mixed $numero Contenuto trovato dal vecchio nome.
+	 * @return mixed Il numero invariato, oppure 0.
+	 */
+	public static function filtra_vecchio_nome( $numero ) {
+		if ( ! self::superficie_pubblica() || ! is_numeric( $numero ) ) {
+			return $numero;
+		}
+
+		return self::da_nascondere( (int) $numero ) ? 0 : $numero;
+	}
+
+	/**
+	 * L'elenco dei commenti chiesto per un contenuto da togliere di mezzo è
+	 * quello di un contenuto che non esiste.
+	 *
+	 * Togliere i commenti restituiti, come fa filtra_commenti(), non basta qui:
+	 * l'interfaccia informatica conta i commenti con un'interrogazione a parte e
+	 * dichiara il totale nelle intestazioni, che per uno scaduto con dei
+	 * commenti non sarebbe zero. L'interrogazione stessa esclude allora i
+	 * contenuti da togliere di mezzo fra quelli chiesti, e conteggio ed elenco
+	 * vengono tutti e due da quella. Riga C-275.
+	 *
+	 * **Il limite resta per l'elenco senza contenuto.** Lì il totale conta
+	 * ancora i commenti tolti, come dice filtra_commenti(): il numero non dice
+	 * di quale contenuto fossero.
+	 *
+	 * @internal Aggancio di `rest_comment_query`.
+	 *
+	 * @param mixed $argomenti Argomenti dell'interrogazione dei commenti.
+	 * @return mixed Gli argomenti, con i contenuti da togliere di mezzo esclusi.
+	 */
+	public static function filtra_commenti_rest( $argomenti ) {
+		if ( ! is_array( $argomenti ) || empty( $argomenti['post__in'] ) || ! self::superficie_pubblica() ) {
+			return $argomenti;
+		}
+
+		$esclusi = array();
+
+		foreach ( (array) $argomenti['post__in'] as $numero ) {
+			if ( self::da_nascondere( (int) $numero ) ) {
+				$esclusi[] = (int) $numero;
+			}
+		}
+
+		if ( ! empty( $esclusi ) ) {
+			$argomenti['post__not_in'] = array_merge( isset( $argomenti['post__not_in'] ) ? (array) $argomenti['post__not_in'] : array(), $esclusi );
+		}
+
+		return $argomenti;
 	}
 
 	/**

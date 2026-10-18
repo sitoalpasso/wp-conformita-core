@@ -873,7 +873,7 @@ codice del primo giro, C-256 e C-257 su quello del secondo, C-258 su quello del 
 ## 17. Allegati, commenti e rifiuto indistinguibile
 
 Unità a parte, aperta dopo le prove dell'albo sugli atti scaduti, che con il tipo aperto da
-un altro componente hanno trovato quattro strade ancora aperte. Righe C-259..C-273, prove in
+un altro componente hanno trovato quattro strade ancora aperte. Righe C-259..C-275, prove in
 `tests/filtro-scadenza-allegati-commenti-test.php`. Versione dell'interfaccia da `1.5.0` a
 `1.6.0`.
 
@@ -918,6 +918,8 @@ contiene il titolo.
 | Singolo commento nella pubblicazione remota | `xmlrpc_prepare_comment`, insieme vuoto come per il contenuto (C-18); l'elenco passa da `the_comments` | C-271 |
 | Contenuto con numero zero o negativo | non è di nessun contenuto: un commento senza contenuto non eredita la scadenza del contenuto corrente della pagina | C-269 |
 | Reindirizzamento della pagina non trovata | `redirect_canonical`: WordPress, davanti a una pagina non trovata, cerca da sé il contenuto dal numero nell'indirizzo (`p`, `page_id`, `attachment_id`) o dal nome, e manda il visitatore al suo indirizzo. Se il numero richiesto o la destinazione è da togliere di mezzo, il reindirizzamento si annulla e resta la pagina non trovata | C-273 |
+| Vecchio indirizzo di un contenuto che ha cambiato nome | `old_slug_redirect_post_id`: WordPress cerca il vecchio nome nella banca dati e manda al nuovo indirizzo; per un contenuto da togliere di mezzo il numero si azzera e la pagina resta non trovata | C-274 |
+| Elenco dei commenti chiesto per contenuto | `rest_comment_query`: l'interrogazione esclude i contenuti da togliere di mezzo fra quelli chiesti, così l'elenco e il totale dichiarato nelle intestazioni sono quelli di un contenuto che non esiste. Vale per chiunque, come `the_comments` sull'elenco | C-275 |
 
 **Perché il rifiuto si chiede alla rotta.** Scriverlo qui con il codice di WordPress sarebbe
 bastato oggi, ma una versione che cambiasse codice o messaggio avrebbe riaperto la differenza
@@ -957,6 +959,8 @@ numero inesistente, con lo stesso utente e nello stesso momento.
 | C-272 | Lettura del singolo contenuto, allegato e commento scaduti con un parametro non valido, con GET e HEAD: identica al numero inesistente, intestazione `Allow` compresa; sul valido l'intestazione dice che la lettura è permessa |
 | C-271 | Pubblicazione remota: il commento dello scaduto e del suo allegato non è restituito, né da solo né nell'elenco; quello del valido sì |
 | C-273 | Con indirizzi leggibili, la pagina dell'allegato di un contenuto scaduto chiesta per numero e il contenuto scaduto chiesto per numero rispondono pagina non trovata senza reindirizzamento, come un numero inesistente; l'allegato di un contenuto valido è reindirizzato al suo indirizzo |
+| C-274 | Con indirizzi leggibili, il vecchio indirizzo di un contenuto scaduto che ha cambiato nome non porta al nuovo; quello del valido sì |
+| C-275 | Elenco dei commenti chiesto per un contenuto scaduto o per il suo allegato, con GET e HEAD: identico a quello per un contenuto inesistente, totale compreso; chiesto insieme a un valido, elenco e totale contano solo il valido |
 
 Le prove confrontano le risposte come le riceve chi le chiede da fuori, cioè dopo
 `rest_post_dispatch`, e verificano che il termine di paragone sia il "non trovato" del
@@ -1001,6 +1005,15 @@ reindirizzamento al suo indirizzo, che ne contiene il nome. Lo stesso valeva per
 dello scaduto stesso e per la ricerca per nome. Ora il reindirizzamento si annulla quando il
 numero chiesto o la destinazione indovinata sono da togliere di mezzo. Riga C-273. La riga
 C-98 conosce anche `xmlrpc_prepare_comment`, `rest_post_dispatch` e `redirect_canonical`.
+
+### Il quinto giro di revisione
+
+Due rilievi, veri. Il primo: quando un contenuto cambia nome WordPress conserva quello
+vecchio e manda chi lo apre all'indirizzo nuovo; è una strada diversa dal reindirizzamento
+del giro 4, e per uno scaduto rivelava l'indirizzo nuovo. Riga C-274. Il secondo: l'elenco
+dei commenti chiesto per uno scaduto era vuoto, ma il totale nelle intestazioni contava
+ancora i suoi commenti, mentre per un contenuto inesistente diceva zero. Lo stato invece era
+lo stesso, 200, nei due casi. Riga C-275.
 
 **Per chi usa core.** Il rifiuto del singolo contenuto scaduto nell'interfaccia informatica
 non ha più il codice `conformita_core_contenuto_non_trovato`: è quello di WordPress per un

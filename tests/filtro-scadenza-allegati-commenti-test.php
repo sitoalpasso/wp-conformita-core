@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sulle strade che passano da un allegato o da un
  * commento, e il rifiuto che non si distingue da un indirizzo sbagliato: righe
- * C-259..C-273 del catalogo.
+ * C-259..C-275 del catalogo.
  *
  * **Che cosa avevano in comune i buchi.** Un allegato e un commento non hanno
  * una data di fine propria: la loro scadenza e' quella del contenuto a cui
@@ -291,6 +291,36 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 	 */
 	private function numero_inesistente() {
 		return PHP_INT_MAX;
+	}
+
+	/**
+	 * Accende gli indirizzi leggibili e registra di nuovo il tipo.
+	 *
+	 * Il tipo si registra di nuovo dopo aver acceso gli indirizzi leggibili,
+	 * con la sua variabile d'interrogazione, come su un sito vero: registrato
+	 * prima, i suoi indirizzi resterebbero quelli semplici, e un
+	 * reindirizzamento non avrebbe un indirizzo diverso da quello chiesto,
+	 * quindi niente da misurare.
+	 */
+	private function indirizzi_leggibili() {
+		$this->set_permalink_structure( '/%postname%/' );
+
+		unregister_post_type( self::TIPO );
+		Conformita_Core_Tipi::azzera();
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				self::TIPO,
+				array(
+					'sezione'      => self::SEZIONE,
+					'show_in_rest' => true,
+					'argomenti'    => array(
+						'public'      => true,
+						'has_archive' => true,
+					),
+				)
+			)
+		);
+		flush_rewrite_rules();
 	}
 
 	/**
@@ -672,31 +702,7 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 	 * reindirizzamento, mentre per un numero inesistente non esce niente.
 	 */
 	public function test_c273_reindirizzamento_della_pagina_non_trovata() {
-		$this->set_permalink_structure( '/%postname%/' );
-
-		/*
-		 * Il tipo si registra di nuovo dopo aver acceso gli indirizzi leggibili,
-		 * con la sua variabile d'interrogazione, come su un sito vero: registrato
-		 * prima, i suoi indirizzi resterebbero quelli semplici, e il
-		 * reindirizzamento verso l'allegato non avrebbe un indirizzo diverso da
-		 * quello chiesto, quindi nessun reindirizzamento da misurare.
-		 */
-		unregister_post_type( self::TIPO );
-		Conformita_Core_Tipi::azzera();
-		$this->assertTrue(
-			conformita_core_registra_tipo(
-				self::TIPO,
-				array(
-					'sezione'      => self::SEZIONE,
-					'show_in_rest' => true,
-					'argomenti'    => array(
-						'public'      => true,
-						'has_archive' => true,
-					),
-				)
-			)
-		);
-		flush_rewrite_rules();
+		$this->indirizzi_leggibili();
 
 		$this->oggi_e( '2026-09-09' );
 
@@ -725,6 +731,104 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 		$this->go_to( $inesistente );
 		$this->assertTrue( is_404() );
 		$this->assertEmpty( redirect_canonical( $inesistente, false ), 'Come per un numero inesistente.' );
+	}
+
+	/**
+	 * C-274: il vecchio indirizzo di un contenuto scaduto a cui e' stato
+	 * cambiato il nome non porta al suo indirizzo nuovo.
+	 *
+	 * Quando un contenuto cambia nome WordPress si ricorda quello vecchio, e chi
+	 * apre il vecchio indirizzo viene mandato al nuovo. La ricerca del vecchio
+	 * nome legge la banca dati direttamente: per uno scaduto il reindirizzamento
+	 * direbbe che il contenuto esiste e quale e' il suo indirizzo, che contiene
+	 * il titolo. La prova esegue la funzione di WordPress e ferma il
+	 * reindirizzamento all'ultimo passo, per non uscire dalla suite.
+	 */
+	public function test_c274_vecchio_nome_di_uno_scaduto() {
+		$this->indirizzi_leggibili();
+		$this->oggi_e( '2026-09-09' );
+
+		$valido  = $this->contenuto( '2026-09-30', 'Primo nome valido' );
+		$scaduto = $this->contenuto( '2026-09-08', 'Primo nome scaduto' );
+
+		wp_update_post(
+			array(
+				'ID'        => $valido,
+				'post_name' => 'secondo-nome-valido',
+			)
+		);
+		wp_update_post(
+			array(
+				'ID'        => $scaduto,
+				'post_name' => 'secondo-nome-scaduto',
+			)
+		);
+
+		$destinazioni = array();
+		$cattura      = static function ( $indirizzo ) use ( &$destinazioni ) {
+			$destinazioni[] = $indirizzo;
+			return false;
+		};
+		add_filter( 'old_slug_redirect_url', $cattura, PHP_INT_MAX );
+
+		$this->go_to( home_url( '/' . self::TIPO . '/primo-nome-valido/' ) );
+		$this->assertTrue( is_404() );
+		wp_old_slug_redirect();
+		$this->assertSame( array( get_permalink( $valido ) ), $destinazioni, 'Per il valido WordPress reindirizza: senza, la prova sotto non misurerebbe niente.' );
+
+		$destinazioni = array();
+		$this->go_to( home_url( '/' . self::TIPO . '/primo-nome-scaduto/' ) );
+		$this->assertTrue( is_404() );
+		wp_old_slug_redirect();
+		$this->assertSame( array(), $destinazioni, 'Nessun reindirizzamento verso lo scaduto, come per un nome mai esistito.' );
+
+		remove_filter( 'old_slug_redirect_url', $cattura, PHP_INT_MAX );
+	}
+
+	/**
+	 * C-275: l'elenco dei commenti chiesto per un contenuto scaduto, o per il
+	 * suo allegato, e' identico a quello chiesto per un contenuto che non
+	 * esiste: stato, corpo e intestazioni, totale compreso, con GET e HEAD.
+	 *
+	 * Togliere i commenti dall'elenco non basta: il totale dichiarato nelle
+	 * intestazioni li conterebbe ancora, e direbbe che dietro quel numero c'e'
+	 * un contenuto con dei commenti. L'elenco del contenuto valido ha i suoi.
+	 */
+	public function test_c275_elenco_dei_commenti_per_contenuto() {
+		$this->oggi_e( '2026-09-09' );
+
+		$valido   = $this->contenuto( '2026-09-30' );
+		$scaduto  = $this->contenuto( '2026-09-08' );
+		$allegato = $this->allegato_di( $scaduto );
+
+		$buono = $this->commento_su( $valido, 'Commento visibile' );
+		$this->commento_su( $scaduto, 'Commento nascosto' );
+		$this->commento_su( $scaduto, 'Altro commento nascosto' );
+		$this->commento_su( $allegato, 'Commento sull\'allegato nascosto' );
+
+		foreach ( array( 0, $this->utente_autorizzato() ) as $utente ) {
+			wp_set_current_user( $utente );
+
+			$elenco = $this->chiedi( '/wp/v2/comments', array( 'post' => array( $valido ) ) );
+			$this->assertSame( array( $buono ), $this->identificativi( $elenco ) );
+			$this->assertSame( 1, (int) $elenco->get_headers()['X-WP-Total'] );
+
+			foreach ( array( 'GET', 'HEAD' ) as $metodo ) {
+				$inesistente = $this->visibile( $this->chiedi( '/wp/v2/comments', array( 'post' => array( $this->numero_inesistente() ) ), $metodo ) );
+
+				foreach ( array( $scaduto, $allegato ) as $nascosto ) {
+					$this->assertSame(
+						$inesistente,
+						$this->visibile( $this->chiedi( '/wp/v2/comments', array( 'post' => array( $nascosto ) ), $metodo ) ),
+						'Utente ' . $utente . ', metodo ' . $metodo . ', contenuto ' . $nascosto . '.'
+					);
+				}
+			}
+
+			$insieme = $this->chiedi( '/wp/v2/comments', array( 'post' => array( $valido, $scaduto ) ) );
+			$this->assertSame( array( $buono ), $this->identificativi( $insieme ) );
+			$this->assertSame( 1, (int) $insieme->get_headers()['X-WP-Total'], 'Il totale conta solo i commenti del valido.' );
+		}
 	}
 
 	/**
