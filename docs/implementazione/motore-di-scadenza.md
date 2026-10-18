@@ -873,7 +873,7 @@ codice del primo giro, C-256 e C-257 su quello del secondo, C-258 su quello del 
 ## 17. Allegati, commenti e rifiuto indistinguibile
 
 Unità a parte, aperta dopo le prove dell'albo sugli atti scaduti, che con il tipo aperto da
-un altro componente hanno trovato quattro strade ancora aperte. Righe C-259..C-267, prove in
+un altro componente hanno trovato quattro strade ancora aperte. Righe C-259..C-269, prove in
 `tests/filtro-scadenza-allegati-commenti-test.php`. Versione dell'interfaccia da `1.5.0` a
 `1.6.0`.
 
@@ -912,6 +912,9 @@ contiene il titolo.
 | Singolo commento nell'interfaccia informatica | `rest_request_before_callbacks`, come il singolo contenuto | C-263 |
 | Rifiuto del singolo | è quello che il controllo dei permessi della rotta dà per un numero negativo, cioè per un numero che non esiste: codice, messaggio, stato e intestazioni identici | C-261, C-263 |
 | Richiesta di sole intestazioni | trattata come la lettura | C-262 |
+| Intestazione `Allow` della risposta | ricalcolata in `rest_post_dispatch`, dopo che WordPress l'ha aggiunta, con la stessa richiesta di paragone del rifiuto | C-259, C-261, C-262, C-263 |
+| Contesto di modifica su uno scaduto | passa solo se il controllo dei permessi della rotta lo autorizza; altrimenti il rifiuto del numero inesistente | C-112, C-268 |
+| Contenuto con numero zero o negativo | non è di nessun contenuto: un commento senza contenuto non eredita la scadenza del contenuto corrente della pagina | C-269 |
 
 **Perché il rifiuto si chiede alla rotta.** Scriverlo qui con il codice di WordPress sarebbe
 bastato oggi, ma una versione che cambiasse codice o messaggio avrebbe riaperto la differenza
@@ -945,8 +948,25 @@ numero inesistente, con lo stesso utente e nello stesso momento.
 | C-265 | Feed generale dei commenti e feed della ricerca con i commenti: senza i commenti del contenuto scaduto e del suo allegato, con il conteggio allineato |
 | C-266 | Pubblicazione remota: l'allegato di un contenuto scaduto non è descritto, quello di un contenuto valido sì |
 | C-267 | Versione dell'interfaccia 1.6.0 |
+| C-268 | Contesto di modifica senza permesso su contenuto, allegato e commento scaduti: identico al numero inesistente con lo stesso contesto; chi può modificare li apre tutti e tre |
+| C-269 | Commento senza contenuto letto mentre il contenuto corrente della pagina è scaduto: resta |
 
-Sul codice di prima di questa unità le prime otto sono rosse. La riga C-98, che conta gli
+Le prove confrontano le risposte come le riceve chi le chiede da fuori, cioè dopo
+`rest_post_dispatch`, e verificano che il termine di paragone sia il "non trovato" del
+controllore e non una rotta che non esiste.
+
+Sul codice di prima di questa unità le prime otto sono rosse.
+
+### Il primo giro di revisione
+
+Quattro rilievi, tutti veri, tutti riprodotti con una prova rossa prima della correzione:
+l'intestazione `Allow` che WordPress aggiunge dopo lo smistamento diceva che la lettura dello
+scaduto era permessa, quella del numero inesistente no (le prove guardavano lo smistamento e
+non la risposta spedita); il contesto di modifica chiesto da chi non può modificare rispondeva
+"non hai il permesso" invece di "non trovato", e la riga C-112 lo pretendeva; il numero zero
+passato a `get_post()` diventava il contenuto corrente della pagina; due prove non
+verificavano che la rotta o il metodo rispondessero a un caso valido. Righe C-268 e C-269, e
+C-112 cambiata. La riga C-98, che conta gli
 agganci del motore, ne conosce due in più: `xmlrpc_prepare_media_item` e `the_comments`. La
 prova della versione nel meccanismo di indicizzazione non fissa più la versione esatta ma
 "almeno 1.5.0", come era già successo alla riga C-223 del registro.

@@ -78,6 +78,18 @@ final class Conformita_Core_Filtro_Scadenza {
 	private static $avviato = false;
 
 	/**
+	 * Le richieste dell'interfaccia informatica rifiutate come inesistenti, con
+	 * la richiesta di paragone per un numero che non esiste.
+	 *
+	 * Serve a `normalizza_risposta_rest()`, che lavora dopo lo smistamento sulla
+	 * risposta già pronta. La mappa è debole: una richiesta finita non resta
+	 * qui dentro.
+	 *
+	 * @var WeakMap<WP_REST_Request, WP_REST_Request>|null
+	 */
+	private static $rifiutate = null;
+
+	/**
 	 * Aggancia i filtri del motore.
 	 *
 	 * @internal Non fa parte dell'interfaccia pubblica verso i componenti. Il
@@ -112,7 +124,7 @@ final class Conformita_Core_Filtro_Scadenza {
 		self::$avviato = true;
 
 		foreach ( self::agganci() as $aggancio ) {
-			add_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), 10, $aggancio['argomenti'] );
+			add_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), self::priorita( $aggancio ), $aggancio['argomenti'] );
 		}
 	}
 
@@ -154,6 +166,13 @@ final class Conformita_Core_Filtro_Scadenza {
 				'argomenti' => 3,
 			),
 			array(
+				'aggancio'  => 'rest_post_dispatch',
+				'metodo'    => 'normalizza_risposta_rest',
+				'argomenti' => 3,
+				// Dopo rest_send_allow_header(), che WordPress aggancia a 10.
+				'priorita'  => 11,
+			),
+			array(
 				'aggancio'  => 'oembed_response_data',
 				'metodo'    => 'filtra_anteprima_incorporata',
 				'argomenti' => 2,
@@ -187,6 +206,17 @@ final class Conformita_Core_Filtro_Scadenza {
 	}
 
 	/**
+	 * La priorità di un aggancio dell'elenco: 10, salvo dove l'elenco dice
+	 * altrimenti.
+	 *
+	 * @param array<string, mixed> $aggancio Voce di `agganci()`.
+	 * @return int
+	 */
+	private static function priorita( array $aggancio ) {
+		return isset( $aggancio['priorita'] ) ? (int) $aggancio['priorita'] : 10;
+	}
+
+	/**
 	 * Il motore è agganciato.
 	 *
 	 * @return bool
@@ -209,7 +239,7 @@ final class Conformita_Core_Filtro_Scadenza {
 		}
 
 		foreach ( self::agganci() as $aggancio ) {
-			remove_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), 10 );
+			remove_filter( $aggancio['aggancio'], array( __CLASS__, $aggancio['metodo'] ), self::priorita( $aggancio ) );
 		}
 
 		self::$avviato = false;
@@ -630,27 +660,6 @@ final class Conformita_Core_Filtro_Scadenza {
 			return $risposta;
 		}
 
-		/*
-		 * Il contesto di modifica non e' la superficie pubblica: e' il canale con
-		 * cui l'editor a blocchi di WordPress apre un contenuto per modificarlo.
-		 * Rifiutarlo renderebbe un atto con la data sbagliata impossibile da
-		 * correggere, cioe' l'esatto contrario di quello che l'amministrazione
-		 * deve garantire.
-		 *
-		 * Lasciarlo passare non apre niente a nessuno: per quel contesto
-		 * WordPress pretende gia' il permesso di modifica sul contenuto, e a chi
-		 * non ce l'ha risponde con il proprio rifiuto. Il rifiuto arriva prima
-		 * che si sappia se il contenuto sia scaduto, quindi non dice niente a chi
-		 * non deve saperlo.
-		 *
-		 * Il confronto e' sul valore esatto e non sul suo contrario: un contesto
-		 * sconosciuto o assente ricade nel trattamento pubblico, che e' la
-		 * direzione sicura. Righe C-16 e C-112.
-		 */
-		if ( 'edit' === $richiesta['context'] ) {
-			return $risposta;
-		}
-
 		if ( $controllore instanceof WP_REST_Comments_Controller ) {
 			$commento = get_comment( (int) $richiesta['id'] );
 			$nascosto = $commento instanceof WP_Comment && self::da_nascondere( (int) $commento->comment_post_ID );
@@ -662,7 +671,68 @@ final class Conformita_Core_Filtro_Scadenza {
 			return $risposta;
 		}
 
+		/*
+		 * Il contesto di modifica non e' la superficie pubblica: e' il canale con
+		 * cui l'editor a blocchi di WordPress apre un contenuto per modificarlo.
+		 * Rifiutarlo renderebbe un atto con la data sbagliata impossibile da
+		 * correggere, cioe' l'esatto contrario di quello che l'amministrazione
+		 * deve garantire.
+		 *
+		 * **Si lascia passare solo chi la rotta autorizza davvero.** A chi non
+		 * puo' modificare, WordPress risponderebbe "non hai il permesso" per un
+		 * contenuto che esiste e "non trovato" per uno che non esiste: bastava
+		 * aggiungere il contesto alla richiesta per sapere che dietro un numero
+		 * c'era stato qualcosa. Il controllo e' quello della rotta stessa, che
+		 * non scrive niente e che WordPress ripeterebbe subito dopo.
+		 *
+		 * Il confronto e' sul valore esatto e non sul suo contrario: un contesto
+		 * sconosciuto o assente ricade nel trattamento pubblico, che e' la
+		 * direzione sicura. Righe C-16, C-112 e C-268.
+		 */
+		if ( 'edit' === $richiesta['context'] && true === $controllore->get_item_permissions_check( $richiesta ) ) {
+			return $risposta;
+		}
+
 		return self::rifiuto_come_inesistente( $controllore, $richiesta );
+	}
+
+	/**
+	 * La risposta a una richiesta rifiutata come inesistente porta le stesse
+	 * intestazioni di un numero che non esiste.
+	 *
+	 * Prima di spedire la risposta WordPress aggiunge l'intestazione `Allow`,
+	 * e per farlo chiede di nuovo i permessi di ogni metodo della rotta con il
+	 * numero della richiesta. Per un contenuto scaduto ma esistente la lettura
+	 * risulterebbe permessa, per un numero inesistente no: l'intestazione
+	 * direbbe quello che il rifiuto tace. Qui la si ricalcola con la richiesta
+	 * di paragone, la stessa usata per il rifiuto. Righe C-259, C-261, C-262 e
+	 * C-263.
+	 *
+	 * @internal Aggancio di `rest_post_dispatch`, dopo `rest_send_allow_header()`.
+	 *
+	 * @param mixed $risposta  Risposta pronta.
+	 * @param mixed $server    Server dell'interfaccia.
+	 * @param mixed $richiesta Richiesta servita.
+	 * @return mixed La risposta, con le intestazioni del numero inesistente se
+	 *               la richiesta era stata rifiutata qui.
+	 */
+	public static function normalizza_risposta_rest( $risposta, $server = null, $richiesta = null ) {
+		if ( null === self::$rifiutate || ! $richiesta instanceof WP_REST_Request || ! isset( self::$rifiutate[ $richiesta ] ) ) {
+			return $risposta;
+		}
+
+		$finta = self::$rifiutate[ $richiesta ];
+		unset( self::$rifiutate[ $richiesta ] );
+
+		if ( ! $risposta instanceof WP_REST_Response || ! $server instanceof WP_REST_Server ) {
+			return $risposta;
+		}
+
+		$intestazioni = $risposta->get_headers();
+		unset( $intestazioni['Allow'] );
+		$risposta->set_headers( $intestazioni );
+
+		return rest_send_allow_header( $risposta, $server, $finta );
 	}
 
 	/**
@@ -722,6 +792,12 @@ final class Conformita_Core_Filtro_Scadenza {
 		$finta = clone $richiesta;
 		$finta->set_param( 'id', -1 );
 
+		if ( null === self::$rifiutate ) {
+			self::$rifiutate = new WeakMap();
+		}
+
+		self::$rifiutate[ $richiesta ] = $finta;
+
 		$rifiuto = $controllore->get_item_permissions_check( $finta );
 
 		if ( is_wp_error( $rifiuto ) ) {
@@ -762,10 +838,17 @@ final class Conformita_Core_Filtro_Scadenza {
 	 * @return bool
 	 */
 	private static function da_nascondere( $contenuto ) {
+		/*
+		 * Il numero zero, per `get_post()`, e' il contenuto corrente della
+		 * pagina: un commento che non appartiene a nessun contenuto ne
+		 * erediterebbe la scadenza. Un numero che non e' positivo non e' di
+		 * nessun contenuto. Riga C-269.
+		 */
 		if ( is_array( $contenuto ) ) {
-			$contenuto = isset( $contenuto['ID'] ) ? get_post( (int) $contenuto['ID'] ) : null;
+			$numero    = isset( $contenuto['ID'] ) ? (int) $contenuto['ID'] : 0;
+			$contenuto = $numero > 0 ? get_post( $numero ) : null;
 		} elseif ( is_numeric( $contenuto ) ) {
-			$contenuto = get_post( (int) $contenuto );
+			$contenuto = (int) $contenuto > 0 ? get_post( (int) $contenuto ) : null;
 		}
 
 		if ( ! $contenuto instanceof WP_Post ) {

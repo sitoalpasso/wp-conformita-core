@@ -2,7 +2,7 @@
 /**
  * Il filtro di scadenza sulle strade che passano da un allegato o da un
  * commento, e il rifiuto che non si distingue da un indirizzo sbagliato: righe
- * C-259..C-267 del catalogo.
+ * C-259..C-269 del catalogo.
  *
  * **Che cosa avevano in comune i buchi.** Un allegato e un commento non hanno
  * una data di fine propria: la loro scadenza e' quella del contenuto a cui
@@ -217,7 +217,16 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 	}
 
 	/**
-	 * Esegue una richiesta sull'interfaccia informatica.
+	 * Esegue una richiesta sull'interfaccia informatica, come arriva a chi la
+	 * fa da fuori.
+	 *
+	 * **Non basta il solo smistamento.** Prima di spedire la risposta WordPress
+	 * la passa da `rest_post_dispatch`, dove fra l'altro aggiunge l'intestazione
+	 * `Allow` chiedendo di nuovo i permessi di ogni metodo con il numero vero:
+	 * una prova che guardasse solo lo smistamento non vedrebbe quella
+	 * intestazione, e una differenza fra uno scaduto e un numero inesistente
+	 * passerebbe inosservata. E' quello che ha trovato la revisione del primo
+	 * giro.
 	 *
 	 * @param string $percorso  Percorso della rotta, senza parametri.
 	 * @param array  $parametri Parametri della richiesta.
@@ -231,7 +240,34 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 			$richiesta->set_param( $nome, $valore );
 		}
 
-		return rest_get_server()->dispatch( $richiesta );
+		$server = rest_get_server();
+
+		return apply_filters( 'rest_post_dispatch', rest_ensure_response( $server->dispatch( $richiesta ) ), $server, $richiesta );
+	}
+
+	/**
+	 * La risposta per un numero che non esiste, sulla stessa rotta.
+	 *
+	 * E' il termine di paragone di ogni rifiuto, quindi si verifica che sia il
+	 * "non trovato" del controllore e non una rotta che non esiste: due
+	 * risposte uguali perche' nessuna delle due rotte esiste non provano
+	 * niente.
+	 *
+	 * @param string $base      Percorso della rotta senza il numero finale.
+	 * @param array  $parametri Parametri della richiesta.
+	 * @param string $metodo    Metodo della richiesta.
+	 * @return array Quello che la risposta lascia vedere.
+	 */
+	private function inesistente( $base, array $parametri = array(), $metodo = 'GET' ) {
+		$risposta = $this->chiedi( $base . '/' . $this->numero_inesistente(), $parametri, $metodo );
+		$dati     = $risposta->get_data();
+
+		$this->assertSame( 404, $risposta->get_status(), 'Il termine di paragone e\' un "non trovato".' );
+		$this->assertIsArray( $dati );
+		$this->assertArrayHasKey( 'code', $dati );
+		$this->assertNotSame( 'rest_no_route', $dati['code'], 'Il termine di paragone deve venire dal controllore della rotta, non da una rotta che non esiste.' );
+
+		return $this->visibile( $risposta );
 	}
 
 	/**
@@ -300,7 +336,7 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 			$morta = $this->chiedi( '/wp/v2/media/' . $allegato_morto );
 
 			$this->assertSame(
-				$this->visibile( $this->chiedi( '/wp/v2/media/' . $this->numero_inesistente() ) ),
+				$this->inesistente( '/wp/v2/media' ),
 				$this->visibile( $morta ),
 				'La scheda dell\'allegato di un contenuto scaduto deve rispondere come un numero che non esiste, per l\'utente ' . $utente . '.'
 			);
@@ -337,13 +373,18 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 	public function test_c261_rifiuto_indistinguibile() {
 		$this->oggi_e( '2026-09-09' );
 
+		$valido  = $this->contenuto( '2026-09-30' );
 		$scaduto = $this->contenuto( '2026-09-08' );
 
 		foreach ( array( 0, $this->utente_autorizzato() ) as $utente ) {
 			wp_set_current_user( $utente );
 
+			$buona = $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $valido );
+			$this->assertSame( 200, $buona->get_status(), 'La rotta serve il contenuto valido, per l\'utente ' . $utente . '.' );
+			$this->assertSame( $valido, $buona->get_data()['id'] );
+
 			$this->assertSame(
-				$this->visibile( $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $this->numero_inesistente() ) ),
+				$this->inesistente( '/wp/v2/' . self::TIPO ),
 				$this->visibile( $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto ) ),
 				'Il contenuto scaduto deve rispondere come un numero che non esiste, per l\'utente ' . $utente . '.'
 			);
@@ -366,14 +407,17 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 		$this->assertSame( 200, $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $valido, array(), 'HEAD' )->get_status(), 'Il contenuto valido risponde anche cosi\'.' );
 
 		$this->assertSame(
-			$this->visibile( $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $this->numero_inesistente(), array(), 'HEAD' ) ),
+			$this->inesistente( '/wp/v2/' . self::TIPO, array(), 'HEAD' ),
 			$this->visibile( $this->chiedi( '/wp/v2/' . self::TIPO . '/' . $scaduto, array(), 'HEAD' ) )
 		);
 
+		$allegato_buono = $this->allegato_di( $valido );
 		$allegato_morto = $this->allegato_di( $scaduto );
 
+		$this->assertSame( 200, $this->chiedi( '/wp/v2/media/' . $allegato_buono, array(), 'HEAD' )->get_status(), 'L\'allegato valido risponde anche cosi\'.' );
+
 		$this->assertSame(
-			$this->visibile( $this->chiedi( '/wp/v2/media/' . $this->numero_inesistente(), array(), 'HEAD' ) ),
+			$this->inesistente( '/wp/v2/media', array(), 'HEAD' ),
 			$this->visibile( $this->chiedi( '/wp/v2/media/' . $allegato_morto, array(), 'HEAD' ) )
 		);
 	}
@@ -405,7 +449,7 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 
 			$this->assertSame( 200, $this->chiedi( '/wp/v2/comments/' . $buono )->get_status() );
 
-			$inesistente = $this->visibile( $this->chiedi( '/wp/v2/comments/' . $this->numero_inesistente() ) );
+			$inesistente = $this->inesistente( '/wp/v2/comments' );
 
 			$this->assertSame( $inesistente, $this->visibile( $this->chiedi( '/wp/v2/comments/' . $morto ) ), 'Utente ' . $utente . '.' );
 			$this->assertSame( $inesistente, $this->visibile( $this->chiedi( '/wp/v2/comments/' . $morto_allegato ) ), 'Utente ' . $utente . '.' );
@@ -465,6 +509,74 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 			$this->assertNotContains( $morto_allegato, $commenti, 'Nemmeno quello del suo allegato, da ' . $indirizzo . '.' );
 			$this->assertSame( count( $commenti ), $GLOBALS['wp_query']->comment_count, 'Il conteggio segue i commenti rimasti.' );
 		}
+	}
+
+	/**
+	 * C-268: chi non ha il permesso di modifica e chiede uno scaduto con il
+	 * contesto di modifica riceve il rifiuto di un numero inesistente.
+	 *
+	 * Il contesto di modifica resta aperto a chi puo' davvero modificare,
+	 * perche' l'atto con la data sbagliata deve restare correggibile (C-112).
+	 * Ma a chi non puo', WordPress risponde "non hai il permesso" per un
+	 * contenuto che esiste e "non trovato" per uno che non esiste: senza questa
+	 * riga bastava aggiungere il contesto alla richiesta per sapere che dietro
+	 * un numero c'era stato qualcosa.
+	 */
+	public function test_c268_contesto_di_modifica_senza_permesso() {
+		$this->oggi_e( '2026-09-09' );
+
+		$scaduto  = $this->contenuto( '2026-09-08' );
+		$allegato = $this->allegato_di( $scaduto );
+		$commento = $this->commento_su( $scaduto, 'Commento nascosto' );
+
+		$modifica = array( 'context' => 'edit' );
+
+		$strade = array(
+			'/wp/v2/' . self::TIPO => $scaduto,
+			'/wp/v2/media'         => $allegato,
+			'/wp/v2/comments'      => $commento,
+		);
+
+		wp_set_current_user( 0 );
+
+		foreach ( $strade as $base => $numero ) {
+			$this->assertSame(
+				$this->inesistente( $base, $modifica ),
+				$this->visibile( $this->chiedi( $base . '/' . $numero, $modifica ) ),
+				'Con il contesto di modifica e senza permesso, ' . $base . ' risponde come un numero inesistente.'
+			);
+		}
+
+		wp_set_current_user( $this->utente_autorizzato() );
+
+		foreach ( $strade as $base => $numero ) {
+			$risposta = $this->chiedi( $base . '/' . $numero, $modifica );
+
+			$this->assertSame( 200, $risposta->get_status(), 'Chi puo\' modificare apre ' . $base . ' anche scaduto.' );
+			$this->assertSame( $numero, $risposta->get_data()['id'] );
+		}
+	}
+
+	/**
+	 * C-269: un commento che non appartiene a nessun contenuto non prende la
+	 * scadenza del contenuto che la pagina sta mostrando.
+	 *
+	 * WordPress legge il numero zero come "il contenuto corrente della
+	 * pagina": senza un controllo esplicito, un commento senza contenuto,
+	 * scritto per esempio da un'importazione, sparirebbe o comparirebbe a
+	 * seconda della pagina in cui lo si legge.
+	 */
+	public function test_c269_commento_senza_contenuto() {
+		$this->oggi_e( '2026-09-09' );
+
+		$scaduto = $this->contenuto( '2026-09-08' );
+		$orfano  = $this->commento_su( 0, 'Commento senza contenuto' );
+
+		$GLOBALS['post'] = get_post( $scaduto );
+
+		$commenti = array_map( 'intval', wp_list_pluck( get_comments( array( 'status' => 'approve' ) ), 'comment_ID' ) );
+
+		$this->assertContains( $orfano, $commenti, 'Il commento senza contenuto non eredita la scadenza del contenuto corrente.' );
 	}
 
 	/**
