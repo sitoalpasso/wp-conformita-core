@@ -42,7 +42,7 @@
  * catena di `ammessa()`. Sul punto amministrativo, che è la superficie dove la
  * scadenza **non** si applica, il nonce c'è insieme alla capability.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-162.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-162, C-276..C-282.
  *
  * @package Conformita_Core
  */
@@ -329,12 +329,33 @@ final class Conformita_Core_Consegna {
 
 		$capacita = Conformita_Core_Tipi::capacita( $contenuto->post_type );
 
-		if ( is_wp_error( $capacita ) || empty( $capacita['edit_posts'] ) || ! current_user_can( $capacita['edit_posts'] ) ) {
-			self::emetti( self::rifiuto() );
+		if ( ! is_wp_error( $capacita ) && ! empty( $capacita['edit_posts'] ) && current_user_can( $capacita['edit_posts'] ) ) {
+			self::emetti( self::componi( $atto, $allegato, true ) );
 			return;
 		}
 
-		self::emetti( self::componi( $atto, $allegato, true ) );
+		/*
+		 * Chi ha soltanto il permesso di consultare gli scaduti apre i file dei
+		 * contenuti pubblicati, scaduti compresi, e niente altro: bozze,
+		 * contenuti cestinati e allegati cestinati restano a chi gestisce il
+		 * tipo. Il controllo dello stato sta prima della catena e non dentro,
+		 * perché la catena non sa chi chiede. Righe C-278..C-280.
+		 */
+		$consultazione = Conformita_Core_Tipi::capacita_consultazione_scaduti( $contenuto->post_type );
+		$allegato_post = get_post( $allegato );
+
+		if (
+			! is_wp_error( $consultazione )
+			&& current_user_can( $consultazione )
+			&& 'publish' === $contenuto->post_status
+			&& $allegato_post instanceof WP_Post
+			&& 'inherit' === $allegato_post->post_status
+		) {
+			self::emetti( self::componi( $atto, $allegato, true ) );
+			return;
+		}
+
+		self::emetti( self::rifiuto() );
 	}
 
 	/**

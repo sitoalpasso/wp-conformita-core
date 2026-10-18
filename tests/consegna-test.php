@@ -3,7 +3,8 @@
  * I due punti di consegna: indirizzi, catena di controlli, intestazioni.
  *
  * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176,
- * e C-228 e C-240 dell'unita' S9 (il divieto di indicizzazione sui file).
+ * e C-228 e C-240 dell'unita' S9 (il divieto di indicizzazione sui file),
+ * e C-276..C-282 (il permesso di consultare gli scaduti).
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -1236,5 +1237,232 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			}
 		);
 		$this->assertSame( array( 'noindex' ), $amministrativa, 'Punto amministrativo, sezione vietata.' );
+	}
+
+	/**
+	 * Un utente che ha soltanto il permesso di consultare gli scaduti del tipo.
+	 *
+	 * Parte da abbonato, il ruolo con meno permessi, perche' nessun altro
+	 * permesso gli apra le porte che la prova vuole vedere aperte da questo.
+	 *
+	 * @param string|null $tipo Tipo di contenuto, o null per quello della prova.
+	 * @return int
+	 */
+	private function utente_che_consulta( $tipo = null ) {
+		$capacita = conformita_core_capacita_consultazione_scaduti( null === $tipo ? self::TIPO : $tipo );
+		$this->assertIsString( $capacita );
+
+		$utente = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		( new WP_User( $utente ) )->add_cap( $capacita );
+
+		return $utente;
+	}
+
+	/**
+	 * Registra un secondo tipo nella stessa sezione.
+	 *
+	 * @return string Identificativo del tipo.
+	 */
+	private function altro_tipo() {
+		$this->assertTrue(
+			conformita_core_registra_tipo(
+				'prova_consegna_due',
+				array(
+					'sezione'      => self::SEZIONE,
+					'show_in_rest' => false,
+					'argomenti'    => array( 'public' => true ),
+				)
+			)
+		);
+
+		return 'prova_consegna_due';
+	}
+
+	/**
+	 * C-276: il nome del permesso di consultazione, uno per tipo.
+	 */
+	public function test_c276_nome_del_permesso_di_consultazione() {
+		$altro = $this->altro_tipo();
+
+		$primo   = conformita_core_capacita_consultazione_scaduti( self::TIPO );
+		$secondo = conformita_core_capacita_consultazione_scaduti( $altro );
+
+		$this->assertSame( 'conformita_core_consultare_scaduti_' . self::TIPO, $primo );
+		$this->assertSame( 'conformita_core_consultare_scaduti_' . $altro, $secondo );
+		$this->assertNotSame( $primo, $secondo );
+		$this->assertSame( $primo, conformita_core_capacita_consultazione_scaduti( ' ' . self::TIPO . ' ' ), 'Lo stesso tipo scritto con spazi intorno e\' lo stesso tipo.' );
+
+		foreach ( array( self::TIPO, $altro ) as $tipo ) {
+			$mappa = array_values( conformita_core_capacita_tipo( $tipo ) );
+			$this->assertNotContains( $primo, $mappa, 'Il permesso non e\' nella mappa del tipo: chi assegna la mappa non lo da\' senza deciderlo.' );
+			$this->assertNotContains( $secondo, $mappa );
+		}
+
+		$this->assertNotSame( conformita_core_capacita_registro(), $primo );
+
+		$errore = conformita_core_capacita_consultazione_scaduti( 'tipo_mai_registrato' );
+		$this->assertWPError( $errore );
+		$this->assertSame( 'conformita_core_tipo_sconosciuto', $errore->get_error_code() );
+		$this->assertWPError( conformita_core_capacita_consultazione_scaduti( 'post' ), 'Un tipo di WordPress non e\' governato da core.' );
+	}
+
+	/**
+	 * C-277: core non assegna il permesso a nessun ruolo.
+	 */
+	public function test_c277_nessun_ruolo_ha_il_permesso() {
+		$capacita = conformita_core_capacita_consultazione_scaduti( self::TIPO );
+
+		foreach ( wp_roles()->role_objects as $nome => $ruolo ) {
+			$this->assertFalse( $ruolo->has_cap( $capacita ), 'Ruolo ' . $nome . '.' );
+		}
+
+		$amministratore = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		$this->assertFalse( user_can( $amministratore, $capacita ) );
+	}
+
+	/**
+	 * C-278: chi consulta apre dal punto amministrativo il file di un
+	 * contenuto pubblicato, scaduto o valido.
+	 */
+	public function test_c278_chi_consulta_apre_i_file_pubblicati() {
+		$scaduto          = $this->atto( 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+		$allegato_scaduto = $this->allegato( $scaduto );
+		$valido           = $this->atto();
+		$allegato_valido  = $this->allegato( $valido );
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'subscriber' ) ) );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $scaduto, $allegato_scaduto )['stato'], 'Senza il permesso resta chiuso: senza, la prova sotto non misurerebbe niente.' );
+
+		wp_set_current_user( $this->utente_che_consulta() );
+
+		$risposta = $this->chiedi_da_amministrazione( $scaduto, $allegato_scaduto );
+		$this->assertSame( 200, $risposta['stato'] );
+		$this->assertSame( realpath( get_attached_file( $allegato_scaduto ) ), $risposta['percorso'] );
+
+		$risposta = $this->chiedi_da_amministrazione( $valido, $allegato_valido );
+		$this->assertSame( 200, $risposta['stato'] );
+		$this->assertSame( realpath( get_attached_file( $allegato_valido ) ), $risposta['percorso'] );
+	}
+
+	/**
+	 * C-279: chi consulta non apre contenuti privati o in attesa, bozze,
+	 * contenuti cestinati e allegati
+	 * cestinati, che restano a chi gestisce il tipo; il rifiuto e' quello di
+	 * sempre.
+	 */
+	public function test_c279_chi_consulta_non_apre_cio_che_non_e_pubblicato() {
+		$bozza          = $this->atto( 'draft' );
+		$allegato_bozza = $this->allegato( $bozza );
+
+		$cestinato          = $this->atto();
+		$allegato_cestinato = $this->allegato( $cestinato );
+		wp_update_post(
+			array(
+				'ID'          => $cestinato,
+				'post_status' => 'trash',
+			)
+		);
+
+		$pubblicato        = $this->atto( 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+		$allegato_ritirato = $this->allegato( $pubblicato, 'ritirato.pdf' );
+		wp_update_post(
+			array(
+				'ID'          => $allegato_ritirato,
+				'post_status' => 'trash',
+			)
+		);
+
+		$privato          = $this->atto( 'private' );
+		$allegato_privato = $this->allegato( $privato );
+		$in_attesa        = $this->atto( 'pending' );
+		$allegato_attesa  = $this->allegato( $in_attesa );
+
+		$casi = array(
+			'privato'             => array( $privato, $allegato_privato ),
+			'in attesa'           => array( $in_attesa, $allegato_attesa ),
+			'bozza'               => array( $bozza, $allegato_bozza ),
+			'contenuto cestinato' => array( $cestinato, $allegato_cestinato ),
+			'allegato cestinato'  => array( $pubblicato, $allegato_ritirato ),
+		);
+
+		wp_set_current_user( $this->utente_del_tipo() );
+		foreach ( $casi as $caso => $coppia ) {
+			$this->assertSame( 200, $this->chiedi_da_amministrazione( $coppia[0], $coppia[1] )['stato'], 'Chi gestisce il tipo lo apre: ' . $caso . '.' );
+		}
+
+		wp_set_current_user( 0 );
+		$rifiuto = $this->chiedi_da_amministrazione( $bozza, $allegato_bozza );
+		$this->assertSame( 404, $rifiuto['stato'] );
+
+		wp_set_current_user( $this->utente_che_consulta() );
+		foreach ( $casi as $caso => $coppia ) {
+			$risposta = $this->chiedi_da_amministrazione( $coppia[0], $coppia[1] );
+			unset( $risposta['amministrazione'], $rifiuto['amministrazione'] );
+			$this->assertSame( $rifiuto, $risposta, 'Chi consulta riceve il rifiuto di sempre: ' . $caso . '.' );
+		}
+	}
+
+	/**
+	 * C-280: il permesso di un tipo non apre i file di un altro tipo.
+	 */
+	public function test_c280_il_permesso_vale_solo_per_il_suo_tipo() {
+		$altro    = $this->altro_tipo();
+		$atto     = $this->atto( 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+		$allegato = $this->allegato( $atto );
+
+		wp_set_current_user( $this->utente_che_consulta( $altro ) );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $atto, $allegato )['stato'] );
+
+		wp_set_current_user( $this->utente_che_consulta() );
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $atto, $allegato )['stato'] );
+	}
+
+	/**
+	 * C-281: il permesso e' di sola lettura, e il punto pubblico resta chiuso
+	 * agli scaduti anche per chi lo ha.
+	 */
+	public function test_c281_sola_lettura() {
+		$atto     = $this->atto( 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+		$allegato = $this->allegato( $atto );
+		$utente   = $this->utente_che_consulta();
+
+		foreach ( array( 'edit_post', 'delete_post', 'publish_post' ) as $azione ) {
+			$this->assertFalse( user_can( $utente, $azione, $atto ), $azione . ' sul contenuto.' );
+			$this->assertFalse( user_can( $utente, $azione, $allegato ), $azione . ' sull\'allegato.' );
+		}
+
+		foreach ( conformita_core_capacita_tipo( self::TIPO ) as $chiave => $capacita ) {
+			/*
+			 * `read` e' il permesso generico di WordPress, che ha ogni utente
+			 * registrato; i tre permessi sul singolo si chiedono con il
+			 * contenuto, e sono provati sopra.
+			 */
+			if ( in_array( $chiave, array( 'read', 'edit_post', 'read_post', 'delete_post' ), true ) ) {
+				continue;
+			}
+
+			$this->assertFalse( user_can( $utente, $capacita ), $capacita . '.' );
+		}
+
+		wp_set_current_user( $utente );
+		$this->assertSame( 404, $this->chiedi( $atto, $allegato )['stato'] );
+	}
+
+	/**
+	 * C-282: il nonce resta obbligatorio anche per chi consulta, e la versione
+	 * dell'interfaccia sale a 1.7.0.
+	 */
+	public function test_c282_nonce_e_versione() {
+		$atto  = $this->atto( 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+		$primo = $this->allegato( $atto, 'primo.pdf' );
+		$altro = $this->allegato( $atto, 'altro.pdf' );
+
+		wp_set_current_user( $this->utente_che_consulta() );
+
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $atto, $primo, '' )['stato'] );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $atto, $primo, wp_create_nonce( 'conformita_core_allegato_' . $altro ) )['stato'] );
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $atto, $primo )['stato'] );
+
+		$this->assertSame( '1.7.0', conformita_core_versione_api() );
 	}
 }
