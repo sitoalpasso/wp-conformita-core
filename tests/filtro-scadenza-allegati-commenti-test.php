@@ -884,7 +884,7 @@ class Conformita_Core_Filtro_Scadenza_Allegati_Commenti_Test extends WP_UnitTest
 	 * rifiuto identico a un numero inesistente, deve poterla chiedere.
 	 */
 	public function test_c267_versione_dell_interfaccia() {
-		$this->assertSame( '1.6.0', conformita_core_versione_api() );
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.6.0', '>=' ), 'La versione che garantisce questa unita\' e\' la 1.6.0, e le successive compatibili la mantengono.' );
 	}
 
 	/**

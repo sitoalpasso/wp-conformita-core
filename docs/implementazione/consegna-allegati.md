@@ -1878,3 +1878,39 @@ qual è la conseguenza.
   mostra.
 - Aggiungere al proprio collaudo la riga C-33, l'indirizzo diretto dell'allegato, che oggi è
   nominata in `collaudo.md` come parte dell'elenco chiuso e non ha ancora un test.
+
+## 16. Il permesso di consultare gli scaduti
+
+Unità a parte, chiesta dall'albo per la consultazione riservata degli atti scaduti. Righe
+C-276..C-282, prove in `tests/consegna-test.php`. Versione dell'interfaccia da
+`1.6.0` a `1.7.0`.
+
+**Che cosa manca oggi.** Il punto amministrativo apre i file a chi ha `edit_posts` del tipo,
+cioè a chi gestisce gli atti. Chi deve soltanto consultare gli scaduti, senza poterli toccare,
+non ha un permesso che lo dica, e se gli si desse `edit_posts` potrebbe anche modificare.
+
+**Le scelte.**
+
+| Domanda | Scelta | Perché |
+|---|---|---|
+| Un permesso per tutti i tipi o uno per tipo | uno per tipo, `conformita_core_consultare_scaduti_<tipo>` | chi consulta gli atti di un tipo non deve vedere quelli di un altro; un ente che vuole tutto lo assegna per ogni tipo |
+| Dove si ricava il nome | da core, con `conformita_core_capacita_consultazione_scaduti( $tipo )` | come per il registro: il componente non inventa nomi di permessi |
+| Fa parte della mappa di `conformita_core_capacita_tipo()` | no, è una funzione a sé | un componente che assegna a un ruolo tutta la mappa non deve ritrovarsi a dare anche la consultazione senza averlo deciso |
+| A chi lo assegna core | a nessuno, amministratore compreso | come ogni permesso di core: lo assegna il componente |
+| Che cosa apre | il punto amministrativo, con il nonce, per i file di un contenuto **pubblicato** del tipo, scaduto o no, con l'allegato nello stato normale | è un permesso di lettura dell'archivio: le bozze, i contenuti cestinati e gli allegati cestinati restano a chi gestisce il tipo |
+| Che cosa non apre | modifica, cancellazione, pubblicazione, il punto pubblico | è sola lettura; il punto pubblico resta chiuso agli scaduti per chiunque |
+| Il rifiuto | lo stesso di tutti gli altri rifiuti, byte per byte | riga C-138 |
+
+**Nome iniettivo.** Il nome non può coincidere con un permesso derivato da un altro tipo: quelli
+cominciano con un verbo di WordPress (`edit_`, `read_`, `delete_`, `publish_`, `create_`), questo
+con `conformita_core_`, e il tipo non contiene trattini (riga C-86).
+
+| Riga | Cosa verifica |
+|---|---|
+| C-276 | Il nome del permesso: uno per tipo, diverso per tipi diversi, diverso da ogni permesso della mappa del tipo e da quello del registro; errore per un tipo non registrato |
+| C-277 | Dopo la registrazione del tipo nessun ruolo ha il permesso, amministratore compreso |
+| C-278 | Chi ha solo il permesso di consultazione apre dal punto amministrativo il file di un contenuto pubblicato scaduto e quello di uno valido |
+| C-279 | Chi ha solo il permesso di consultazione non apre il file di una bozza, di un contenuto cestinato, di un allegato cestinato: il rifiuto è quello di sempre; chi gestisce il tipo li apre |
+| C-280 | Il permesso di un tipo non apre i file di un altro tipo |
+| C-281 | Chi ha solo il permesso di consultazione non può modificare, cancellare né pubblicare il contenuto, e dal punto pubblico il file scaduto resta chiuso anche per lui |
+| C-282 | Il nonce resta obbligatorio anche per chi consulta; versione dell'interfaccia 1.7.0 |
