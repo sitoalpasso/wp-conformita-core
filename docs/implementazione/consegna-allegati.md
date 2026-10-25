@@ -1944,7 +1944,7 @@ modo di proporne un altro senza toccare il file.
 | C-283 | Un `nome_scaricato` che non è una funzione (un nome di funzione inesistente, un numero, un elenco, null) rifiuta la registrazione, e il tipo non esiste |
 | C-284 | Con la funzione dichiarata, il file caricato con un nome di persona esce dai due punti con il nome proposto, nelle due forme dell'intestazione; nessuna intestazione contiene il nome originale; tipo, uscita dentro la pagina e file consegnato sono quelli di prima; la funzione riceve allegato e contenuto. Con il tipo del contenuto scritto in maiuscolo direttamente nella banca dati, il punto amministrativo consegna con lo stesso nome proposto. Un file con estensione sconosciuta e un nome proposto che contiene `.pdf` esce come scaricamento generico |
 | C-285 | Nomi proposti che non vanno (vuoto, altra estensione, maiuscole, solo l'estensione, senza punto, una barra, le virgolette, un a capo, un trattino in testa, troppo lungo, un numero, null, un'eccezione, un errore di tipo) escono come `documento.pdf` e mai con il nome originale, dentro la pagina come prima, con lo stesso file e le stesse altre intestazioni di una risposta con un nome che va; anche dal punto amministrativo; per un file senza estensione un nome senza punti passa, ogni altro esce come `documento`; al limite della lunghezza il nome passa |
-| C-286 | Senza la funzione la risposta intera è quella di prima: il nome del disco tale e quale, maiuscole comprese, nelle due forme, dai due punti; versione dell'interfaccia 1.8.0 |
+| C-286 | Senza la funzione la risposta intera è quella di prima, confrontata con un atteso scritto per intero, ogni intestazione compresa, e uguale dai due punti: il nome del disco tale e quale, maiuscole comprese, nelle due forme; versione dell'interfaccia 1.8.0 |
 
 **Com'è andata.** Il primo giro di revisione indipendente ha trovato che la funzione del nome si
 cercava con il tipo scritto esattamente come registrato, mentre la politica e il permesso lo
@@ -1954,7 +1954,8 @@ anche prove più strette: un errore di tipo oltre all'eccezione, il file senza e
 confronto di tutte le altre intestazioni nel ripiego e della risposta intera senza la funzione.
 Un tipo del file dedotto dal nome proposto invece che dal disco non è distinguibile: il nome
 proposto deve finire con l'estensione del disco, e WordPress deduce il tipo dall'ultima
-estensione.
+estensione. Il secondo giro ha chiesto che l'atteso di C-286 non copiasse niente dalla risposta vera, e che
+anche la risposta del punto amministrativo si confrontasse per intero.
 
 **Che cosa deve fare l'albo.** Portare `CORE_API_RICHIESTA` a `1.8.0`, fissare la revisione in
 `bin/installa-core.sh` e dichiarare `nome_scaricato` registrando il tipo degli atti.

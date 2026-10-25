@@ -1731,36 +1731,30 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( '/[A-Z]/', $disco, 'Precondizione: sul disco un nome con maiuscole.' );
 
 		// La risposta intera, come prima della modifica: il nome del disco tale e quale, nelle due forme.
-		$atteso   = array(
+		$atteso = array(
 			'stato'           => 200,
 			'intestazioni'    => array(
-				'Cache-Control'          => 'private, no-store, no-cache, must-revalidate, max-age=0',
-				'Pragma'                 => 'no-cache',
-				'Expires'                => 'Wed, 11 Jan 1984 05:00:00 GMT',
-				'X-Content-Type-Options' => 'nosniff',
-				'Accept-Ranges'          => 'none',
-				'Content-Type'           => 'application/pdf',
-				'Content-Length'         => (string) filesize( $percorso ),
-				'Content-Disposition'    => 'inline; filename="' . $disco . '"; filename*=UTF-8\'\'' . rawurlencode( $disco ),
+				'Cache-Control'           => 'private, no-store, no-cache, must-revalidate, max-age=0',
+				'Pragma'                  => 'no-cache',
+				'Expires'                 => 'Wed, 11 Jan 1984 05:00:00 GMT',
+				'X-Content-Type-Options'  => 'nosniff',
+				'Accept-Ranges'           => 'none',
+				'Content-Type'            => 'application/pdf',
+				'Content-Length'          => (string) filesize( $percorso ),
+				'Content-Disposition'     => 'inline; filename="' . $disco . '"; filename*=UTF-8\'\'' . rawurlencode( $disco ),
+				'X-Robots-Tag'            => 'noindex',
+				'Content-Security-Policy' => "default-src 'none'; img-src 'self' data:; object-src 'none'; script-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
 			),
 			'percorso'        => $percorso,
 			'corpo'           => '',
 			'amministrazione' => false,
 		);
-		$pubblica = $this->chiedi( $atto, $allegato );
 
-		foreach ( array_diff_key( $pubblica['intestazioni'], $atteso['intestazioni'] ) as $nome => $valore ) {
-			$atteso['intestazioni'][ $nome ] = $valore;
-		}
-
-		$this->assertSame( $atteso, $pubblica );
+		$this->assertSame( $atteso, $this->chiedi( $atto, $allegato ), 'Dal punto pubblico.' );
 
 		wp_set_current_user( $this->utente_del_tipo() );
-		$amministrativa = $this->chiedi_da_amministrazione( $atto, $allegato );
 
-		$this->assertSame( 200, $amministrativa['stato'] );
-		$this->assertSame( $atteso['intestazioni']['Content-Disposition'], $amministrativa['intestazioni']['Content-Disposition'] );
-		$this->assertSame( $percorso, $amministrativa['percorso'] );
+		$this->assertSame( $atteso, $this->chiedi_da_amministrazione( $atto, $allegato ), 'Dal punto amministrativo.' );
 		$this->assertNull( Conformita_Core_Tipi::nome_scaricato( self::TIPO ) );
 		$this->assertSame( '1.8.0', conformita_core_versione_api() );
 	}
