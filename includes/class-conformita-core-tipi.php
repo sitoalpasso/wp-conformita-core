@@ -276,11 +276,17 @@ final class Conformita_Core_Tipi {
 	/**
 	 * La funzione che da' il nome al file consegnato di un contenuto del tipo, o null.
 	 *
+	 * Il tipo si riconosce con il criterio della banca dati, come per la
+	 * politica e il permesso: un contenuto con il tipo scritto in un'altra
+	 * forma passa gli stessi controlli, e deve avere lo stesso nome.
+	 *
 	 * @param string $tipo Identificativo del tipo.
 	 * @return callable|null
 	 */
 	public static function nome_scaricato( $tipo ) {
-		return isset( self::$tipi[ $tipo ]['nome_scaricato'] ) ? self::$tipi[ $tipo ]['nome_scaricato'] : null;
+		$canonico = self::canonico( $tipo );
+
+		return null !== $canonico && isset( self::$tipi[ $canonico ]['nome_scaricato'] ) ? self::$tipi[ $canonico ]['nome_scaricato'] : null;
 	}
 
 	/**

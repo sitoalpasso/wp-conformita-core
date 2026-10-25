@@ -1937,13 +1937,24 @@ modo di proporne un altro senza toccare il file.
 | Una funzione che solleva un'eccezione | come un nome che non va | la consegna non si rompe per un errore del componente, e non torna al nome del disco |
 | Una dichiarazione che non è una funzione | il tipo non si registra | si scopre alla registrazione, non alla prima consegna |
 | Punto pubblico e amministrativo | tutti e due | è lo stesso file |
+| Tipo scritto in un'altra forma | si riconosce come per la politica e il permesso, con il criterio della banca dati | un contenuto che passa i controlli con quel tipo deve avere anche il suo nome, non quello del disco |
 
 | Riga | Cosa verifica |
 |---|---|
 | C-283 | Un `nome_scaricato` che non è una funzione (un nome di funzione inesistente, un numero, un elenco, null) rifiuta la registrazione, e il tipo non esiste |
-| C-284 | Con la funzione dichiarata, il file caricato con un nome di persona esce dai due punti con il nome proposto, nelle due forme dell'intestazione; nessuna intestazione contiene il nome originale; tipo, uscita dentro la pagina e file consegnato sono quelli di prima; la funzione riceve allegato e contenuto |
-| C-285 | Nomi proposti che non vanno (vuoto, altra estensione, maiuscole, solo l'estensione, senza punto, una barra, le virgolette, un a capo, un trattino in testa, troppo lungo, un numero, null, un'eccezione) escono come `documento.pdf` e mai con il nome originale; al limite della lunghezza il nome passa |
-| C-286 | Senza la funzione il file esce con il nome del disco; versione dell'interfaccia 1.8.0 |
+| C-284 | Con la funzione dichiarata, il file caricato con un nome di persona esce dai due punti con il nome proposto, nelle due forme dell'intestazione; nessuna intestazione contiene il nome originale; tipo, uscita dentro la pagina e file consegnato sono quelli di prima; la funzione riceve allegato e contenuto. Con il tipo del contenuto scritto in maiuscolo direttamente nella banca dati, il punto amministrativo consegna con lo stesso nome proposto. Un file con estensione sconosciuta e un nome proposto che contiene `.pdf` esce come scaricamento generico |
+| C-285 | Nomi proposti che non vanno (vuoto, altra estensione, maiuscole, solo l'estensione, senza punto, una barra, le virgolette, un a capo, un trattino in testa, troppo lungo, un numero, null, un'eccezione, un errore di tipo) escono come `documento.pdf` e mai con il nome originale, dentro la pagina come prima, con lo stesso file e le stesse altre intestazioni di una risposta con un nome che va; anche dal punto amministrativo; per un file senza estensione un nome senza punti passa, ogni altro esce come `documento`; al limite della lunghezza il nome passa |
+| C-286 | Senza la funzione la risposta intera è quella di prima: il nome del disco tale e quale, maiuscole comprese, nelle due forme, dai due punti; versione dell'interfaccia 1.8.0 |
+
+**Com'è andata.** Il primo giro di revisione indipendente ha trovato che la funzione del nome si
+cercava con il tipo scritto esattamente come registrato, mentre la politica e il permesso lo
+riconoscono anche scritto in un'altra forma: un contenuto con il tipo in maiuscolo passava i
+controlli e usciva con il nome del disco. Ora il tipo si riconosce allo stesso modo. Ha chiesto
+anche prove più strette: un errore di tipo oltre all'eccezione, il file senza estensione, il
+confronto di tutte le altre intestazioni nel ripiego e della risposta intera senza la funzione.
+Un tipo del file dedotto dal nome proposto invece che dal disco non è distinguibile: il nome
+proposto deve finire con l'estensione del disco, e WordPress deduce il tipo dall'ultima
+estensione.
 
 **Che cosa deve fare l'albo.** Portare `CORE_API_RICHIESTA` a `1.8.0`, fissare la revisione in
 `bin/installa-core.sh` e dichiarare `nome_scaricato` registrando il tipo degli atti.
