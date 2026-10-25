@@ -1450,7 +1450,8 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 
 	/**
 	 * C-282: il nonce resta obbligatorio anche per chi consulta, e la versione
-	 * dell'interfaccia sale a 1.7.0.
+	 * dell'interfaccia sale a 1.7.0 (poi 1.8.0, C-286: si guarda che non sia
+	 * piu' bassa).
 	 */
 	public function test_c282_nonce_e_versione() {
 		$atto  = $this->atto( 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
@@ -1463,6 +1464,156 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$this->assertSame( 404, $this->chiedi_da_amministrazione( $atto, $primo, wp_create_nonce( 'conformita_core_allegato_' . $altro ) )['stato'] );
 		$this->assertSame( 200, $this->chiedi_da_amministrazione( $atto, $primo )['stato'] );
 
-		$this->assertSame( '1.7.0', conformita_core_versione_api() );
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.7.0', '>=' ) );
+	}
+
+	/**
+	 * Registra un tipo della stessa sezione con la funzione del nome dichiarata.
+	 *
+	 * @param mixed $funzione Funzione dichiarata.
+	 * @return true|WP_Error
+	 */
+	private function tipo_con_nome( $funzione ) {
+		return conformita_core_registra_tipo(
+			'prova_consegna_nomi',
+			array(
+				'sezione'        => self::SEZIONE,
+				'show_in_rest'   => false,
+				'argomenti'      => array( 'public' => true ),
+				'nome_scaricato' => $funzione,
+			)
+		);
+	}
+
+	/**
+	 * Un contenuto pubblicato del tipo con il nome dichiarato.
+	 *
+	 * @return int
+	 */
+	private function atto_con_nome() {
+		$atto = self::factory()->post->create(
+			array(
+				'post_type'   => 'prova_consegna_nomi',
+				'post_status' => 'publish',
+			)
+		);
+
+		update_post_meta( $atto, conformita_core_chiave_fine_pubblicazione(), gmdate( 'Y-m-d', strtotime( '+30 days' ) ) );
+
+		return $atto;
+	}
+
+	/**
+	 * Il nome proposto da una risposta, letto dalle due forme dell'intestazione.
+	 *
+	 * @param array<string, mixed> $risposta Risposta emessa.
+	 * @return array{0: string, 1: string}
+	 */
+	private function nomi_proposti( array $risposta ) {
+		$intestazione = (string) $risposta['intestazioni']['Content-Disposition'];
+
+		$this->assertSame( 1, preg_match( '/; filename="([^"]*)"; filename\*=UTF-8\'\'(.*)$/', $intestazione, $parti ), $intestazione );
+
+		return array( $parti[1], rawurldecode( $parti[2] ) );
+	}
+
+	/**
+	 * C-283: una funzione del nome che non e' una funzione si rifiuta prima di registrare.
+	 */
+	public function test_c283_nome_scaricato_non_funzione() {
+		foreach ( array( 'non_esiste_questa_funzione', 42, array( 'a', 'b' ), null ) as $valore ) {
+			$esito = $this->tipo_con_nome( $valore );
+
+			$this->assertWPError( $esito, wp_json_encode( $valore ) );
+			$this->assertSame( 'conformita_core_nome_scaricato_non_valido', $esito->get_error_code() );
+			$this->assertFalse( post_type_exists( 'prova_consegna_nomi' ), 'Il tipo rifiutato non lascia niente.' );
+			$this->assertFalse( conformita_core_tipo_registrato( 'prova_consegna_nomi' ) );
+		}
+	}
+
+	/**
+	 * C-284: il file esce con il nome che il tipo dichiara, dai due punti, e il contenuto non cambia.
+	 */
+	public function test_c284_nome_dichiarato_dal_tipo() {
+		$ricevuti = array();
+
+		$this->assertTrue(
+			$this->tipo_con_nome(
+				function ( $allegato, $atto ) use ( &$ricevuti ) {
+					$ricevuti[] = array( $allegato, $atto );
+
+					return 'albo-2041-0007-dal-01-10-al-16-10.pdf';
+				}
+			)
+		);
+
+		$atto     = $this->atto_con_nome();
+		$allegato = $this->allegato( $atto, 'Mario Rossi verbale.pdf' );
+		$percorso = get_attached_file( $allegato );
+
+		$this->assertStringContainsString( 'Mario', wp_basename( $percorso ), 'Precondizione: sul disco il nome originale.' );
+
+		$pubblica = $this->chiedi( $atto, $allegato );
+
+		$this->assertSame( 200, $pubblica['stato'] );
+		$this->assertSame( array( 'albo-2041-0007-dal-01-10-al-16-10.pdf', 'albo-2041-0007-dal-01-10-al-16-10.pdf' ), $this->nomi_proposti( $pubblica ) );
+		$this->assertStringNotContainsString( 'Mario', wp_json_encode( $pubblica['intestazioni'] ) );
+		$this->assertSame( 'application/pdf', $pubblica['intestazioni']['Content-Type'], 'Il tipo si decide dal file, come prima.' );
+		$this->assertStringStartsWith( 'inline;', $pubblica['intestazioni']['Content-Disposition'] );
+		$this->assertSame( realpath( $percorso ), $pubblica['percorso'], 'Si consegna lo stesso file, byte per byte.' );
+		$this->assertSame( array( array( $allegato, $atto ) ), $ricevuti, 'La funzione riceve allegato e contenuto.' );
+
+		wp_set_current_user( $this->utente_del_tipo( 'prova_consegna_nomi' ) );
+		$amministrativa = $this->chiedi_da_amministrazione( $atto, $allegato );
+
+		$this->assertSame( 200, $amministrativa['stato'] );
+		$this->assertSame( 'albo-2041-0007-dal-01-10-al-16-10.pdf', $this->nomi_proposti( $amministrativa )[0], 'Anche dal punto amministrativo.' );
+	}
+
+	/**
+	 * C-285: un nome proposto che non va esce come nome neutro, mai come quello del disco.
+	 */
+	public function test_c285_nome_proposto_non_valido() {
+		$proposto = '';
+
+		$this->assertTrue(
+			$this->tipo_con_nome(
+				function () use ( &$proposto ) {
+					if ( 'eccezione' === $proposto ) {
+						throw new RuntimeException( 'guasto' );
+					}
+
+					return $proposto;
+				}
+			)
+		);
+
+		$atto     = $this->atto_con_nome();
+		$allegato = $this->allegato( $atto, 'Mario Rossi verbale.pdf' );
+
+		foreach ( array( '', 'albo.txt', 'albo.PDF', 'Albo.pdf', '.pdf', 'pdf', 'cartella/albo.pdf', 'albo".pdf', "albo.pdf\n", '-albo.pdf', str_repeat( 'a', 150 ) . '.pdf', 42, null, 'eccezione' ) as $valore ) {
+			$proposto = $valore;
+			$risposta = $this->chiedi( $atto, $allegato );
+
+			$this->assertSame( 200, $risposta['stato'], wp_json_encode( $valore ) );
+			$this->assertSame( array( 'documento.pdf', 'documento.pdf' ), $this->nomi_proposti( $risposta ), wp_json_encode( $valore ) );
+			$this->assertStringNotContainsString( 'Mario', wp_json_encode( $risposta['intestazioni'] ), wp_json_encode( $valore ) );
+		}
+
+		// Controllo: al limite della lunghezza il nome passa.
+		$proposto = str_repeat( 'a', 147 ) . '.pdf';
+		$this->assertSame( $proposto, $this->nomi_proposti( $this->chiedi( $atto, $allegato ) )[0] );
+	}
+
+	/**
+	 * C-286: senza la funzione il file esce con il nome del disco, come prima; interfaccia 1.8.0.
+	 */
+	public function test_c286_senza_dichiarazione_e_versione() {
+		$atto     = $this->atto();
+		$allegato = $this->allegato( $atto, 'verbale.pdf' );
+
+		$this->assertSame( wp_basename( get_attached_file( $allegato ) ), $this->nomi_proposti( $this->chiedi( $atto, $allegato ) )[0] );
+		$this->assertNull( Conformita_Core_Tipi::nome_scaricato( self::TIPO ) );
+		$this->assertSame( '1.8.0', conformita_core_versione_api() );
 	}
 }

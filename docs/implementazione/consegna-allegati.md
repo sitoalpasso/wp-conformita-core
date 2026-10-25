@@ -1914,3 +1914,36 @@ con `conformita_core_`, e il tipo non contiene trattini (riga C-86).
 | C-280 | Il permesso di un tipo non apre i file di un altro tipo |
 | C-281 | Chi ha solo il permesso di consultazione non può modificare, cancellare né pubblicare il contenuto, e dal punto pubblico il file scaduto resta chiuso anche per lui |
 | C-282 | Il nonce resta obbligatorio anche per chi consulta; versione dell'interfaccia 1.7.0 |
+
+## 17. Il nome del file consegnato
+
+Unità a parte, chiesta dall'albo per il nome del file scaricato (ALBO-30 dell'albo). Righe
+C-283..C-286, prove in `tests/consegna-test.php`. Versione dell'interfaccia da `1.7.0` a
+`1.8.0`.
+
+**Che cosa manca oggi.** Il file esce con il nome che ha sul disco, cioè con il nome con cui è
+stato caricato. Quel nome può contenere dati personali, e il componente che lo deposita non ha
+modo di proporne un altro senza toccare il file.
+
+**Le scelte.**
+
+| Domanda | Scelta | Perché |
+|---|---|---|
+| Dove si dichiara | nella definizione del tipo, chiave facoltativa `nome_scaricato`, una funzione che riceve allegato e contenuto e restituisce il nome | il nome dipende dai dati del contenuto, che conosce solo il componente; dichiararlo con il tipo lo rende visibile dove si legge tutto il resto |
+| Senza dichiarazione | il nome del disco, come prima | non cambia niente per chi non la dichiara; non è una politica, perché il nome non decide che cosa si consegna né a chi |
+| Che cosa cambia | solo il nome suggerito nell'intestazione `Content-Disposition`, nelle due forme | il tipo del file, l'uscita dentro la pagina o come scaricamento e i byte consegnati si decidono dal file sul disco, come prima |
+| Che forma deve avere | lettere minuscole, cifre, punto, trattino e trattino basso, al massimo 151 caratteri, che comincia con lettera o cifra e finisce con l'estensione del file | nessun carattere che un browser o un sistema operativo interpreti; la stessa estensione, perché il file si apra con il programma giusto |
+| Un nome che non va | `documento` con l'estensione del file | chi dichiara la funzione vuole togliere il nome originale: un suo errore non deve rimetterlo in giro |
+| Una funzione che solleva un'eccezione | come un nome che non va | la consegna non si rompe per un errore del componente, e non torna al nome del disco |
+| Una dichiarazione che non è una funzione | il tipo non si registra | si scopre alla registrazione, non alla prima consegna |
+| Punto pubblico e amministrativo | tutti e due | è lo stesso file |
+
+| Riga | Cosa verifica |
+|---|---|
+| C-283 | Un `nome_scaricato` che non è una funzione (un nome di funzione inesistente, un numero, un elenco, null) rifiuta la registrazione, e il tipo non esiste |
+| C-284 | Con la funzione dichiarata, il file caricato con un nome di persona esce dai due punti con il nome proposto, nelle due forme dell'intestazione; nessuna intestazione contiene il nome originale; tipo, uscita dentro la pagina e file consegnato sono quelli di prima; la funzione riceve allegato e contenuto |
+| C-285 | Nomi proposti che non vanno (vuoto, altra estensione, maiuscole, solo l'estensione, senza punto, una barra, le virgolette, un a capo, un trattino in testa, troppo lungo, un numero, null, un'eccezione) escono come `documento.pdf` e mai con il nome originale; al limite della lunghezza il nome passa |
+| C-286 | Senza la funzione il file esce con il nome del disco; versione dell'interfaccia 1.8.0 |
+
+**Che cosa deve fare l'albo.** Portare `CORE_API_RICHIESTA` a `1.8.0`, fissare la revisione in
+`bin/installa-core.sh` e dichiarare `nome_scaricato` registrando il tipo degli atti.
