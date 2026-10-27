@@ -623,7 +623,63 @@ final class Conformita_Core_Consegna {
 			return self::rifiuto();
 		}
 
-		return self::consegna( get_post( (int) $allegato_id ), $percorso );
+		return self::consegna( get_post( (int) $allegato_id ), $percorso, (int) $atto_id );
+	}
+
+	/**
+	 * Il nome con cui il file esce: quello del disco, oppure quello che dichiara il tipo.
+	 *
+	 * **Il tipo del file si decide sempre dal nome sul disco**, non da questo:
+	 * il nome proposto cambia soltanto cio' che il browser suggerisce di
+	 * salvare. Per questo deve finire con la stessa estensione del file, e
+	 * avere solo lettere minuscole, cifre, punto, trattino e trattino basso.
+	 *
+	 * **Un nome proposto che non va non fa tornare il nome del disco.** Il tipo
+	 * che lo dichiara vuole togliere il nome originale, che puo' contenere dati
+	 * personali; un errore nella sua funzione non deve rimetterlo in giro. Esce
+	 * allora un nome neutro, `documento` con l'estensione del file. Righe C-284
+	 * e C-285.
+	 *
+	 * @param WP_Post $allegato Allegato.
+	 * @param string  $percorso Percorso del file sul disco.
+	 * @param int     $atto_id  Contenuto a cui l'allegato appartiene.
+	 * @return string
+	 */
+	private static function nome_consegnato( WP_Post $allegato, $percorso, $atto_id ) {
+		$nome     = wp_basename( $percorso );
+		$funzione = Conformita_Core_Tipi::nome_scaricato( (string) get_post_type( $atto_id ) );
+
+		if ( null === $funzione ) {
+			return $nome;
+		}
+
+		/*
+		 * L'estensione del disco entra nel nome solo se fatta di lettere e
+		 * cifre: un file rinominato da fuori con un a capo o un altro carattere
+		 * di controllo nell'estensione romperebbe l'intestazione anche nel
+		 * nome neutro. Altrimenti si considera assente.
+		 */
+		$estensione = strtolower( (string) pathinfo( $nome, PATHINFO_EXTENSION ) );
+		$estensione = 1 === preg_match( '/^[a-z0-9]{1,16}$/D', $estensione ) ? $estensione : '';
+		$neutro     = 'documento' . ( '' === $estensione ? '' : '.' . $estensione );
+
+		try {
+			$proposto = call_user_func( $funzione, (int) $allegato->ID, (int) $atto_id );
+		} catch ( Throwable $errore ) {
+			return $neutro;
+		}
+
+		if ( ! is_string( $proposto ) || 1 !== preg_match( '/^[a-z0-9][a-z0-9._-]{0,150}$/D', $proposto ) ) {
+			return $neutro;
+		}
+
+		$fine = '' === $estensione ? '' : '.' . $estensione;
+
+		if ( '' === $fine ? false !== strpos( $proposto, '.' ) : ( strlen( $proposto ) <= strlen( $fine ) || substr( $proposto, -strlen( $fine ) ) !== $fine ) ) {
+			return $neutro;
+		}
+
+		return $proposto;
 	}
 
 	/**
@@ -679,11 +735,12 @@ final class Conformita_Core_Consegna {
 	 *
 	 * @param WP_Post $allegato Allegato da consegnare.
 	 * @param string  $percorso Percorso del file sul disco.
+	 * @param int     $atto_id  Contenuto a cui l'allegato appartiene.
 	 * @return array<string, mixed>
 	 */
-	private static function consegna( WP_Post $allegato, $percorso ) {
-		$nome    = wp_basename( $percorso );
-		$dedotto = wp_check_filetype( $nome );
+	private static function consegna( WP_Post $allegato, $percorso, $atto_id ) {
+		$dedotto = wp_check_filetype( wp_basename( $percorso ) );
+		$nome    = self::nome_consegnato( $allegato, $percorso, $atto_id );
 
 		$concordi = ! empty( $dedotto['type'] ) && $dedotto['type'] === $allegato->post_mime_type;
 		$tipo     = $concordi ? (string) $allegato->post_mime_type : 'application/octet-stream';

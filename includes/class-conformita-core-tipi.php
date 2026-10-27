@@ -114,6 +114,23 @@ final class Conformita_Core_Tipi {
 			return $argomenti;
 		}
 
+		/*
+		 * Il nome del file consegnato e' facoltativo: senza, il file esce con
+		 * il nome che ha sul disco, come prima. Dichiarato, deve essere una
+		 * funzione; qualunque altra cosa si rifiuta prima di registrare, invece
+		 * di scoprirla alla prima consegna. Riga C-283.
+		 */
+		if ( array_key_exists( 'nome_scaricato', $definizione ) && ! is_callable( $definizione['nome_scaricato'] ) ) {
+			return new WP_Error(
+				'conformita_core_nome_scaricato_non_valido',
+				sprintf(
+					/* translators: %s: identificativo del tipo di contenuto. */
+					__( 'Tipo %s: nome_scaricato, se dichiarato, deve essere una funzione che riceve allegato e contenuto e restituisce il nome del file.', 'conformita-core' ),
+					$tipo
+				)
+			);
+		}
+
 		$oggetto = register_post_type(
 			$tipo,
 			array_merge(
@@ -131,8 +148,9 @@ final class Conformita_Core_Tipi {
 		}
 
 		self::$tipi[ $tipo ] = array(
-			'sezione'  => $sezione,
-			'capacita' => (array) $oggetto->cap,
+			'sezione'        => $sezione,
+			'capacita'       => (array) $oggetto->cap,
+			'nome_scaricato' => $definizione['nome_scaricato'] ?? null,
 		);
 
 		return true;
@@ -253,6 +271,22 @@ final class Conformita_Core_Tipi {
 		}
 
 		return $definizione['argomenti'];
+	}
+
+	/**
+	 * La funzione che da' il nome al file consegnato di un contenuto del tipo, o null.
+	 *
+	 * Il tipo si riconosce con il criterio della banca dati, come per la
+	 * politica e il permesso: un contenuto con il tipo scritto in un'altra
+	 * forma passa gli stessi controlli, e deve avere lo stesso nome.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return callable|null
+	 */
+	public static function nome_scaricato( $tipo ) {
+		$canonico = self::canonico( $tipo );
+
+		return null !== $canonico && isset( self::$tipi[ $canonico ]['nome_scaricato'] ) ? self::$tipi[ $canonico ]['nome_scaricato'] : null;
 	}
 
 	/**
