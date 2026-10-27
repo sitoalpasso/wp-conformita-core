@@ -1714,6 +1714,24 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			$this->assertSame( 'application/octet-stream', $risposta['intestazioni']['Content-Type'], $valore );
 		}
 
+		// Un'estensione del disco con un a capo, da un file rinominato da fuori: non entra nel nome, neanche nel ripiego.
+		$storto = $this->allegato( $atto, 'Mario Rossi storto.pdf' );
+		$this->rinomina_sul_disco( $storto, "mario-rossi.pdf\n" );
+
+		foreach ( array(
+			'albo'     => 'albo',
+			'albo.pdf' => 'documento',
+			null       => 'documento',
+			'errore'   => 'documento',
+		) as $valore => $atteso ) {
+			$proposto = '' === $valore ? null : $valore;
+			$risposta = $this->chiedi( $atto, $storto );
+
+			$this->assertSame( 200, $risposta['stato'], wp_json_encode( $valore ) );
+			$this->assertSame( array( $atteso, $atteso ), $this->nomi_proposti( $risposta ), wp_json_encode( $valore ) );
+			$this->assertSame( 0, preg_match( '/[\x00-\x1f\x7f]/', $risposta['intestazioni']['Content-Disposition'] ), wp_json_encode( $valore ) . ': nessun carattere di controllo.' );
+		}
+
 		// Controllo: al limite della lunghezza il nome passa.
 		$proposto = str_repeat( 'a', 147 ) . '.pdf';
 		$this->assertSame( $proposto, $this->nomi_proposti( $this->chiedi( $atto, $allegato ) )[0] );

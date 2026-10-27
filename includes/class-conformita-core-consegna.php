@@ -653,7 +653,14 @@ final class Conformita_Core_Consegna {
 			return $nome;
 		}
 
+		/*
+		 * L'estensione del disco entra nel nome solo se fatta di lettere e
+		 * cifre: un file rinominato da fuori con un a capo o un altro carattere
+		 * di controllo nell'estensione romperebbe l'intestazione anche nel
+		 * nome neutro. Altrimenti si considera assente.
+		 */
 		$estensione = strtolower( (string) pathinfo( $nome, PATHINFO_EXTENSION ) );
+		$estensione = 1 === preg_match( '/^[a-z0-9]{1,16}$/D', $estensione ) ? $estensione : '';
 		$neutro     = 'documento' . ( '' === $estensione ? '' : '.' . $estensione );
 
 		try {
