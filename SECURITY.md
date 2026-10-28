@@ -25,7 +25,7 @@ Non inserire dati personali, contenuti di atti reali o indirizzi di installazion
 |---|---|
 | Conferma di ricezione | 3 giorni lavorativi |
 | Prima valutazione (vulnerabilità sì o no, gravità) | 10 giorni lavorativi |
-| Correzione per i casi gravi (atto scaduto o non pubblico raggiungibile, documento scaricabile quando non dovrebbe, dati personali esposti, scrittura senza permesso) | 30 giorni dalla conferma |
+| Correzione per i casi gravi (contenuto scaduto o non pubblico raggiungibile, documento scaricabile quando non dovrebbe, dati personali esposti, scrittura senza permesso) | 30 giorni dalla conferma |
 
 Chi segnala viene tenuto informato fino alla correzione. L'avviso si pubblica quando la
 versione corretta è disponibile, con il credito a chi ha segnalato, se lo desidera. Chiediamo
@@ -61,6 +61,8 @@ correzioni di sicurezza si fanno solo sul ramo `main` e sull'ultima versione pub
   repository, con la stessa procedura.
 - Temi e altri plugin, salvo che il difetto stia nel modo in cui questo plugin li usa.
 - I limiti già dichiarati nelle schede di `docs/implementazione/`.
+  Eccezione: un limite dichiarato che si rivela sfruttabile senza poteri da amministratore
+  è in ambito e si corregge.
 - Problemi che richiedono un account che abbia già il permesso di fare la stessa cosa
   dall'interfaccia.
 
