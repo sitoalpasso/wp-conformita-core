@@ -34,10 +34,14 @@ on:
 permissions:
   contents: read
 
-# Un gruppo per riferimento: GitHub tiene in attesa una sola esecuzione per gruppo, e con
-# un gruppo unico un'etichetta o un rilascio potrebbero scartare la copia del ramo principale.
+# Un gruppo per evento e riferimento: GitHub tiene in attesa una sola esecuzione per gruppo
+# e scarta quella in attesa quando ne arriva un'altra. Con un gruppo comune un'etichetta, un
+# rilascio o un avvio manuale potrebbero scartare la copia del ramo principale o quella del
+# rilascio, che l'avvio manuale non rifà. Due esecuzioni sullo stesso riferimento possono
+# quindi girare insieme: è innocuo, perché spingono lo stesso commit senza forzare e il
+# rilascio spinge l'etichetta prima di crearsi.
 concurrency:
-  group: copia-sul-pubblico-${{ github.ref }}
+  group: copia-sul-pubblico-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
