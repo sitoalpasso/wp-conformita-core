@@ -1,0 +1,55 @@
+name: Copia sul repository pubblico
+
+# Lo sviluppo e le revisioni avvengono in una copia privata del repository. Quando una
+# modifica entra nel ramo principale della copia privata, questo flusso la porta sul ramo
+# principale del repository pubblico, con la stessa storia.
+#
+# Il repository pubblico ha lo stesso nome senza il suffisso "-sviluppo". La scrittura usa
+# il segreto TOKEN_REPOSITORIO_PUBBLICO, con permesso di scrittura sui contenuti e sui
+# flussi di lavoro del solo repository pubblico.
+#
+# Il flusso gira solo nella copia privata: nel repository pubblico il file esiste ma non
+# parte. Non forza mai: se il ramo pubblico ha commit che la copia privata non ha, la copia
+# si ferma con errore e la differenza si risolve a mano.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copia-sul-pubblico
+  cancel-in-progress: false
+
+jobs:
+  copia:
+    name: Copia del ramo principale
+    if: github.event.repository.private && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Porta il ramo principale sul repository pubblico
+        env:
+          TOKEN: ${{ secrets.TOKEN_REPOSITORIO_PUBBLICO }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Manca il segreto TOKEN_REPOSITORIO_PUBBLICO."
+            exit 1
+          fi
+          case "$GITHUB_REPOSITORY" in
+            *-sviluppo) ;;
+            *)
+              echo "::error::Il nome del repository non finisce con -sviluppo."
+              exit 1
+              ;;
+          esac
+          PUBBLICO="${GITHUB_REPOSITORY%-sviluppo}"
+          git push "https://x-access-token:${TOKEN}@github.com/${PUBBLICO}.git" HEAD:refs/heads/main
