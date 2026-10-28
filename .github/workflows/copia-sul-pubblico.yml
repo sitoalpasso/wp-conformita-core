@@ -16,6 +16,9 @@ name: Copia sul repository pubblico
 # parte. Non forza mai: se il ramo pubblico ha commit che la copia privata non ha, o se
 # un'etichetta esiste già sul pubblico con un commit diverso, la copia si ferma con errore
 # e la differenza si risolve a mano. Un rilascio che esiste già sul pubblico non si tocca.
+#
+# Un'etichetta passa solo se il suo commit è già nel ramo principale: un'etichetta messa
+# su un ramo non unito porterebbe sul pubblico lavoro non revisionato, e la copia si ferma.
 
 on:
   push:
@@ -31,8 +34,10 @@ on:
 permissions:
   contents: read
 
+# Un gruppo per riferimento: GitHub tiene in attesa una sola esecuzione per gruppo, e con
+# un gruppo unico un'etichetta o un rilascio potrebbero scartare la copia del ramo principale.
 concurrency:
-  group: copia-sul-pubblico
+  group: copia-sul-pubblico-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -64,6 +69,20 @@ jobs:
               ;;
           esac
           echo "PUBBLICO=${GITHUB_REPOSITORY%-sviluppo}" >> "$GITHUB_ENV"
+
+      - name: Controlla che l'etichetta sia nel ramo principale
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          ETICHETTA: ${{ github.ref_name }}
+        run: |
+          if ! git rev-parse --verify --quiet origin/main > /dev/null; then
+            echo "::error::Il ramo principale non è stato scaricato: impossibile controllare l'etichetta."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/tags/${ETICHETTA}^{commit}" origin/main; then
+            echo "::error::L'etichetta ${ETICHETTA} punta a un commit che non è nel ramo principale: non si copia."
+            exit 1
+          fi
 
       - name: Porta il ramo principale
         if: github.ref == 'refs/heads/main'
