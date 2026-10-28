@@ -32,10 +32,8 @@ test. Documentazione e messaggi di commit sono in italiano.
 
 ## Vulnerabilità di sicurezza
 
-Le vulnerabilità **non** si segnalano con una issue pubblica. Usa la segnalazione
-privata di sicurezza del repository (GitHub Security Advisories), descrivendo l'impatto
-e i passaggi per riprodurre. La segnalazione riceve riscontro prima di qualsiasi
-divulgazione.
+Le vulnerabilità **non** si segnalano con una issue pubblica. Canali, tempi di risposta e
+ambito sono in [SECURITY.md](SECURITY.md).
 
 ## Cosa non rientra nel supporto
 
