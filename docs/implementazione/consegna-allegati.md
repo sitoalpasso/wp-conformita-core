@@ -389,7 +389,8 @@ l'elenco amministrativo dove S4 lascia visibile il contenuto scaduto, quindi le 
 hanno la stessa porta. Una capability sul singolo, per esempio `edit_post`, sarebbe fragile
 qui: l'albo blocca la modifica dell'atto pubblicato (ALBO-09), e una futura mappatura che
 rendesse falso `edit_post` su un atto pubblicato chiuderebbe la consegna amministrativa senza
-che nessuno avesse deciso di chiuderla.
+che nessuno avesse deciso di chiuderla. **Superato dal punto 20**, che chiede anche il permesso
+sul singolo contenuto e spiega perché la fragilità qui descritta sbaglia nella direzione che chiude.
 
 ### 1.5 La memoria di pagina, le reti di distribuzione, e come esce il file
 
@@ -1037,7 +1038,7 @@ distinzione è scritto in fondo a questa sezione, e il costo è dichiarato.
 
 | Riga | Stato | Cosa verifica |
 |---|---|---|
-| C-141 | fatto | Utente con la capability del tipo: scarica anche l'allegato di un atto scaduto |
+| C-141 | fatto | Utente con la capability del tipo: scarica anche l'allegato di un atto scaduto (dal punto 20: se ha anche il permesso sull'atto e quello di consultare gli scaduti) |
 | C-142 | fatto | Senza nonce, con nonce inventato, o con il nonce di un altro allegato: rifiutato. Con il proprio: consegna |
 | C-143 | fatto | Utente autenticato senza la capability del tipo, e visitatore anonimo: non trovato |
 | C-144 | fatto | Durante la consegna pubblica `is_admin()` è falso e la superficie amministrativa non risulta in corso. È la riga che impedisce di spostare un domani il punto pubblico su `admin-post.php` senza accorgersene |
@@ -2059,3 +2060,51 @@ la sezione deve poterglielo dire.
 **Che cosa deve fare la trasparenza.** Chiedere la versione `1.10.0` e dichiarare
 `allegati_seguono_la_sezione` con la funzione che risponde `true` solo per i contenuti che la
 pagina della sezione mostra davvero.
+
+## 20. Il punto amministrativo: permesso sul contenuto e consultazione degli scaduti
+
+Unità a parte, chiesta dall'albo prima di introdurre un ruolo che redige senza consultare.
+Righe C-297..C-300, prove in `tests/consegna-test.php`. Versione dell'interfaccia da `1.10.0` a
+`1.11.0`.
+
+**Che cosa cambia.** Fino al punto 19 il punto amministrativo consegnava a chi aveva `edit_posts`
+del tipo i file di qualunque contenuto del tipo, in qualunque stato e scaduto compreso; il
+permesso di consultare gli scaduti (punto 16) era una seconda porta, più stretta. Le due porte
+ora dicono la stessa cosa sugli scaduti: **il file di un contenuto scaduto, dall'amministrazione,
+lo apre solo chi ha il permesso di consultare gli scaduti del tipo**, anche se gestisce il tipo.
+E chi gestisce apre i file di un contenuto solo se ha il permesso **su quel contenuto**
+(`edit_post`), non soltanto sul tipo: chi può modificare solo i propri contenuti apre solo i
+file dei propri.
+
+**Le scelte.**
+
+| Domanda | Scelta | Perché |
+|---|---|---|
+| Che cosa vuol dire "scaduto" qui | `Conformita_Core_Scadenza::scaduto()` vero e il contenuto non è in uno stato di preparazione (`draft`, `auto-draft`, `pending`, `future`) | un contenuto in preparazione non è mai stato esposto, e senza data di fine risulterebbe scaduto: chi lo prepara deve poter aprire i suoi file. Ogni altro stato, compresi il cestino, il privato e gli stati propri di un componente, conta come esposto: fra le due letture è quella che chiude |
+| Chi apre il file di un contenuto scaduto | chi gestisce quel contenuto **e** ha il permesso di consultazione, in qualunque stato; oppure chi ha solo il permesso di consultazione, per il contenuto pubblicato con l'allegato nello stato normale (punto 16, invariato) | la consultazione degli scaduti è un permesso a sé, che un ente assegna deliberatamente: gestire gli atti non lo comprende |
+| Chi apre il file di un contenuto non scaduto o in preparazione | chi ha `edit_posts` del tipo **e** `edit_post` sul contenuto | il permesso sul singolo segue le regole di WordPress sui contenuti propri e altrui, pubblicati e no |
+| La fragilità del punto 1.4 | accettata | un componente che rende falso `edit_post` su un contenuto chiude la porta della gestione per quel contenuto: è un errore che chiude, e per i contenuti pubblicati resta la porta della consultazione |
+| Il rifiuto | lo stesso di sempre, byte per byte | riga C-138 |
+| Il punto pubblico | non cambia | |
+
+| Riga | Cosa verifica |
+|---|---|
+| C-297 | Chi redige (permessi del tipo per i propri contenuti, senza consultazione) apre dall'amministrazione il file del proprio contenuto pubblicato e valido; dopo la scadenza dello stesso contenuto non lo apre più, né da pubblicato né cestinato né privato: il rifiuto è quello di sempre. Con il permesso di consultazione aggiunto, lo riapre |
+| C-298 | Il permesso sul singolo contenuto: chi può modificare solo i propri contenuti apre i file della propria bozza e non quelli della bozza di un altro; chi può modificare anche quelli altrui li apre |
+| C-299 | Un contenuto in preparazione (bozza, in attesa, programmato) senza data di fine o con la data passata risulta scaduto, e chi lo prepara ne apre lo stesso i file |
+| C-300 | Chi gestisce il tipo e ha il permesso di consultazione apre come prima i file dei contenuti scaduti, pubblicati, cestinati o privati; versione dell'interfaccia 1.11.0 |
+
+**Guasti voluti**, eseguiti rompendo una riga alla volta e rieseguendo le prove della consegna.
+Ognuno ha fatto diventare rosse le righe indicate:
+
+| Guasto | Che cosa si rompe | Riga che diventa rossa |
+|---|---|---|
+| G80 | tolto il controllo del permesso di consultazione sugli scaduti nella porta della gestione | C-297 |
+| G81 | tolto il controllo del permesso sul singolo contenuto | C-298 |
+| G82 | gli stati di preparazione contati come esposti | C-299 |
+| G83 | il cestino contato fra gli stati di preparazione | C-297 |
+
+**Che cosa deve fare l'albo.** Niente per i ruoli di oggi, che hanno tutti il permesso di
+consultazione insieme a quelli per pubblicare. Un ruolo che redige senza consultare non apre
+più dall'amministrazione i file degli atti scaduti. Chiedere `1.11.0` dove serve contare su
+questo comportamento.
