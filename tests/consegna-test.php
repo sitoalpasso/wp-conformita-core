@@ -5,7 +5,8 @@
  * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176,
  * e C-228 e C-240 dell'unita' S9 (il divieto di indicizzazione sui file),
  * C-276..C-282 (il permesso di consultare gli scaduti), C-283..C-286 (il nome
- * del file) e C-287..C-290 (i file che seguono la sezione).
+ * del file), C-287..C-290 (i file che seguono la sezione) e C-293..C-296 (la
+ * condizione della sezione).
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -1877,7 +1878,8 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			$this->assertSame( 404, $this->chiedi( $chiuso, $file_chiuso )['stato'], $tipo . ': senza la dichiarazione il file resta chiuso, come in C-176.' );
 		}
 
-		$this->assertSame( '1.9.0', conformita_core_versione_api() );
+		// 1.9.0 quando la riga e' nata; poi 1.10.0 (C-296): si guarda che non sia piu' bassa.
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.9.0', '>=' ) );
 	}
 
 	/**
@@ -2008,5 +2010,168 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		clean_post_cache( $taciuto );
 
 		$this->assertSame( 404, $this->chiedi( $taciuto, $file_taciuto )['stato'] );
+	}
+
+	/**
+	 * Le chiamate ricevute dalla funzione della condizione.
+	 *
+	 * @var array<int, array<int, int>>
+	 */
+	private $chiamate = array();
+
+	/**
+	 * La risposta che la funzione della condizione dara'.
+	 *
+	 * @var mixed
+	 */
+	private $risposta_condizione = true;
+
+	/**
+	 * La funzione della condizione: annota la chiamata e risponde come deciso dalla prova.
+	 *
+	 * @param int $allegato  Allegato.
+	 * @param int $contenuto Contenuto.
+	 * @return mixed
+	 */
+	public function condizione( $allegato, $contenuto ) {
+		$this->chiamate[] = array( $allegato, $contenuto );
+
+		if ( $this->risposta_condizione instanceof Throwable ) {
+			throw $this->risposta_condizione;
+		}
+
+		return $this->risposta_condizione;
+	}
+
+	/**
+	 * C-293: la dichiarazione accetta una funzione; il resto resta rifiutato.
+	 */
+	public function test_c293_la_dichiarazione_accetta_una_funzione() {
+		foreach ( array( 'si', 'true', 1, 0, null, array( true ), 'non_esiste_questa_funzione' ) as $valore ) {
+			$esito = $this->tipo_senza_pagina( 'prova_condizionata', $valore );
+
+			$this->assertWPError( $esito, wp_json_encode( $valore ) );
+			$this->assertSame( 'conformita_core_allegati_sezione_non_valido', $esito->get_error_code() );
+			$this->assertFalse( post_type_exists( 'prova_condizionata' ) );
+		}
+
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_condizionata', array( $this, 'condizione' ) ) );
+		$this->assertTrue( post_type_exists( 'prova_condizionata' ) );
+		$this->assertTrue( Conformita_Core_Tipi::allegati_seguono_la_sezione( 'prova_condizionata' ) );
+	}
+
+	/**
+	 * C-294: con la funzione il file esce solo se risponde esattamente true.
+	 */
+	public function test_c294_solo_true_ammette() {
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_condizionata', array( $this, 'condizione' ) ) );
+
+		$rifiuto = $this->chiedi( 999999, 999998 );
+
+		$this->assertSame( 404, $rifiuto['stato'], 'Precondizione: il rifiuto di riferimento.' );
+
+		$risposte = array(
+			'falso'           => false,
+			'uno'             => 1,
+			'testo true'      => 'true',
+			'null'            => null,
+			'elenco'          => array( true ),
+			'eccezione'       => new RuntimeException( 'guasto della sezione' ),
+			'errore di tipo'  => new TypeError( 'guasto della sezione' ),
+		);
+
+		foreach ( $risposte as $caso => $risposta ) {
+			list( $contenuto, $allegato ) = $this->contenuto_con_file( 'prova_condizionata' );
+
+			$this->risposta_condizione = true;
+			$this->chiamate            = array();
+
+			$ammesso = $this->chiedi( $contenuto, $allegato );
+
+			$this->assertSame( 200, $ammesso['stato'], $caso . ': precondizione, con true il file esce.' );
+			$this->assertSame( get_attached_file( $allegato ), $ammesso['percorso'] );
+			$this->assertSame( array( array( $allegato, $contenuto ) ), $this->chiamate, $caso . ': la funzione riceve allegato e contenuto, una volta.' );
+
+			$this->risposta_condizione = $risposta;
+
+			$this->assertSame( $rifiuto, $this->chiedi( $contenuto, $allegato ), $caso . ': il file non deve uscire, e il rifiuto e\' quello di sempre.' );
+		}
+	}
+
+	/**
+	 * C-295: la funzione e' l'ultimo anello.
+	 */
+	public function test_c295_la_funzione_e_lultimo_anello() {
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_condizionata', array( $this, 'condizione' ) ) );
+
+		list( $altro ) = $this->contenuto_con_file( 'prova_condizionata', 'altro.pdf' );
+
+		$casi = array(
+			'scaduto'              => function ( $contenuto ) {
+				update_post_meta( $contenuto, conformita_core_chiave_fine_pubblicazione(), gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+			},
+			'bozza'                => function ( $contenuto ) {
+				wp_update_post(
+					array(
+						'ID'          => $contenuto,
+						'post_status' => 'draft',
+					)
+				);
+			},
+			'password contenuto'   => function ( $contenuto ) {
+				wp_update_post(
+					array(
+						'ID'            => $contenuto,
+						'post_password' => 'segreto',
+					)
+				);
+			},
+			'accoppiata sbagliata' => null,
+		);
+
+		$this->risposta_condizione = true;
+
+		foreach ( $casi as $caso => $modifica ) {
+			list( $contenuto, $allegato ) = $this->contenuto_con_file( 'prova_condizionata' );
+
+			$this->chiamate = array();
+			$this->assertSame( 200, $this->chiedi( $contenuto, $allegato )['stato'], $caso . ': precondizione.' );
+			$this->assertCount( 1, $this->chiamate, $caso . ': precondizione, la funzione si chiama quando tutto il resto ammette.' );
+
+			if ( null === $modifica ) {
+				$this->chiamate = array();
+				$risposta       = $this->chiedi( $altro, $allegato );
+			} else {
+				$modifica( $contenuto );
+				$this->chiamate = array();
+				$risposta       = $this->chiedi( $contenuto, $allegato );
+			}
+
+			$this->assertSame( 404, $risposta['stato'], $caso );
+			$this->assertSame( array(), $this->chiamate, $caso . ': la funzione non si chiama per un file che core rifiuta comunque.' );
+		}
+	}
+
+	/**
+	 * C-296: il punto amministrativo non chiama la funzione; interfaccia 1.10.0.
+	 */
+	public function test_c296_amministrazione_e_versione() {
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_condizionata', array( $this, 'condizione' ) ) );
+
+		list( $contenuto, $allegato ) = $this->contenuto_con_file( 'prova_condizionata' );
+
+		$this->risposta_condizione = false;
+		$this->chiamate            = array();
+
+		$this->assertSame( 404, $this->chiedi( $contenuto, $allegato )['stato'], 'Precondizione: dal punto pubblico la funzione rifiuta.' );
+		$this->assertCount( 1, $this->chiamate, 'Precondizione: dal punto pubblico la funzione si chiama.' );
+
+		wp_set_current_user( $this->utente_del_tipo( 'prova_condizionata' ) );
+		$this->chiamate = array();
+
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'] );
+		$this->assertSame( array(), $this->chiamate, 'Il punto amministrativo non chiama la funzione.' );
+
+		$this->assertSame( '1.10.0', conformita_core_versione_api() );
 	}
 }
