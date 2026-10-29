@@ -131,6 +131,24 @@ final class Conformita_Core_Tipi {
 			);
 		}
 
+		/*
+		 * I file che seguono la sezione: facoltativo, e senza dichiarazione
+		 * vale la regola che chiude, cioe' il file esce solo se la pagina del
+		 * contenuto e' consultabile. Dichiarato, deve essere un valore
+		 * booleano: una scelta che apre una porta non si deduce da un testo o
+		 * da un numero. Riga C-287.
+		 */
+		if ( array_key_exists( 'allegati_seguono_la_sezione', $definizione ) && ! is_bool( $definizione['allegati_seguono_la_sezione'] ) ) {
+			return new WP_Error(
+				'conformita_core_allegati_sezione_non_valido',
+				sprintf(
+					/* translators: %s: identificativo del tipo di contenuto. */
+					__( 'Tipo %s: allegati_seguono_la_sezione, se dichiarato, deve essere vero o falso.', 'conformita-core' ),
+					$tipo
+				)
+			);
+		}
+
 		$oggetto = register_post_type(
 			$tipo,
 			array_merge(
@@ -148,9 +166,10 @@ final class Conformita_Core_Tipi {
 		}
 
 		self::$tipi[ $tipo ] = array(
-			'sezione'        => $sezione,
-			'capacita'       => (array) $oggetto->cap,
-			'nome_scaricato' => $definizione['nome_scaricato'] ?? null,
+			'sezione'          => $sezione,
+			'capacita'         => (array) $oggetto->cap,
+			'nome_scaricato'   => $definizione['nome_scaricato'] ?? null,
+			'allegati_sezione' => true === ( $definizione['allegati_seguono_la_sezione'] ?? false ),
 		);
 
 		return true;
@@ -287,6 +306,24 @@ final class Conformita_Core_Tipi {
 		$canonico = self::canonico( $tipo );
 
 		return null !== $canonico && isset( self::$tipi[ $canonico ]['nome_scaricato'] ) ? self::$tipi[ $canonico ]['nome_scaricato'] : null;
+	}
+
+	/**
+	 * I file dei contenuti del tipo seguono la pagina della sezione.
+	 *
+	 * Vero solo se la sezione lo ha dichiarato registrando il tipo. Il tipo si
+	 * riconosce con il criterio della banca dati, come per la politica e il
+	 * nome del file: un contenuto con il tipo scritto in un'altra forma passa
+	 * gli stessi controlli, e deve seguire la stessa regola. Righe C-288 e
+	 * C-290.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return bool
+	 */
+	public static function allegati_seguono_la_sezione( $tipo ) {
+		$canonico = self::canonico( $tipo );
+
+		return null !== $canonico && true === self::$tipi[ $canonico ]['allegati_sezione'];
 	}
 
 	/**

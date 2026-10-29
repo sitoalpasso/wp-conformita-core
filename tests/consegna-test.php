@@ -4,7 +4,8 @@
  *
  * Righe di collaudo C-126..C-145, C-159, C-160, C-167, C-168, C-171, C-176,
  * e C-228 e C-240 dell'unita' S9 (il divieto di indicizzazione sui file),
- * e C-276..C-282 (il permesso di consultare gli scaduti).
+ * C-276..C-282 (il permesso di consultare gli scaduti), C-283..C-286 (il nome
+ * del file) e C-287..C-290 (i file che seguono la sezione).
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -1774,6 +1775,238 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 
 		$this->assertSame( $atteso, $this->chiedi_da_amministrazione( $atto, $allegato ), 'Dal punto amministrativo.' );
 		$this->assertNull( Conformita_Core_Tipi::nome_scaricato( self::TIPO ) );
-		$this->assertSame( '1.8.0', conformita_core_versione_api() );
+		// 1.8.0 quando la riga e' nata; poi 1.9.0 (C-288): si guarda che non sia piu' bassa.
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.8.0', '>=' ) );
+	}
+
+	/**
+	 * Registra un tipo non consultabile della sezione della prova, con o senza
+	 * la dichiarazione che i suoi file seguono la sezione.
+	 *
+	 * @param string $tipo         Identificativo del tipo.
+	 * @param mixed  $dichiarazione Valore di `allegati_seguono_la_sezione`, oppure null per non dichiararla.
+	 * @param bool   $dichiara     Mettere la chiave nella definizione.
+	 * @return true|WP_Error
+	 */
+	private function tipo_senza_pagina( $tipo, $dichiarazione = true, $dichiara = true ) {
+		$definizione = array(
+			'sezione'      => self::SEZIONE,
+			'show_in_rest' => false,
+			'argomenti'    => array(
+				'public'             => false,
+				'publicly_queryable' => false,
+			),
+		);
+
+		if ( $dichiara ) {
+			$definizione['allegati_seguono_la_sezione'] = $dichiarazione;
+		}
+
+		return conformita_core_registra_tipo( $tipo, $definizione );
+	}
+
+	/**
+	 * Un contenuto pubblicato e valido di un tipo indicato, con il suo allegato.
+	 *
+	 * @param string $tipo Tipo del contenuto.
+	 * @param string $nome Nome del file.
+	 * @return array{0: int, 1: int} Contenuto e allegato.
+	 */
+	private function contenuto_con_file( $tipo, $nome = 'tabella.pdf' ) {
+		$contenuto = self::factory()->post->create(
+			array(
+				'post_type'   => $tipo,
+				'post_status' => 'publish',
+			)
+		);
+
+		update_post_meta( $contenuto, conformita_core_chiave_fine_pubblicazione(), gmdate( 'Y-m-d', strtotime( '+30 days' ) ) );
+
+		return array( $contenuto, $this->allegato( $contenuto, $nome ) );
+	}
+
+	/**
+	 * C-287: una dichiarazione che non e' un valore booleano si rifiuta prima di registrare.
+	 */
+	public function test_c287_dichiarazione_non_booleana() {
+		foreach ( array( 'si', 'true', 1, 0, null, array( true ) ) as $valore ) {
+			$esito = $this->tipo_senza_pagina( 'prova_seguita', $valore );
+
+			$this->assertWPError( $esito, wp_json_encode( $valore ) );
+			$this->assertSame( 'conformita_core_allegati_sezione_non_valido', $esito->get_error_code() );
+			$this->assertFalse( post_type_exists( 'prova_seguita' ), 'Il tipo rifiutato non lascia niente.' );
+			$this->assertFalse( conformita_core_tipo_registrato( 'prova_seguita' ) );
+		}
+
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_seguita', true ) );
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_non_seguita', false ) );
+	}
+
+	/**
+	 * C-288: con la dichiarazione il file di un contenuto senza pagina propria
+	 * esce dal punto pubblico, e la pagina resta chiusa; senza, o con falso, no.
+	 */
+	public function test_c288_i_file_seguono_la_sezione() {
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_seguita', true ) );
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_negata', false ) );
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_taciuta', null, false ) );
+
+		list( $contenuto, $allegato ) = $this->contenuto_con_file( 'prova_seguita' );
+
+		$this->assertFalse( is_post_publicly_viewable( $contenuto ), 'Precondizione: il contenuto non ha una pagina consultabile.' );
+
+		$risposta = $this->chiedi( $contenuto, $allegato );
+
+		$this->assertSame( 200, $risposta['stato'], 'Il file di un contenuto che si mostra nella pagina della sezione deve uscire.' );
+		$this->assertSame( get_attached_file( $allegato ), $risposta['percorso'] );
+		$this->assertSame( 'application/pdf', $risposta['intestazioni']['Content-Type'] );
+
+		/*
+		 * La dichiarazione non apre la pagina del contenuto. Si chiede per
+		 * numero, come farebbe un visitatore: il nome del tipo nell'indirizzo
+		 * WordPress lo scarta da se', perche' il tipo non e' consultabile.
+		 */
+		$this->go_to( add_query_arg( 'p', $contenuto, home_url( '/' ) ) );
+		$this->assertTrue( is_404(), 'La pagina del contenuto deve restare chiusa.' );
+		$this->assertNotSame( $contenuto, get_queried_object_id() );
+		$this->assertFalse( is_post_publicly_viewable( $contenuto ) );
+
+		foreach ( array( 'prova_negata', 'prova_taciuta' ) as $tipo ) {
+			list( $chiuso, $file_chiuso ) = $this->contenuto_con_file( $tipo );
+
+			$this->assertSame( 404, $this->chiedi( $chiuso, $file_chiuso )['stato'], $tipo . ': senza la dichiarazione il file resta chiuso, come in C-176.' );
+		}
+
+		$this->assertSame( '1.9.0', conformita_core_versione_api() );
+	}
+
+	/**
+	 * C-289: con la dichiarazione ogni altro anello della catena rifiuta ancora.
+	 *
+	 * Per ogni caso la prova fa uscire prima lo stesso file, poi cambia una
+	 * cosa sola: il rifiuto e' quindi di quell'anello, e non di un altro.
+	 */
+	public function test_c289_gli_altri_anelli_restano() {
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_seguita', true ) );
+
+		list( $altro ) = $this->contenuto_con_file( 'prova_seguita', 'altro.pdf' );
+
+		$rifiuto = $this->chiedi( 999999, 999998 );
+
+		$this->assertSame( 404, $rifiuto['stato'], 'Precondizione: il rifiuto di riferimento.' );
+
+		$casi = array(
+			'bozza'                => function ( $contenuto ) {
+				wp_update_post(
+					array(
+						'ID'          => $contenuto,
+						'post_status' => 'draft',
+					)
+				);
+			},
+			'privato'              => function ( $contenuto ) {
+				wp_update_post(
+					array(
+						'ID'          => $contenuto,
+						'post_status' => 'private',
+					)
+				);
+			},
+			'in attesa'            => function ( $contenuto ) {
+				wp_update_post(
+					array(
+						'ID'          => $contenuto,
+						'post_status' => 'pending',
+					)
+				);
+			},
+			'password contenuto'   => function ( $contenuto ) {
+				wp_update_post(
+					array(
+						'ID'            => $contenuto,
+						'post_password' => 'segreto',
+					)
+				);
+			},
+			'password allegato'    => function ( $contenuto, $allegato ) {
+				wp_update_post(
+					array(
+						'ID'            => $allegato,
+						'post_password' => 'suo',
+					)
+				);
+			},
+			'allegato cestinato'   => function ( $contenuto, $allegato ) {
+				wp_update_post(
+					array(
+						'ID'          => $allegato,
+						'post_status' => 'trash',
+					)
+				);
+			},
+			'scaduto'              => function ( $contenuto ) {
+				update_post_meta( $contenuto, conformita_core_chiave_fine_pubblicazione(), gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+			},
+			'senza data'           => function ( $contenuto ) {
+				delete_post_meta( $contenuto, conformita_core_chiave_fine_pubblicazione() );
+			},
+			'accoppiata sbagliata' => null,
+		);
+
+		foreach ( $casi as $caso => $modifica ) {
+			list( $contenuto, $allegato ) = $this->contenuto_con_file( 'prova_seguita' );
+
+			$this->assertSame( 200, $this->chiedi( $contenuto, $allegato )['stato'], $caso . ': precondizione, prima della modifica il file esce.' );
+
+			if ( null === $modifica ) {
+				$risposta = $this->chiedi( $altro, $allegato );
+			} else {
+				$modifica( $contenuto, $allegato );
+				$risposta = $this->chiedi( $contenuto, $allegato );
+			}
+
+			$this->assertSame( $rifiuto, $risposta, $caso . ': il file non deve uscire, e il rifiuto e\' quello di sempre.' );
+		}
+	}
+
+	/**
+	 * C-290: la dichiarazione e' del suo tipo, e non cambia il punto amministrativo.
+	 */
+	public function test_c290_la_dichiarazione_e_del_suo_tipo() {
+		global $wpdb;
+
+		// Il tipo che dichiara si registra per primo: una lettura dal primo tipo che dichiara aprirebbe anche l'altro.
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_seguita', true ) );
+		$this->assertTrue( $this->tipo_senza_pagina( 'prova_taciuta', null, false ) );
+
+		list( $seguito, $file_seguito ) = $this->contenuto_con_file( 'prova_seguita' );
+		list( $taciuto, $file_taciuto ) = $this->contenuto_con_file( 'prova_taciuta' );
+
+		$this->assertSame( 200, $this->chiedi( $seguito, $file_seguito )['stato'], 'Precondizione: il tipo che dichiara consegna.' );
+		$this->assertSame( 404, $this->chiedi( $taciuto, $file_taciuto )['stato'], 'Un tipo della stessa sezione che non dichiara resta chiuso.' );
+
+		// Il punto amministrativo chiede ancora nonce e permessi del tipo.
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $seguito, $file_seguito )['stato'], 'Anonimo.' );
+
+		wp_set_current_user( self::factory()->user->create( array( 'role' => 'editor' ) ) );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $seguito, $file_seguito )['stato'], 'Senza i permessi del tipo.' );
+
+		wp_set_current_user( $this->utente_del_tipo( 'prova_seguita' ) );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $seguito, $file_seguito, '' )['stato'], 'Senza nonce.' );
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $seguito, $file_seguito )['stato'], 'Con permessi e nonce.' );
+
+		wp_set_current_user( 0 );
+
+		// Il tipo scritto in maiuscolo direttamente nella banca dati segue la stessa regola.
+		$wpdb->update( $wpdb->posts, array( 'post_type' => 'PROVA_SEGUITA' ), array( 'ID' => $seguito ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: una scrittura diretta del tipo, come da un'importazione.
+		clean_post_cache( $seguito );
+
+		$this->assertSame( 'PROVA_SEGUITA', get_post_type( $seguito ), 'Precondizione: il tipo e\' scritto in un\'altra forma.' );
+		$this->assertSame( 200, $this->chiedi( $seguito, $file_seguito )['stato'] );
+
+		$wpdb->update( $wpdb->posts, array( 'post_type' => 'PROVA_TACIUTA' ), array( 'ID' => $taciuto ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: come sopra.
+		clean_post_cache( $taciuto );
+
+		$this->assertSame( 404, $this->chiedi( $taciuto, $file_taciuto )['stato'] );
 	}
 }

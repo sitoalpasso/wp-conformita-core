@@ -1962,3 +1962,52 @@ vale come assente, e C-285 lo prova.
 
 **Che cosa deve fare l'albo.** Portare `CORE_API_RICHIESTA` a `1.8.0`, fissare la revisione in
 `bin/installa-core.sh` e dichiarare `nome_scaricato` registrando il tipo degli atti.
+
+## 18. I file che seguono la sezione
+
+Unità a parte, chiesta dalla trasparenza. Righe C-287..C-290, prove in
+`tests/consegna-test.php`. Versione dell'interfaccia da `1.8.0` a `1.9.0`.
+
+**Che cosa manca oggi.** Il punto pubblico consegna il file solo se il pubblico può aprire anche
+la pagina del contenuto a cui il file appartiene (riga C-176). Ci sono contenuti che una pagina
+propria non ce l'hanno di proposito: compaiono soltanto dentro una pagina della sezione, che li
+raccoglie. Il loro tipo è registrato come non consultabile, e quindi i loro file non escono mai,
+nemmeno quando il contenuto è pubblicato, valido e senza password. Aprire una pagina per ogni
+contenuto solo per far passare il file vorrebbe dire aprire anche la ricerca, i feed e gli
+elenchi, cioè porte che poi vanno sorvegliate una per una.
+
+**Le scelte.**
+
+| Domanda | Scelta | Perché |
+|---|---|---|
+| Dove si dichiara | nella definizione del tipo, chiave facoltativa `allegati_seguono_la_sezione` | è la sezione che registra il tipo a sapere dove i suoi contenuti si mostrano; dichiararlo con il tipo lo rende visibile dove si legge tutto il resto |
+| Che forma ha | un valore booleano; qualunque altra cosa rifiuta la registrazione | una scelta che apre una porta non si deduce da un testo o da un numero |
+| Senza dichiarazione, o con `false` | come prima: il file esce solo se la pagina del contenuto è consultabile | il comportamento che chiude; nessun tipo si trova aperto senza averlo scritto |
+| Che cosa cambia con `true` | sul punto pubblico non si guarda più se la pagina del contenuto è consultabile | è l'unico anello che non ha senso per un contenuto senza pagina propria |
+| Che cosa resta uguale | tutti gli altri anelli: tipo gestito con la sua politica, appartenenza dell'allegato, contenuto pubblicato, nessuna password sul contenuto né sull'allegato, allegato nello stato normale, contenuto non scaduto, file dentro la cartella protetta | il file segue il contenuto in tutto il resto; la scadenza in particolare resta una proprietà del dato letto |
+| La pagina del contenuto | resta chiusa | la dichiarazione riguarda i file, non apre nessun indirizzo del contenuto |
+| Il punto amministrativo | non cambia | lì decidono il nonce e i permessi del tipo |
+| Che cosa core non verifica | che la pagina della sezione mostri davvero il contenuto | core non conosce quella pagina; la promessa è del componente che dichiara |
+| Tipo scritto in un'altra forma | si riconosce come per la politica e il nome del file, con il criterio della banca dati | lo stesso contenuto deve avere la stessa regola comunque sia scritto il tipo |
+
+| Riga | Cosa verifica |
+|---|---|
+| C-287 | Una `allegati_seguono_la_sezione` che non è un valore booleano (un testo, un numero, null, un elenco) rifiuta la registrazione, e il tipo non esiste; `true` e `false` si registrano |
+| C-288 | Con `true` su un tipo non consultabile, il file di un contenuto pubblicato, valido e senza password esce dal punto pubblico, con il file giusto; la pagina del contenuto resta non consultabile e non si trova. Con `false`, e senza dichiarazione, lo stesso file è rifiutato come in C-176. Versione dell'interfaccia 1.9.0 |
+| C-289 | Con `true`, ogni altro anello rifiuta ancora, con il rifiuto di sempre: contenuto in bozza, privato o in attesa, password sul contenuto, password sull'allegato, allegato cestinato, contenuto scaduto, contenuto senza data di fine, allegato chiesto con un altro contenuto. Per ognuno la prova mostra prima che lo stesso file esce |
+| C-290 | La dichiarazione vale per il suo tipo: un altro tipo non consultabile della stessa sezione, senza dichiarazione, resta chiuso; il punto amministrativo chiede ancora nonce e permessi del tipo; il tipo scritto in maiuscolo direttamente nella banca dati segue la stessa regola |
+
+**Guasti voluti**, eseguiti sul codice di questa unità rompendo una riga alla volta e rieseguendo le prove della consegna e della scadenza; non girano nella verifica continua (vedi il punto 13). Ognuno ha fatto diventare rosse le righe indicate:
+
+| Guasto | Che cosa si rompe | Riga che diventa rossa |
+|---|---|---|
+| G70 | la dichiarazione ignorata, si guarda sempre la consultabilità della pagina | C-288, C-289, C-290 |
+| G71 | con la dichiarazione si salta anche il controllo dello stato del contenuto | C-289 |
+| G72 | con la dichiarazione si salta anche il controllo di scadenza | C-289 |
+| G73 | la dichiarazione letta dal primo tipo che ce l'ha, invece che dal tipo del contenuto | C-288, C-290 |
+| G74 | tolto il controllo che la dichiarazione sia un valore booleano | C-287 |
+
+**Che cosa deve fare la trasparenza.** Portare la versione richiesta a `1.9.0`, fissare la
+revisione del componente comune e dichiarare `allegati_seguono_la_sezione => true` registrando il
+tipo dei contenuti che compaiono solo dentro la pagina della sezione. L'albo non cambia niente: i
+suoi atti hanno una pagina propria e non dichiarano la chiave.

@@ -78,6 +78,13 @@ if ( ! function_exists( 'conformita_core_registra_tipo' ) ) {
 	 * argomenti di registrazione si passano in `argomenti` e arrivano a
 	 * WordPress come sono, tolti quelli che core impone.
 	 *
+	 * Due chiavi facoltative: `nome_scaricato`, la funzione che propone il
+	 * nome del file consegnato, e, dalla versione 1.9.0 dell'interfaccia,
+	 * `allegati_seguono_la_sezione`, vero per un tipo senza pagina propria i
+	 * cui contenuti si mostrano dentro una pagina della sezione: i loro file
+	 * escono dal punto pubblico quando il contenuto è pubblicato, valido e
+	 * senza password, anche se la pagina del contenuto non è consultabile.
+	 *
 	 * @param string $tipo        Identificativo del tipo.
 	 * @param array  $definizione Definizione: `sezione`, `show_in_rest`, `argomenti`.
 	 * @return true|WP_Error Vero se il tipo è registrato, errore altrimenti.
@@ -224,6 +231,10 @@ if ( ! function_exists( 'conformita_core_imposta_fine_pubblicazione' ) ) {
 if ( ! function_exists( 'conformita_core_fine_pubblicazione' ) ) {
 	/**
 	 * La fine della pubblicazione registrata su un contenuto.
+	 *
+	 * Una lettura fallita nella banca dati non è una data assente: dalla
+	 * versione 1.9.0 dell'interfaccia restituisce l'errore
+	 * `conformita_core_lettura_fallita`, e non la stringa vuota.
 	 *
 	 * @param int $post_id Identificativo del contenuto.
 	 * @return string|WP_Error La data, stringa vuota se assente.
