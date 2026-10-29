@@ -2273,7 +2273,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			$this->metti_in_stato( $contenuto, $stato );
 
 			$this->assertTrue( conformita_core_scaduto( $contenuto ), $stato . ': precondizione, il contenuto e\' scaduto.' );
-			$this->assertTrue( current_user_can( 'edit_post', $contenuto ), $stato . ': precondizione, chi redige ha ancora il permesso sul contenuto.' );
+			$this->assertTrue( current_user_can( 'read_post', $contenuto ), $stato . ': precondizione, chi redige ha ancora il permesso sul contenuto.' );
 
 			$risposta = $this->chiedi_da_amministrazione( $contenuto, $allegato );
 
@@ -2305,7 +2305,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		wp_set_current_user( $redattore );
 
 		$this->assertSame( 200, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'La propria bozza si apre.' );
-		$this->assertFalse( current_user_can( 'edit_post', $altrui ), 'Precondizione: la bozza altrui non e\' sua.' );
+		$this->assertFalse( current_user_can( 'read_post', $altrui ), 'Precondizione: la bozza altrui non e\' sua.' );
 		$this->assertSame( 404, $this->chiedi_da_amministrazione( $altrui, $file_altrui )['stato'], 'La bozza di un altro non si apre.' );
 
 		wp_set_current_user( $this->utente_del_tipo() );
@@ -2321,7 +2321,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 
 		wp_set_current_user( $redattore );
 
-		$this->assertSame( 404, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'Con il tipo in un\'altra forma chi modifica solo i propri contenuti non la apre.' );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'Con il tipo in un\'altra forma chi non modifica i contenuti altrui non la apre.' );
 	}
 
 	/**

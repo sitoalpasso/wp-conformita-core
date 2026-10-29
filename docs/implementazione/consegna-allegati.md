@@ -389,8 +389,8 @@ l'elenco amministrativo dove S4 lascia visibile il contenuto scaduto, quindi le 
 hanno la stessa porta. Una capability sul singolo, per esempio `edit_post`, sarebbe fragile
 qui: l'albo blocca la modifica dell'atto pubblicato (ALBO-09), e una futura mappatura che
 rendesse falso `edit_post` su un atto pubblicato chiuderebbe la consegna amministrativa senza
-che nessuno avesse deciso di chiuderla. **Superato dal punto 20**, che chiede anche il permesso
-sul singolo contenuto e spiega perché la fragilità qui descritta sbaglia nella direzione che chiude.
+che nessuno avesse deciso di chiuderla. **Precisato dal punto 20**, che chiede anche il permesso
+di leggere il singolo contenuto (`read_post`, non `edit_post`, proprio per questa fragilità).
 
 ### 1.5 La memoria di pagina, le reti di distribuzione, e come esce il file
 
@@ -2072,9 +2072,9 @@ del tipo i file di qualunque contenuto del tipo, in qualunque stato e scaduto co
 permesso di consultare gli scaduti (punto 16) era una seconda porta, più stretta. Le due porte
 ora dicono la stessa cosa sugli scaduti: **il file di un contenuto scaduto, dall'amministrazione,
 lo apre solo chi ha il permesso di consultare gli scaduti del tipo**, anche se gestisce il tipo.
-E chi gestisce apre i file di un contenuto solo se ha il permesso **su quel contenuto**
-(`edit_post`), non soltanto sul tipo: chi può modificare solo i propri contenuti apre solo i
-file dei propri.
+E chi gestisce apre i file di un contenuto solo se ha il permesso di leggere **quel
+contenuto** (`read_post`), non soltanto quello sul tipo: chi può modificare solo i propri
+contenuti apre i file delle proprie bozze e non di quelle altrui.
 
 **Le scelte.**
 
@@ -2082,16 +2082,16 @@ file dei propri.
 |---|---|---|
 | Che cosa vuol dire "scaduto" qui | `Conformita_Core_Scadenza::scaduto()` vero e il contenuto non è in uno stato di preparazione (`draft`, `auto-draft`, `pending`, `future`) | un contenuto in preparazione non è mai stato esposto, e senza data di fine risulterebbe scaduto: chi lo prepara deve poter aprire i suoi file. Ogni altro stato, compresi il cestino, il privato e gli stati propri di un componente, conta come esposto: fra le due letture è quella che chiude |
 | Chi apre il file di un contenuto scaduto | chi gestisce quel contenuto **e** ha il permesso di consultazione, in qualunque stato; oppure chi ha solo il permesso di consultazione, per il contenuto pubblicato con l'allegato nello stato normale (punto 16, invariato) | la consultazione degli scaduti è un permesso a sé, che un ente assegna deliberatamente: gestire gli atti non lo comprende |
-| Chi apre il file di un contenuto non scaduto o in preparazione | chi ha `edit_posts` del tipo **e** `edit_post` sul contenuto | il permesso sul singolo segue le regole di WordPress sui contenuti propri e altrui, pubblicati e no |
-| Il tipo scritto in un'altra forma | tutti i permessi del tipo sui contenuti altrui, pubblicati e privati | WordPress non sa derivare `edit_post` per un nome che non conosce; si pretende il caso più largo, che è la lettura che chiude |
-| La fragilità del punto 1.4 | accettata | un componente che rende falso `edit_post` su un contenuto chiude la porta della gestione per quel contenuto: è un errore che chiude, e per i contenuti pubblicati resta la porta della consultazione |
+| Chi apre il file di un contenuto non scaduto o in preparazione | chi ha `edit_posts` del tipo **e** `read_post` sul contenuto | aprire un file è una lettura: WordPress chiede il permesso sui contenuti altrui per le bozze, quelli in attesa e i cestinati, quello sui privati per i privati. Non `edit_post`: un componente che vieta di modificare un contenuto dopo una certa fase, o che non dà a nessuno il permesso di modificare i privati, chiuderebbe la lettura dei file senza averlo deciso |
+| Il contenuto pubblicato e valido con una password | si apre con `edit_posts` del tipo, come prima | `read_post` non guarda la password; dall'amministrazione si entra con permessi più forti di una password di lettura, come al punto 1.4 |
+| Il tipo scritto in un'altra forma | i permessi del tipo sui contenuti altrui e sui privati | WordPress non sa derivare `read_post` per un nome che non conosce; si pretende il caso più largo, che è la lettura che chiude |
 | Il rifiuto | lo stesso di sempre, byte per byte | riga C-138 |
 | Il punto pubblico | non cambia | |
 
 | Riga | Cosa verifica |
 |---|---|
 | C-297 | Chi redige (permessi del tipo per i propri contenuti, senza consultazione) apre dall'amministrazione il file del proprio contenuto pubblicato e valido; dopo la scadenza dello stesso contenuto non lo apre più, né da pubblicato né cestinato né privato: il rifiuto è quello di sempre. Con il permesso di consultazione aggiunto, lo riapre |
-| C-298 | Il permesso sul singolo contenuto: chi può modificare solo i propri contenuti apre i file della propria bozza e non quelli della bozza di un altro; chi può modificare anche quelli altrui li apre. Con il tipo scritto in maiuscolo direttamente nella banca dati, che WordPress non sa ricondurre a un tipo, servono tutti i permessi del tipo sui contenuti altrui, pubblicati e privati: chi li ha apre, chi modifica solo i propri no |
+| C-298 | Il permesso sul singolo contenuto: chi può modificare solo i propri contenuti apre i file della propria bozza e non quelli della bozza di un altro; chi può modificare anche quelli altrui li apre. Con il tipo scritto in maiuscolo direttamente nella banca dati, che WordPress non sa ricondurre a un tipo, servono i permessi del tipo sui contenuti altrui e sui privati: chi li ha apre, chi modifica solo i propri no |
 | C-299 | Un contenuto in preparazione (bozza, in attesa, programmato) senza data di fine o con la data passata risulta scaduto, e chi lo prepara ne apre lo stesso i file |
 | C-300 | Chi gestisce il tipo e ha il permesso di consultazione apre come prima i file dei contenuti scaduti, pubblicati, cestinati o privati; versione dell'interfaccia 1.11.0 |
 

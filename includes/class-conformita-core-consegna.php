@@ -290,13 +290,11 @@ final class Conformita_Core_Consegna {
 	 * contenuto scaduto resta raggiungibile perché resti correggibile. Non è
 	 * l'archivio riservato, che è l'unità S10 e non esiste.
 	 *
-	 * Due porte. Chi gestisce il tipo apre i file dei contenuti su cui ha il
-	 * permesso (`edit_post`), e quelli dei contenuti scaduti solo se ha anche
-	 * il permesso di consultare gli scaduti. Chi ha soltanto quest'ultimo
-	 * apre i file dei contenuti pubblicati, scaduti compresi. Un componente
-	 * che rende falso `edit_post` su un contenuto chiude la prima porta per
-	 * quel contenuto: e' un errore che chiude, e per i pubblicati resta la
-	 * seconda. Punto 20 della scheda.
+	 * Due porte. Chi gestisce il tipo apre i file dei contenuti che ha il
+	 * permesso di leggere (`read_post`), e quelli dei contenuti scaduti solo
+	 * se ha anche il permesso di consultare gli scaduti. Chi ha soltanto
+	 * quest'ultimo apre i file dei contenuti pubblicati, scaduti compresi.
+	 * Punto 20 della scheda.
 	 *
 	 * @internal Aggancio di `admin_post_conformita_core_allegato`.
 	 */
@@ -332,8 +330,8 @@ final class Conformita_Core_Consegna {
 		$consulta      = ! is_wp_error( $consultazione ) && current_user_can( $consultazione );
 
 		/*
-		 * Chi gestisce apre i file di un contenuto se ha il permesso su quel
-		 * contenuto, non soltanto sul tipo; e quelli di un contenuto scaduto
+		 * Chi gestisce apre i file di un contenuto se ha il permesso di
+		 * leggere quel contenuto, non soltanto quello sul tipo; e quelli di un contenuto scaduto
 		 * solo se consulta anche gli scaduti: gestire gli atti non comprende
 		 * la consultazione dell'archivio. Righe C-297..C-300.
 		 */
@@ -371,14 +369,18 @@ final class Conformita_Core_Consegna {
 	}
 
 	/**
-	 * Chi chiede ha il permesso di modificare proprio questo contenuto.
+	 * Chi chiede ha il permesso di leggere proprio questo contenuto.
 	 *
-	 * Si chiede a WordPress con `edit_post`, che conosce autore e stato. Un
-	 * contenuto con il tipo scritto in un'altra forma direttamente nella banca
-	 * dati e' gestito per core ma sconosciuto a WordPress, che per quel nome
-	 * non sa derivare il permesso: allora si pretendono tutti i permessi del
-	 * tipo sui contenuti altrui, pubblicati e privati, cioe' quelli che
-	 * `edit_post` chiederebbe nel caso piu' largo. Riga C-298.
+	 * Si chiede a WordPress con `read_post`, che conosce autore e stato:
+	 * aprire un file e' una lettura. Per una bozza, un contenuto in attesa o
+	 * cestinato di un altro autore WordPress chiede il permesso di modificare
+	 * i contenuti altrui; per un privato quello di leggere i privati. Un
+	 * contenuto pubblicato lo legge chiunque, e per quello scaduto decide il
+	 * permesso di consultazione. Un contenuto con il tipo scritto in un'altra
+	 * forma direttamente nella banca dati e' gestito per core ma sconosciuto
+	 * a WordPress, che per quel nome non sa derivare il permesso: allora si
+	 * pretendono i permessi del tipo sui contenuti altrui e sui privati, cioe'
+	 * quelli che `read_post` chiederebbe nel caso piu' largo. Riga C-298.
 	 *
 	 * @param WP_Post              $contenuto Contenuto.
 	 * @param array<string, mixed> $capacita  Capability del tipo.
@@ -386,10 +388,10 @@ final class Conformita_Core_Consegna {
 	 */
 	private static function permesso_sul_contenuto( WP_Post $contenuto, array $capacita ) {
 		if ( null !== get_post_type_object( $contenuto->post_type ) ) {
-			return current_user_can( 'edit_post', $contenuto->ID );
+			return current_user_can( 'read_post', $contenuto->ID );
 		}
 
-		foreach ( array( 'edit_others_posts', 'edit_published_posts', 'edit_private_posts' ) as $generico ) {
+		foreach ( array( 'edit_others_posts', 'read_private_posts' ) as $generico ) {
 			if ( empty( $capacita[ $generico ] ) || ! current_user_can( $capacita[ $generico ] ) ) {
 				return false;
 			}
