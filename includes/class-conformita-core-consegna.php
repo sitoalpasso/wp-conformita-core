@@ -42,7 +42,7 @@
  * catena di `ammessa()`. Sul punto amministrativo, che è la superficie dove la
  * scadenza **non** si applica, il nonce c'è insieme alla capability.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-162, C-276..C-282.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-162, C-276..C-282, C-287..C-290.
  *
  * @package Conformita_Core
  */
@@ -531,8 +531,15 @@ final class Conformita_Core_Consegna {
 			 * `is_post_publicly_viewable()` guarda anche lo stato, ma il
 			 * controllo su `publish` resta sopra: due anelli che guardano cose
 			 * diverse restano due anelli, e la riga C-136 misura quello.
+			 *
+			 * **L'unica eccezione e' dichiarata dalla sezione.** Un tipo senza
+			 * pagina propria, i cui contenuti si mostrano soltanto dentro una
+			 * pagina della sezione, puo' dichiarare che i suoi file seguono la
+			 * sezione: allora questo anello non si applica, e tutti gli altri
+			 * si'. Senza dichiarazione vale la regola che chiude. Righe
+			 * C-287..C-290.
 			 */
-			if ( ! is_post_publicly_viewable( $atto ) ) {
+			if ( ! Conformita_Core_Tipi::allegati_seguono_la_sezione( $atto->post_type ) && ! is_post_publicly_viewable( $atto ) ) {
 				return false;
 			}
 

@@ -1997,14 +1997,15 @@ elenchi, cioè porte che poi vanno sorvegliate una per una.
 | C-289 | Con `true`, ogni altro anello rifiuta ancora, con il rifiuto di sempre: contenuto in bozza, privato o in attesa, password sul contenuto, password sull'allegato, allegato cestinato, contenuto scaduto, contenuto senza data di fine, allegato chiesto con un altro contenuto. Per ognuno la prova mostra prima che lo stesso file esce |
 | C-290 | La dichiarazione vale per il suo tipo: un altro tipo non consultabile della stessa sezione, senza dichiarazione, resta chiuso; il punto amministrativo chiede ancora nonce e permessi del tipo; il tipo scritto in maiuscolo direttamente nella banca dati segue la stessa regola |
 
-**Guasti voluti, eseguiti su una copia e non nella verifica continua** (vedi il punto 13):
+**Guasti voluti**, eseguiti sul codice di questa unità rompendo una riga alla volta e rieseguendo le prove della consegna e della scadenza; non girano nella verifica continua (vedi il punto 13). Ognuno ha fatto diventare rosse le righe indicate:
 
 | Guasto | Che cosa si rompe | Riga che diventa rossa |
 |---|---|---|
-| G70 | la dichiarazione ignorata, si guarda sempre la consultabilità della pagina | C-288 |
+| G70 | la dichiarazione ignorata, si guarda sempre la consultabilità della pagina | C-288, C-289, C-290 |
 | G71 | con la dichiarazione si salta anche il controllo dello stato del contenuto | C-289 |
 | G72 | con la dichiarazione si salta anche il controllo di scadenza | C-289 |
-| G73 | la dichiarazione letta dal primo tipo che ce l'ha, invece che dal tipo del contenuto | C-290 |
+| G73 | la dichiarazione letta dal primo tipo che ce l'ha, invece che dal tipo del contenuto | C-288, C-290 |
+| G74 | tolto il controllo che la dichiarazione sia un valore booleano | C-287 |
 
 **Che cosa deve fare la trasparenza.** Portare la versione richiesta a `1.9.0`, fissare la
 revisione del componente comune e dichiarare `allegati_seguono_la_sezione => true` registrando il

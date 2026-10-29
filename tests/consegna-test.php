@@ -1861,17 +1861,14 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$this->assertSame( get_attached_file( $allegato ), $risposta['percorso'] );
 		$this->assertSame( 'application/pdf', $risposta['intestazioni']['Content-Type'] );
 
-		// La dichiarazione non apre la pagina del contenuto.
-		$this->go_to(
-			add_query_arg(
-				array(
-					'p'         => $contenuto,
-					'post_type' => 'prova_seguita',
-				),
-				home_url( '/' )
-			)
-		);
-		$this->assertNotSame( $contenuto, get_queried_object_id(), 'La pagina del contenuto deve restare chiusa.' );
+		/*
+		 * La dichiarazione non apre la pagina del contenuto. Si chiede per
+		 * numero, come farebbe un visitatore: il nome del tipo nell'indirizzo
+		 * WordPress lo scarta da se', perche' il tipo non e' consultabile.
+		 */
+		$this->go_to( add_query_arg( 'p', $contenuto, home_url( '/' ) ) );
+		$this->assertTrue( is_404(), 'La pagina del contenuto deve restare chiusa.' );
+		$this->assertNotSame( $contenuto, get_queried_object_id() );
 		$this->assertFalse( is_post_publicly_viewable( $contenuto ) );
 
 		foreach ( array( 'prova_negata', 'prova_taciuta' ) as $tipo ) {
@@ -2001,13 +1998,13 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		wp_set_current_user( 0 );
 
 		// Il tipo scritto in maiuscolo direttamente nella banca dati segue la stessa regola.
-		$wpdb->update( $wpdb->posts, array( 'post_type' => 'PROVA_SEGUITA' ), array( 'ID' => $seguito ) );
+		$wpdb->update( $wpdb->posts, array( 'post_type' => 'PROVA_SEGUITA' ), array( 'ID' => $seguito ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: una scrittura diretta del tipo, come da un'importazione.
 		clean_post_cache( $seguito );
 
 		$this->assertSame( 'PROVA_SEGUITA', get_post_type( $seguito ), 'Precondizione: il tipo e\' scritto in un\'altra forma.' );
 		$this->assertSame( 200, $this->chiedi( $seguito, $file_seguito )['stato'] );
 
-		$wpdb->update( $wpdb->posts, array( 'post_type' => 'PROVA_TACIUTA' ), array( 'ID' => $taciuto ) );
+		$wpdb->update( $wpdb->posts, array( 'post_type' => 'PROVA_TACIUTA' ), array( 'ID' => $taciuto ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: come sopra.
 		clean_post_cache( $taciuto );
 
 		$this->assertSame( 404, $this->chiedi( $taciuto, $file_taciuto )['stato'] );

@@ -222,7 +222,16 @@ final class Conformita_Core_Scadenza {
 			return $esito;
 		}
 
+		/*
+		 * Una lettura fallita non e' un contenuto senza data: scrivere senza
+		 * sapere che cosa c'e' vorrebbe dire non vedere i duplicati da
+		 * riparare. Riga C-292.
+		 */
 		$valori = self::valori( $post_id );
+
+		if ( is_wp_error( $valori ) ) {
+			return $valori;
+		}
 
 		/*
 		 * WordPress ammette più righe di metadato con la stessa chiave. Scrivere
@@ -261,7 +270,13 @@ final class Conformita_Core_Scadenza {
 		 * resta invisibile. Fra le due, dichiarare un successo che non c'è è il
 		 * difetto peggiore, perché nessuno lo va a verificare.
 		 */
-		if ( array( $data ) !== self::valori( $post_id ) ) {
+		$riletti = self::valori( $post_id );
+
+		if ( is_wp_error( $riletti ) ) {
+			return $riletti;
+		}
+
+		if ( array( $data ) !== $riletti ) {
 			return new WP_Error(
 				'conformita_core_dato_non_riparato',
 				__( 'Fine pubblicazione: dopo la scrittura il contenuto non ha esattamente una data di fine, quindi resta anomalo e scaduto.', 'conformita-core' )
@@ -282,10 +297,15 @@ final class Conformita_Core_Scadenza {
 	 * vincerebbe la più permissiva. Un valore solo per chiave è il contratto:
 	 * i duplicati danno errore, e l'errore rende scaduto. Riga C-114.
 	 *
+	 * **Una lettura fallita non è una data assente.** Se la banca dati non
+	 * risponde, la risposta è l'errore `conformita_core_lettura_fallita`, e
+	 * non la stringa vuota: chi legge la data per mostrarla direbbe "manca"
+	 * a un contenuto che la data ce l'ha. Riga C-291.
+	 *
 	 * @param int $post_id Identificativo del contenuto.
 	 * @return string|WP_Error La data, stringa vuota se assente, errore se il
-	 *                         tipo non è gestito o se le date registrate sono
-	 *                         più di una.
+	 *                         tipo non è gestito, se le date registrate sono
+	 *                         più di una o se la lettura è fallita.
 	 */
 	public static function fine( $post_id ) {
 		$post_id = (int) $post_id;
@@ -299,6 +319,10 @@ final class Conformita_Core_Scadenza {
 		}
 
 		$valori = self::valori( $post_id );
+
+		if ( is_wp_error( $valori ) ) {
+			return $valori;
+		}
 
 		if ( count( $valori ) > 1 ) {
 			return new WP_Error(
@@ -358,17 +382,36 @@ final class Conformita_Core_Scadenza {
 
 	/**
 	 * I valori della fine pubblicazione, nella forma in cui WordPress li
-	 * restituirebbe.
+	 * restituirebbe, oppure l'errore se la lettura è fallita.
 	 *
 	 * Sono le righe di `righe()` con i valori serializzati ricostruiti, come fa
 	 * WordPress: un elenco conservato per errore resta un elenco e non diventa
 	 * un testo che somiglia a una data.
 	 *
+	 * Stessa domanda di `righe()`, ma con l'errore della banca dati guardato
+	 * subito dopo: un elenco vuoto è sia "nessuna data" sia "domanda fallita",
+	 * e solo l'errore dice quale dei due. WordPress azzera l'errore all'inizio
+	 * di ogni domanda, quindi quello che si legge è di questa. `righe()` resta
+	 * com'è per il registro delle modifiche, che oggi tratta una lettura
+	 * fallita come nessuna data: è un limite dichiarato al punto 18 della
+	 * scheda. Righe C-291 e C-292.
+	 *
 	 * @param int $post_id Identificativo del contenuto.
-	 * @return array<int, mixed>
+	 * @return array<int, mixed>|WP_Error
 	 */
 	private static function valori( $post_id ) {
-		return array_map( 'maybe_unserialize', self::righe( $post_id ) );
+		global $wpdb;
+
+		$righe = self::righe( $post_id );
+
+		if ( '' !== (string) $wpdb->last_error ) {
+			return new WP_Error(
+				'conformita_core_lettura_fallita',
+				__( 'Fine pubblicazione: la banca dati non ha risposto alla lettura della data di fine. Il contenuto è trattato come scaduto finché la lettura non riesce.', 'conformita-core' )
+			);
+		}
+
+		return array_map( 'maybe_unserialize', $righe );
 	}
 
 	/**

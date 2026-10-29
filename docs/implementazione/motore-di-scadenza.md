@@ -1057,5 +1057,5 @@ un'unità a parte.
 | C-291 | Con la lettura della data che fallisce nella banca dati, `fine()` e `istante()` restituiscono `conformita_core_lettura_fallita`, e non `''` né `conformita_core_data_assente`; `scaduto()` è vero. Prima, sullo stesso contenuto, la data si legge e non è scaduto; e un contenuto senza data dà ancora `''` |
 | C-292 | Con la lettura che fallisce, `imposta()` restituisce `conformita_core_lettura_fallita` e non scrive: tolto il guasto, sul contenuto c'è la data di prima e una sola |
 
-**Guasto voluto**, eseguito su una copia: G-S1, tolto il controllo dell'errore dopo la lettura.
+**Guasto voluto**, eseguito rompendo la riga e rieseguendo le prove: G-S1, tolto il controllo dell'errore dopo la lettura.
 Diventano rosse C-291 e C-292.
