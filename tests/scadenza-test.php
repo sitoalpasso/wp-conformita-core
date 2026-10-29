@@ -1,7 +1,7 @@
 <?php
 /**
  * Contratto del dato di fine pubblicazione, righe C-23, C-24, C-87, C-88, C-99
- * e C-100 del catalogo.
+ * e C-100 del catalogo, piu' C-291 e C-292 (la lettura fallita).
  *
  * Questo file collauda il **contratto**, non il filtro di lettura: chiave del
  * metadato, formato del valore, istante di scadenza e decisione. I dodici
@@ -401,5 +401,105 @@ class Conformita_Core_Scadenza_Test extends WP_UnitTestCase {
 		// secondo il fuso del sito, che e' l'unico che conta.
 		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-09-10 00:00:00', wp_timezone() ) );
 		$this->assertTrue( conformita_core_scaduto( $atto ) );
+	}
+
+	/**
+	 * Rende fallita, nella banca dati, la lettura della data di fine di un contenuto.
+	 *
+	 * Si rompe soltanto la domanda con cui core legge la data, e la si rompe
+	 * dove la banca dati la riceve: la tabella diventa una che non esiste, e
+	 * la banca dati risponde con un errore vero. Le altre domande, comprese le
+	 * scritture, passano come sono.
+	 *
+	 * @param int $atto Contenuto di cui far fallire la lettura.
+	 * @return callable Il filtro agganciato, da togliere con `ripara_lettura()`.
+	 */
+	private function rompi_lettura( $atto ) {
+		global $wpdb;
+
+		$inizio = "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = " . (int) $atto . ' AND meta_key = ';
+
+		$filtro = function ( $domanda ) use ( $inizio, $wpdb ) {
+			if ( is_string( $domanda ) && 0 === strpos( $domanda, $inizio ) && false !== strpos( $domanda, conformita_core_chiave_fine_pubblicazione() ) ) {
+				return str_replace( $wpdb->postmeta, $wpdb->prefix . 'tabella_che_non_esiste', $domanda );
+			}
+
+			return $domanda;
+		};
+
+		$wpdb->suppress_errors( true );
+		add_filter( 'query', $filtro );
+
+		return $filtro;
+	}
+
+	/**
+	 * Toglie il guasto messo da `rompi_lettura()`.
+	 *
+	 * @param callable $filtro Filtro agganciato.
+	 */
+	private function ripara_lettura( $filtro ) {
+		global $wpdb;
+
+		remove_filter( 'query', $filtro );
+		$wpdb->suppress_errors( false );
+	}
+
+	/**
+	 * C-291: una lettura fallita della data di fine non e' una data assente.
+	 */
+	public function test_c291_lettura_fallita_non_e_data_assente() {
+		$atto       = $this->atto();
+		$senza_data = $this->atto();
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $atto, '2026-09-30' ) );
+		$this->adesso( '2026-09-09 12:00:00' );
+
+		// Precondizioni: senza guasto la data si legge, e un contenuto senza data da' vuoto.
+		$this->assertSame( '2026-09-30', conformita_core_fine_pubblicazione( $atto ) );
+		$this->assertFalse( conformita_core_scaduto( $atto ) );
+		$this->assertSame( '', conformita_core_fine_pubblicazione( $senza_data ) );
+		$this->assertSame( 'conformita_core_data_assente', conformita_core_istante_scadenza( $senza_data )->get_error_code() );
+
+		$filtro = $this->rompi_lettura( $atto );
+
+		$fine    = conformita_core_fine_pubblicazione( $atto );
+		$istante = conformita_core_istante_scadenza( $atto );
+		$scaduto = conformita_core_scaduto( $atto );
+		$altro   = conformita_core_fine_pubblicazione( $senza_data );
+
+		$this->ripara_lettura( $filtro );
+
+		$this->assertWPError( $fine, 'Una lettura fallita non deve rispondere come una data assente.' );
+		$this->assertSame( 'conformita_core_lettura_fallita', $fine->get_error_code() );
+		$this->assertWPError( $istante );
+		$this->assertSame( 'conformita_core_lettura_fallita', $istante->get_error_code() );
+		$this->assertTrue( $scaduto, 'Con la lettura fallita si sbaglia nella direzione sicura.' );
+		$this->assertSame( '', $altro, 'Il guasto tocca solo la lettura del contenuto rotto.' );
+
+		$this->assertSame( '2026-09-30', conformita_core_fine_pubblicazione( $atto ), 'Tolto il guasto la data torna.' );
+	}
+
+	/**
+	 * C-292: con la lettura fallita `imposta()` non scrive.
+	 */
+	public function test_c292_imposta_non_scrive_se_non_sa_che_cosa_sovrascrive() {
+		global $wpdb;
+
+		$atto = $this->atto();
+
+		$this->assertTrue( conformita_core_imposta_fine_pubblicazione( $atto, '2026-09-30' ) );
+
+		$filtro = $this->rompi_lettura( $atto );
+		$esito  = conformita_core_imposta_fine_pubblicazione( $atto, '2026-12-31' );
+		$this->ripara_lettura( $filtro );
+
+		$this->assertWPError( $esito );
+		$this->assertSame( 'conformita_core_lettura_fallita', $esito->get_error_code() );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- prova: si guarda la banca dati, non la memoria.
+		$righe = $wpdb->get_col( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $atto, conformita_core_chiave_fine_pubblicazione() ) );
+
+		$this->assertSame( array( '2026-09-30' ), $righe, 'Sul contenuto resta la data di prima, una sola.' );
 	}
 }
