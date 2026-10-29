@@ -42,7 +42,7 @@
  * catena di `ammessa()`. Sul punto amministrativo, che è la superficie dove la
  * scadenza **non** si applica, il nonce c'è insieme alla capability.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-162, C-276..C-282, C-287..C-290.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-162, C-276..C-282, C-287..C-290, C-293..C-296.
  *
  * @package Conformita_Core
  */
@@ -589,6 +589,18 @@ final class Conformita_Core_Consegna {
 			if ( Conformita_Core_Scadenza::scaduto( (int) $atto->ID ) ) {
 				return false;
 			}
+
+			/*
+			 * La condizione della sezione, per ultima: core non sa che cosa
+			 * la pagina della sezione mostra, e un contenuto pubblicato che
+			 * la pagina non mostra non deve avere il file scaricabile. Si
+			 * chiama solo quando tutto il resto ammette, e ammette solo il
+			 * valore `true` esatto: qualunque altra risposta, o un errore
+			 * della funzione, rifiuta. Righe C-294 e C-295.
+			 */
+			if ( ! self::condizione_ammette( $atto, $allegato ) ) {
+				return false;
+			}
 		}
 
 		$percorso = get_attached_file( $allegato_id );
@@ -613,6 +625,30 @@ final class Conformita_Core_Consegna {
 		}
 
 		return $reale;
+	}
+
+	/**
+	 * La condizione dichiarata dalla sezione ammette il file.
+	 *
+	 * Vero anche quando non c'e' nessuna condizione: allora decidono gli
+	 * altri anelli, come prima.
+	 *
+	 * @param WP_Post $atto     Contenuto.
+	 * @param WP_Post $allegato Allegato.
+	 * @return bool
+	 */
+	private static function condizione_ammette( WP_Post $atto, WP_Post $allegato ) {
+		$condizione = Conformita_Core_Tipi::condizione_allegati( $atto->post_type );
+
+		if ( null === $condizione ) {
+			return true;
+		}
+
+		try {
+			return true === call_user_func( $condizione, (int) $allegato->ID, (int) $atto->ID );
+		} catch ( Throwable $errore ) {
+			return false;
+		}
 	}
 
 	/**

@@ -2011,3 +2011,51 @@ elenchi, cioè porte che poi vanno sorvegliate una per una.
 revisione del componente comune e dichiarare `allegati_seguono_la_sezione => true` registrando il
 tipo dei contenuti che compaiono solo dentro la pagina della sezione. L'albo non cambia niente: i
 suoi atti hanno una pagina propria e non dichiarano la chiave.
+
+## 19. La condizione della sezione sui file che seguono la sezione
+
+Unità a parte, chiesta dalla trasparenza prima di usare il punto 18. Righe C-293..C-296, prove in
+`tests/consegna-test.php`. Versione dell'interfaccia da `1.9.0` a `1.10.0`.
+
+**Che cosa manca dopo il punto 18.** Con `allegati_seguono_la_sezione => true` il file di un
+contenuto pubblicato, valido e senza password esce dal punto pubblico. Ma "pubblicato" non vuol
+dire "mostrato nella pagina della sezione": la sezione può avere le sue ragioni per non mostrare
+un contenuto pubblicato, per esempio perché non è ancora collegato al punto della pagina in cui
+deve comparire. Quel contenuto non si vede, e il suo file si scaricherebbe lo stesso da chi
+conosce i due numeri dell'indirizzo. Core non sa che cosa la pagina della sezione mostra, quindi
+la sezione deve poterglielo dire.
+
+**Le scelte.**
+
+| Domanda | Scelta | Perché |
+|---|---|---|
+| Dove si dichiara | nella stessa chiave: `allegati_seguono_la_sezione` accetta, oltre a `true` e `false`, una funzione | la condizione ha senso solo insieme alla regola: una chiave sorella permetterebbe una condizione senza regola o una regola dimenticata senza condizione |
+| Che cosa riceve la funzione | identificativo dell'allegato e del contenuto, nello stesso ordine di `nome_scaricato` | lo stesso contratto per le due funzioni che un tipo dichiara |
+| Quando si chiama | per ultima, sul punto pubblico, solo dopo che tutti gli altri anelli hanno ammesso il file | la funzione decide solo ciò che core non sa; una funzione lenta o sbagliata non si chiama per un file che core rifiuta comunque |
+| Che cosa ammette | solo il valore `true` esatto | qualunque altra risposta (falso, `1`, il testo `'true'`, `null`, un elenco) rifiuta: chi dichiara la funzione vuole chiudere, e un suo errore deve chiudere |
+| Un'eccezione o un errore nella funzione | rifiuto | come per `nome_scaricato`: la consegna non si rompe, e nel dubbio non consegna |
+| Il rifiuto | lo stesso di sempre, byte per byte | riga C-138 |
+| Il punto amministrativo | non chiama la funzione | lì decidono nonce e permessi del tipo, come per tutto il punto 18 |
+| Con `true` | come al punto 18, nessuna funzione | chi non ha condizioni non deve scriverne una |
+| Una dichiarazione che non è né booleana né funzione | il tipo non si registra | come al punto 18, riga C-287 |
+
+| Riga | Cosa verifica |
+|---|---|
+| C-293 | `allegati_seguono_la_sezione` accetta una funzione e il tipo si registra; i valori di C-287, che non sono né booleani né funzioni, restano rifiutati |
+| C-294 | Con la funzione dichiarata il file esce solo quando la funzione risponde `true`; falso, `1`, il testo `'true'`, `null`, un elenco, un'eccezione e un errore di tipo danno il rifiuto di sempre. La funzione riceve allegato e contenuto. Prima di ogni caso la prova mostra che lo stesso file esce con la funzione che risponde `true` |
+| C-295 | La funzione è l'ultimo anello: non viene chiamata per un contenuto scaduto, in bozza o con password, né per un allegato chiesto con un altro contenuto; il conteggio delle chiamate parte da zero dopo la preparazione della prova |
+| C-296 | Il punto amministrativo non chiama la funzione e consegna anche quando la funzione rifiuterebbe; versione dell'interfaccia 1.10.0 |
+
+**Guasti voluti**, eseguiti rompendo una riga alla volta e rieseguendo le prove della consegna. Ognuno ha fatto diventare rosse le righe indicate:
+
+| Guasto | Che cosa si rompe | Riga che diventa rossa |
+|---|---|---|
+| G75 | la funzione ignorata | C-294, C-295, C-296 |
+| G76 | ammessa ogni risposta che PHP considera vera, invece del solo `true` | C-294 |
+| G77 | l'eccezione della funzione non intercettata | C-294 |
+| G78 | la funzione chiamata prima del controllo di scadenza | C-294, C-295, C-296 (le chiamate contate sono due invece di una) |
+| G79 | la funzione chiamata anche dal punto amministrativo | C-296 |
+
+**Che cosa deve fare la trasparenza.** Chiedere la versione `1.10.0` e dichiarare
+`allegati_seguono_la_sezione` con la funzione che risponde `true` solo per i contenuti che la
+pagina della sezione mostra davvero.

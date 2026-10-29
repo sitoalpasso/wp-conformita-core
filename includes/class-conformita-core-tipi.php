@@ -135,15 +135,19 @@ final class Conformita_Core_Tipi {
 		 * I file che seguono la sezione: facoltativo, e senza dichiarazione
 		 * vale la regola che chiude, cioe' il file esce solo se la pagina del
 		 * contenuto e' consultabile. Dichiarato, deve essere un valore
-		 * booleano: una scelta che apre una porta non si deduce da un testo o
-		 * da un numero. Riga C-287.
+		 * booleano oppure una funzione, la condizione con cui la sezione dice
+		 * quali contenuti la sua pagina mostra davvero: una scelta che apre
+		 * una porta non si deduce da un testo o da un numero. Righe C-287 e
+		 * C-293.
 		 */
-		if ( array_key_exists( 'allegati_seguono_la_sezione', $definizione ) && ! is_bool( $definizione['allegati_seguono_la_sezione'] ) ) {
+		$seguono = array_key_exists( 'allegati_seguono_la_sezione', $definizione ) ? $definizione['allegati_seguono_la_sezione'] : false;
+
+		if ( ! is_bool( $seguono ) && ! is_callable( $seguono ) ) {
 			return new WP_Error(
 				'conformita_core_allegati_sezione_non_valido',
 				sprintf(
 					/* translators: %s: identificativo del tipo di contenuto. */
-					__( 'Tipo %s: allegati_seguono_la_sezione, se dichiarato, deve essere vero o falso.', 'conformita-core' ),
+					__( 'Tipo %s: allegati_seguono_la_sezione, se dichiarato, deve essere vero, falso, oppure una funzione che riceve allegato e contenuto e risponde vero solo per i contenuti che la pagina della sezione mostra.', 'conformita-core' ),
 					$tipo
 				)
 			);
@@ -169,7 +173,7 @@ final class Conformita_Core_Tipi {
 			'sezione'          => $sezione,
 			'capacita'         => (array) $oggetto->cap,
 			'nome_scaricato'   => $definizione['nome_scaricato'] ?? null,
-			'allegati_sezione' => true === ( $definizione['allegati_seguono_la_sezione'] ?? false ),
+			'allegati_sezione' => $seguono,
 		);
 
 		return true;
@@ -311,7 +315,10 @@ final class Conformita_Core_Tipi {
 	/**
 	 * I file dei contenuti del tipo seguono la pagina della sezione.
 	 *
-	 * Vero solo se la sezione lo ha dichiarato registrando il tipo. Il tipo si
+	 * Vero solo se la sezione lo ha dichiarato registrando il tipo, con `true`
+	 * oppure con una funzione: in tutti e due i casi l'anello della pagina
+	 * consultabile non si applica, e la funzione, se c'e', diventa l'ultimo
+	 * anello del punto pubblico. Il tipo si
 	 * riconosce con il criterio della banca dati, come per la politica e il
 	 * nome del file: un contenuto con il tipo scritto in un'altra forma passa
 	 * gli stessi controlli, e deve seguire la stessa regola. Righe C-288 e
@@ -323,7 +330,27 @@ final class Conformita_Core_Tipi {
 	public static function allegati_seguono_la_sezione( $tipo ) {
 		$canonico = self::canonico( $tipo );
 
-		return null !== $canonico && true === self::$tipi[ $canonico ]['allegati_sezione'];
+		return null !== $canonico && false !== self::$tipi[ $canonico ]['allegati_sezione'];
+	}
+
+	/**
+	 * La condizione con cui la sezione ammette i file di un contenuto del tipo, o null.
+	 *
+	 * C'e' solo se la sezione ha dichiarato una funzione al posto di `true`.
+	 * Il tipo si riconosce con il criterio della banca dati, come sopra. Riga
+	 * C-294.
+	 *
+	 * @param string $tipo Identificativo del tipo.
+	 * @return callable|null
+	 */
+	public static function condizione_allegati( $tipo ) {
+		$canonico = self::canonico( $tipo );
+
+		if ( null === $canonico || is_bool( self::$tipi[ $canonico ]['allegati_sezione'] ) ) {
+			return null;
+		}
+
+		return self::$tipi[ $canonico ]['allegati_sezione'];
 	}
 
 	/**

@@ -84,6 +84,9 @@ if ( ! function_exists( 'conformita_core_registra_tipo' ) ) {
 	 * cui contenuti si mostrano dentro una pagina della sezione: i loro file
 	 * escono dal punto pubblico quando il contenuto è pubblicato, valido e
 	 * senza password, anche se la pagina del contenuto non è consultabile.
+	 * Dalla 1.10.0 la chiave accetta anche una funzione, che riceve allegato
+	 * e contenuto e viene chiamata per ultima: il file esce solo se risponde
+	 * `true`.
 	 *
 	 * @param string $tipo        Identificativo del tipo.
 	 * @param array  $definizione Definizione: `sezione`, `show_in_rest`, `argomenti`.
