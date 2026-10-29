@@ -374,9 +374,10 @@ if ( ! function_exists( 'conformita_core_indirizzo_consegna_amministrativa' ) ) 
 	/**
 	 * L'indirizzo amministrativo, con il proprio nonce.
 	 *
-	 * Serve il file anche quando il contenuto è scaduto, e pretende la
-	 * capability del tipo: è la stessa esenzione che l'amministrazione ha sulle
-	 * pagine, non l'archivio riservato, che è un'unità successiva.
+	 * Serve il file a chi ha il permesso sul contenuto, con la capability del
+	 * tipo, oppure a chi consulta gli scaduti del tipo, per i contenuti
+	 * pubblicati. Dalla 1.11.0 il file di un contenuto scaduto lo apre solo chi
+	 * ha il permesso di consultare gli scaduti, anche se gestisce il tipo.
 	 *
 	 * @param int $allegato_id Identificativo dell'allegato.
 	 * @return string|WP_Error

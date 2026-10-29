@@ -2083,6 +2083,7 @@ file dei propri.
 | Che cosa vuol dire "scaduto" qui | `Conformita_Core_Scadenza::scaduto()` vero e il contenuto non è in uno stato di preparazione (`draft`, `auto-draft`, `pending`, `future`) | un contenuto in preparazione non è mai stato esposto, e senza data di fine risulterebbe scaduto: chi lo prepara deve poter aprire i suoi file. Ogni altro stato, compresi il cestino, il privato e gli stati propri di un componente, conta come esposto: fra le due letture è quella che chiude |
 | Chi apre il file di un contenuto scaduto | chi gestisce quel contenuto **e** ha il permesso di consultazione, in qualunque stato; oppure chi ha solo il permesso di consultazione, per il contenuto pubblicato con l'allegato nello stato normale (punto 16, invariato) | la consultazione degli scaduti è un permesso a sé, che un ente assegna deliberatamente: gestire gli atti non lo comprende |
 | Chi apre il file di un contenuto non scaduto o in preparazione | chi ha `edit_posts` del tipo **e** `edit_post` sul contenuto | il permesso sul singolo segue le regole di WordPress sui contenuti propri e altrui, pubblicati e no |
+| Il tipo scritto in un'altra forma | tutti i permessi del tipo sui contenuti altrui, pubblicati e privati | WordPress non sa derivare `edit_post` per un nome che non conosce; si pretende il caso più largo, che è la lettura che chiude |
 | La fragilità del punto 1.4 | accettata | un componente che rende falso `edit_post` su un contenuto chiude la porta della gestione per quel contenuto: è un errore che chiude, e per i contenuti pubblicati resta la porta della consultazione |
 | Il rifiuto | lo stesso di sempre, byte per byte | riga C-138 |
 | Il punto pubblico | non cambia | |
@@ -2090,7 +2091,7 @@ file dei propri.
 | Riga | Cosa verifica |
 |---|---|
 | C-297 | Chi redige (permessi del tipo per i propri contenuti, senza consultazione) apre dall'amministrazione il file del proprio contenuto pubblicato e valido; dopo la scadenza dello stesso contenuto non lo apre più, né da pubblicato né cestinato né privato: il rifiuto è quello di sempre. Con il permesso di consultazione aggiunto, lo riapre |
-| C-298 | Il permesso sul singolo contenuto: chi può modificare solo i propri contenuti apre i file della propria bozza e non quelli della bozza di un altro; chi può modificare anche quelli altrui li apre |
+| C-298 | Il permesso sul singolo contenuto: chi può modificare solo i propri contenuti apre i file della propria bozza e non quelli della bozza di un altro; chi può modificare anche quelli altrui li apre. Con il tipo scritto in maiuscolo direttamente nella banca dati, che WordPress non sa ricondurre a un tipo, servono tutti i permessi del tipo sui contenuti altrui, pubblicati e privati: chi li ha apre, chi modifica solo i propri no |
 | C-299 | Un contenuto in preparazione (bozza, in attesa, programmato) senza data di fine o con la data passata risulta scaduto, e chi lo prepara ne apre lo stesso i file |
 | C-300 | Chi gestisce il tipo e ha il permesso di consultazione apre come prima i file dei contenuti scaduti, pubblicati, cestinati o privati; versione dell'interfaccia 1.11.0 |
 
@@ -2103,6 +2104,7 @@ Ognuno ha fatto diventare rosse le righe indicate:
 | G81 | tolto il controllo del permesso sul singolo contenuto | C-298 |
 | G82 | gli stati di preparazione contati come esposti | C-299 |
 | G83 | il cestino contato fra gli stati di preparazione | C-297 |
+| G84 | con il tipo in un'altra forma il permesso sul singolo dato per concesso | C-298 |
 
 **Che cosa deve fare l'albo.** Niente per i ruoli di oggi, che hanno tutti il permesso di
 consultazione insieme a quelli per pubblicare. Un ruolo che redige senza consultare non apre

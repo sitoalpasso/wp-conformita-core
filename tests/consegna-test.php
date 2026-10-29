@@ -1389,7 +1389,8 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			'allegato cestinato'  => array( $pubblicato, $allegato_ritirato ),
 		);
 
-		wp_set_current_user( $this->utente_del_tipo() );
+		// Chi gestisce il tipo e consulta: l'allegato cestinato e' di un contenuto scaduto (punto 20).
+		wp_set_current_user( $this->utente_del_tipo_che_consulta() );
 		foreach ( $casi as $caso => $coppia ) {
 			$this->assertSame( 200, $this->chiedi_da_amministrazione( $coppia[0], $coppia[1] )['stato'], 'Chi gestisce il tipo lo apre: ' . $caso . '.' );
 		}
@@ -2281,11 +2282,13 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			$this->assertSame( $rifiuto['intestazioni'], $risposta['intestazioni'] );
 
 			( new WP_User( $redattore ) )->add_cap( conformita_core_capacita_consultazione_scaduti( self::TIPO ) );
+			wp_set_current_user( 0 );
 			wp_set_current_user( $redattore );
 
 			$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'], $stato . ': con il permesso di consultazione si riapre.' );
 
 			( new WP_User( $redattore ) )->remove_cap( conformita_core_capacita_consultazione_scaduti( self::TIPO ) );
+			wp_set_current_user( 0 );
 		}
 	}
 
@@ -2308,6 +2311,17 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		wp_set_current_user( $this->utente_del_tipo() );
 
 		$this->assertSame( 200, $this->chiedi_da_amministrazione( $altrui, $file_altrui )['stato'], 'Chi modifica anche i contenuti altrui la apre.' );
+
+		// Il tipo scritto in maiuscolo direttamente nella banca dati: WordPress non sa derivare il permesso.
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, array( 'post_type' => strtoupper( self::TIPO ) ), array( 'ID' => $proprio ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: una scrittura diretta del tipo, come da un'importazione.
+		clean_post_cache( $proprio );
+
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'Chi ha tutti i permessi del tipo la apre.' );
+
+		wp_set_current_user( $redattore );
+
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'Con il tipo in un\'altra forma chi modifica solo i propri contenuti non la apre.' );
 	}
 
 	/**
