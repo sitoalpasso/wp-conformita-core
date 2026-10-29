@@ -2032,6 +2032,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 	 * @param int $allegato  Allegato.
 	 * @param int $contenuto Contenuto.
 	 * @return mixed
+	 * @throws Throwable Quando la prova ha deciso che la funzione fallisca.
 	 */
 	public function condizione( $allegato, $contenuto ) {
 		$this->chiamate[] = array( $allegato, $contenuto );
@@ -2071,13 +2072,13 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$this->assertSame( 404, $rifiuto['stato'], 'Precondizione: il rifiuto di riferimento.' );
 
 		$risposte = array(
-			'falso'           => false,
-			'uno'             => 1,
-			'testo true'      => 'true',
-			'null'            => null,
-			'elenco'          => array( true ),
-			'eccezione'       => new RuntimeException( 'guasto della sezione' ),
-			'errore di tipo'  => new TypeError( 'guasto della sezione' ),
+			'falso'          => false,
+			'uno'            => 1,
+			'testo true'     => 'true',
+			'null'           => null,
+			'elenco'         => array( true ),
+			'eccezione'      => new RuntimeException( 'guasto della sezione' ),
+			'errore di tipo' => new TypeError( 'guasto della sezione' ),
 		);
 
 		foreach ( $risposte as $caso => $risposta ) {

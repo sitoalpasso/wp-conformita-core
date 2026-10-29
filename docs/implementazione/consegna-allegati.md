@@ -2046,14 +2046,14 @@ la sezione deve poterglielo dire.
 | C-295 | La funzione è l'ultimo anello: non viene chiamata per un contenuto scaduto, in bozza o con password, né per un allegato chiesto con un altro contenuto; il conteggio delle chiamate parte da zero dopo la preparazione della prova |
 | C-296 | Il punto amministrativo non chiama la funzione e consegna anche quando la funzione rifiuterebbe; versione dell'interfaccia 1.10.0 |
 
-**Guasti voluti**, eseguiti rompendo una riga alla volta e rieseguendo le prove della consegna:
+**Guasti voluti**, eseguiti rompendo una riga alla volta e rieseguendo le prove della consegna. Ognuno ha fatto diventare rosse le righe indicate:
 
 | Guasto | Che cosa si rompe | Riga che diventa rossa |
 |---|---|---|
-| G75 | la funzione ignorata | C-294 |
+| G75 | la funzione ignorata | C-294, C-295, C-296 |
 | G76 | ammessa ogni risposta che PHP considera vera, invece del solo `true` | C-294 |
 | G77 | l'eccezione della funzione non intercettata | C-294 |
-| G78 | la funzione chiamata prima del controllo di scadenza | C-295 |
+| G78 | la funzione chiamata prima del controllo di scadenza | C-294, C-295, C-296 (le chiamate contate sono due invece di una) |
 | G79 | la funzione chiamata anche dal punto amministrativo | C-296 |
 
 **Che cosa deve fare la trasparenza.** Chiedere la versione `1.10.0` e dichiarare
