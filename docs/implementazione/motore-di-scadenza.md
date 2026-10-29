@@ -250,8 +250,8 @@ generico `1`, che accetterebbe anche un core privo di questo motore.
 |---|---|---|---|
 | `conformita_core_chiave_fine_pubblicazione()` | nessuno | `string`, la chiave del metadato | nessuno |
 | `conformita_core_valida_fine_pubblicazione( $valore )` | `string` | `true` oppure `WP_Error` | `conformita_core_data_formato`, `conformita_core_data_inesistente` |
-| `conformita_core_imposta_fine_pubblicazione( $post_id, $data )` | `int`, `string` | `true` oppure `WP_Error` | i due sopra, più `conformita_core_tipo_non_gestito`, `conformita_core_data_non_scritta` e `conformita_core_dato_non_riparato` |
-| `conformita_core_fine_pubblicazione( $post_id )` | `int` | `string` la data, `''` se assente, `WP_Error` altrimenti | `conformita_core_tipo_non_gestito`, `conformita_core_dato_duplicato` |
+| `conformita_core_imposta_fine_pubblicazione( $post_id, $data )` | `int`, `string` | `true` oppure `WP_Error` | i due sopra, più `conformita_core_tipo_non_gestito`, `conformita_core_data_non_scritta`, `conformita_core_dato_non_riparato` e `conformita_core_lettura_fallita` (dalla 1.9.0, punto 18) |
+| `conformita_core_fine_pubblicazione( $post_id )` | `int` | `string` la data, `''` se assente, `WP_Error` altrimenti | `conformita_core_tipo_non_gestito`, `conformita_core_dato_duplicato`, `conformita_core_lettura_fallita` (dalla 1.9.0, punto 18) |
 | `conformita_core_istante_scadenza( $post_id )` | `int` | `DateTimeImmutable` nel fuso del sito, oppure `WP_Error` | `conformita_core_data_assente`, `conformita_core_data_non_valida`, più quelli di sopra |
 | `conformita_core_scaduto( $post_id )` | `int` | `bool`. Data assente, non valida o duplicata danno scaduto | nessuno: è chiamata nel percorso di lettura e non deve poter fallire |
 
@@ -1026,3 +1026,36 @@ valido risponda con il suo totale e che l'inesistente risponda con totale zero.
 non ha più il codice `conformita_core_contenuto_non_trovato`: è quello di WordPress per un
 numero inesistente. Un componente che nelle proprie prove pretendeva il vecchio codice deve
 confrontare con la risposta per un numero inesistente.
+
+## 18. Una lettura fallita non è una data assente
+
+Unità piccola, chiesta dalla trasparenza insieme alla regola dei file che seguono la sezione
+(punto 18 di `consegna-allegati.md`). Righe C-291 e C-292, prove in `tests/scadenza-test.php`.
+Versione dell'interfaccia da `1.8.0` a `1.9.0`, la stessa salita.
+
+**Il difetto.** `Conformita_Core_Scadenza::righe()` legge la data di fine con una domanda diretta
+alla banca dati. Se la domanda fallisce, WordPress restituisce un elenco vuoto, e un elenco vuoto
+è anche quello che si ottiene quando la data non c'è. `fine()` rispondeva quindi `''`, cioè
+"questo contenuto non ha una data", anche quando non era riuscita a leggerla. Per la scadenza non
+cambiava niente, perché tutti e due i casi danno scaduto. Cambiava per chi chiama: un componente
+che legge la data per mostrarla all'addetto diceva "manca la data di fine" a un contenuto che
+la data ce l'ha, e lo spingeva a riscriverla. E `imposta()`, con una lettura fallita, non vedeva
+i duplicati che doveva riparare.
+
+**La correzione.** La lettura guarda l'errore della banca dati dopo la domanda. Se c'è,
+`fine()` e `istante()` restituiscono l'errore `conformita_core_lettura_fallita`, diverso da
+`''` e da `conformita_core_data_assente`; `scaduto()` resta vero, come per ogni errore;
+`imposta()` restituisce lo stesso errore e non scrive, perché non sa che cosa sta sovrascrivendo.
+
+**Che cosa resta fuori, dichiarato.** `righe()` resta com'è, perché la usa il registro delle
+modifiche per confrontare la data prima e dopo un salvataggio, e lì una lettura fallita oggi vale
+come "nessuna data". Cambiarla vuol dire decidere che cosa il registro scrive quando non sa, ed è
+un'unità a parte.
+
+| Riga | Cosa verifica |
+|---|---|
+| C-291 | Con la lettura della data che fallisce nella banca dati, `fine()` e `istante()` restituiscono `conformita_core_lettura_fallita`, e non `''` né `conformita_core_data_assente`; `scaduto()` è vero. Prima, sullo stesso contenuto, la data si legge e non è scaduto; e un contenuto senza data dà ancora `''` |
+| C-292 | Con la lettura che fallisce, `imposta()` restituisce `conformita_core_lettura_fallita` e non scrive: tolto il guasto, sul contenuto c'è la data di prima e una sola |
+
+**Guasto voluto**, eseguito su una copia: G-S1, tolto il controllo dell'errore dopo la lettura.
+Diventano rosse C-291 e C-292.
