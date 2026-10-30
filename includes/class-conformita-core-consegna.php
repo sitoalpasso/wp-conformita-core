@@ -42,7 +42,7 @@
  * catena di `ammessa()`. Sul punto amministrativo, che è la superficie dove la
  * scadenza **non** si applica, il nonce c'è insieme alla capability.
  *
- * Righe di collaudo C-126..C-145, C-159, C-160, C-162, C-276..C-282, C-287..C-290, C-293..C-296.
+ * Righe di collaudo C-126..C-145, C-159, C-160, C-162, C-276..C-282, C-287..C-290, C-293..C-300.
  *
  * @package Conformita_Core
  */
@@ -290,13 +290,11 @@ final class Conformita_Core_Consegna {
 	 * contenuto scaduto resta raggiungibile perché resti correggibile. Non è
 	 * l'archivio riservato, che è l'unità S10 e non esiste.
 	 *
-	 * La capability richiesta è quella **di tipo sull'insieme**, non una sul
-	 * singolo contenuto: è la stessa che regge l'elenco amministrativo dove S4
-	 * lascia visibile il contenuto scaduto, quindi le due esenzioni hanno la
-	 * stessa porta. Una capability sul singolo, per esempio `edit_post`, sarebbe
-	 * fragile: l'albo blocca la modifica dell'atto pubblicato, e una mappatura
-	 * che la rendesse falsa chiuderebbe questa consegna senza che nessuno lo
-	 * avesse deciso.
+	 * Due porte. Chi gestisce il tipo apre i file dei contenuti che ha il
+	 * permesso di leggere (`read_post`), e quelli dei contenuti scaduti solo
+	 * se ha anche il permesso di consultare gli scaduti. Chi ha soltanto
+	 * quest'ultimo apre i file dei contenuti pubblicati, scaduti compresi.
+	 * Punto 20 della scheda.
 	 *
 	 * @internal Aggancio di `admin_post_conformita_core_allegato`.
 	 */
@@ -327,9 +325,23 @@ final class Conformita_Core_Consegna {
 			return;
 		}
 
-		$capacita = Conformita_Core_Tipi::capacita( $contenuto->post_type );
+		$capacita      = Conformita_Core_Tipi::capacita( $contenuto->post_type );
+		$consultazione = Conformita_Core_Tipi::capacita_consultazione_scaduti( $contenuto->post_type );
+		$consulta      = ! is_wp_error( $consultazione ) && current_user_can( $consultazione );
 
-		if ( ! is_wp_error( $capacita ) && ! empty( $capacita['edit_posts'] ) && current_user_can( $capacita['edit_posts'] ) ) {
+		/*
+		 * Chi gestisce apre i file di un contenuto se ha il permesso di
+		 * leggere quel contenuto, non soltanto quello sul tipo; e quelli di un contenuto scaduto
+		 * solo se consulta anche gli scaduti: gestire gli atti non comprende
+		 * la consultazione dell'archivio. Righe C-297..C-300.
+		 */
+		if (
+			! is_wp_error( $capacita )
+			&& ! empty( $capacita['edit_posts'] )
+			&& current_user_can( $capacita['edit_posts'] )
+			&& self::permesso_sul_contenuto( $contenuto, $capacita )
+			&& ( $consulta || ! self::scaduto_dopo_lesposizione( $contenuto ) )
+		) {
 			self::emetti( self::componi( $atto, $allegato, true ) );
 			return;
 		}
@@ -341,12 +353,10 @@ final class Conformita_Core_Consegna {
 		 * tipo. Il controllo dello stato sta prima della catena e non dentro,
 		 * perché la catena non sa chi chiede. Righe C-278..C-280.
 		 */
-		$consultazione = Conformita_Core_Tipi::capacita_consultazione_scaduti( $contenuto->post_type );
 		$allegato_post = get_post( $allegato );
 
 		if (
-			! is_wp_error( $consultazione )
-			&& current_user_can( $consultazione )
+			$consulta
 			&& 'publish' === $contenuto->post_status
 			&& $allegato_post instanceof WP_Post
 			&& 'inherit' === $allegato_post->post_status
@@ -356,6 +366,58 @@ final class Conformita_Core_Consegna {
 		}
 
 		self::emetti( self::rifiuto() );
+	}
+
+	/**
+	 * Chi chiede ha il permesso di leggere proprio questo contenuto.
+	 *
+	 * Si chiede a WordPress con `read_post`, che conosce autore e stato:
+	 * aprire un file e' una lettura. Per una bozza, un contenuto in attesa o
+	 * cestinato di un altro autore WordPress chiede il permesso di modificare
+	 * i contenuti altrui; per un privato quello di leggere i privati. Un
+	 * contenuto pubblicato lo legge chiunque, e per quello scaduto decide il
+	 * permesso di consultazione. Un contenuto con il tipo scritto in un'altra
+	 * forma direttamente nella banca dati e' gestito per core ma sconosciuto
+	 * a WordPress, che per quel nome non sa derivare il permesso: allora si
+	 * pretendono i permessi del tipo sui contenuti altrui e sui privati, cioe'
+	 * quelli che `read_post` chiederebbe nel caso piu' largo. Riga C-298.
+	 *
+	 * @param WP_Post              $contenuto Contenuto.
+	 * @param array<string, mixed> $capacita  Capability del tipo.
+	 * @return bool
+	 */
+	private static function permesso_sul_contenuto( WP_Post $contenuto, array $capacita ) {
+		if ( null !== get_post_type_object( $contenuto->post_type ) ) {
+			return current_user_can( 'read_post', $contenuto->ID );
+		}
+
+		foreach ( array( 'edit_others_posts', 'read_private_posts' ) as $generico ) {
+			if ( empty( $capacita[ $generico ] ) || ! current_user_can( $capacita[ $generico ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Il contenuto e' scaduto e non e' in preparazione.
+	 *
+	 * Un contenuto in preparazione non e' mai stato esposto, e senza data di
+	 * fine risulterebbe scaduto: chi lo prepara deve poter aprire i suoi file.
+	 * Ogni altro stato, compresi il cestino, il privato e gli stati propri di
+	 * un componente, conta come esposto, che e' la lettura che chiude. Riga
+	 * C-299.
+	 *
+	 * @param WP_Post $contenuto Contenuto.
+	 * @return bool
+	 */
+	private static function scaduto_dopo_lesposizione( WP_Post $contenuto ) {
+		if ( in_array( $contenuto->post_status, array( 'draft', 'auto-draft', 'pending', 'future' ), true ) ) {
+			return false;
+		}
+
+		return Conformita_Core_Scadenza::scaduto( (int) $contenuto->ID );
 	}
 
 	/**

@@ -6,7 +6,8 @@
  * e C-228 e C-240 dell'unita' S9 (il divieto di indicizzazione sui file),
  * C-276..C-282 (il permesso di consultare gli scaduti), C-283..C-286 (il nome
  * del file), C-287..C-290 (i file che seguono la sezione) e C-293..C-296 (la
- * condizione della sezione).
+ * condizione della sezione), C-297..C-300 (permesso sul contenuto e
+ * consultazione degli scaduti nel punto amministrativo).
  *
  * **Come si intercetta la risposta.** Il punto pubblico, in esercizio, manda le
  * intestazioni, riversa i byte ed esce. Uscire dentro una prova ucciderebbe il
@@ -833,13 +834,14 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 	}
 
 	/**
-	 * C-141: la consegna amministrativa serve anche l'allegato di un atto scaduto.
+	 * C-141: la consegna amministrativa serve anche l'allegato di un atto scaduto,
+	 * a chi gestisce il tipo e consulta gli scaduti (punto 20 della scheda).
 	 */
 	public function test_c141_amministrazione_serve_anche_lo_scaduto() {
 		$atto     = $this->atto( 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
 		$allegato = $this->allegato( $atto );
 
-		wp_set_current_user( $this->utente_del_tipo() );
+		wp_set_current_user( $this->utente_del_tipo_che_consulta() );
 
 		$risposta = $this->chiedi_da_amministrazione( $atto, $allegato );
 
@@ -1387,7 +1389,8 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			'allegato cestinato'  => array( $pubblicato, $allegato_ritirato ),
 		);
 
-		wp_set_current_user( $this->utente_del_tipo() );
+		// Chi gestisce il tipo e consulta: l'allegato cestinato e' di un contenuto scaduto (punto 20).
+		wp_set_current_user( $this->utente_del_tipo_che_consulta() );
 		foreach ( $casi as $caso => $coppia ) {
 			$this->assertSame( 200, $this->chiedi_da_amministrazione( $coppia[0], $coppia[1] )['stato'], 'Chi gestisce il tipo lo apre: ' . $caso . '.' );
 		}
@@ -2173,6 +2176,193 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'] );
 		$this->assertSame( array(), $this->chiamate, 'Il punto amministrativo non chiama la funzione.' );
 
-		$this->assertSame( '1.10.0', conformita_core_versione_api() );
+		// 1.10.0 quando la riga e' nata; poi 1.11.0 (C-300): si guarda che non sia piu' bassa.
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.10.0', '>=' ) );
+	}
+
+	/**
+	 * Un utente che gestisce il tipo e consulta gli scaduti.
+	 *
+	 * @return int
+	 */
+	private function utente_del_tipo_che_consulta() {
+		$utente = $this->utente_del_tipo();
+
+		( new WP_User( $utente ) )->add_cap( conformita_core_capacita_consultazione_scaduti( self::TIPO ) );
+
+		return $utente;
+	}
+
+	/**
+	 * Un utente che redige: modifica e cancella i propri contenuti, anche
+	 * pubblicati, e legge i privati, ma non tocca quelli altrui, non pubblica
+	 * e non consulta gli scaduti.
+	 *
+	 * @return int
+	 */
+	private function redattore() {
+		$mappa     = conformita_core_capacita_tipo( self::TIPO );
+		$utente    = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		$utente_wp = new WP_User( $utente );
+
+		foreach ( array( 'edit_posts', 'edit_published_posts', 'edit_private_posts', 'delete_posts', 'read_private_posts' ) as $generico ) {
+			$utente_wp->add_cap( $mappa[ $generico ] );
+		}
+
+		return $utente;
+	}
+
+	/**
+	 * Un contenuto del tipo della prova, di un autore indicato.
+	 *
+	 * @param int         $autore Autore.
+	 * @param string      $stato  Stato.
+	 * @param string|null $fine   Data di fine, vuoto per nessuna, null per fra un mese.
+	 * @return array{0: int, 1: int} Contenuto e allegato.
+	 */
+	private function contenuto_di( $autore, $stato = 'publish', $fine = null ) {
+		$contenuto = self::factory()->post->create(
+			array(
+				'post_type'   => self::TIPO,
+				'post_status' => $stato,
+				'post_author' => $autore,
+			)
+		);
+
+		if ( null === $fine ) {
+			$fine = gmdate( 'Y-m-d', strtotime( '+30 days' ) );
+		}
+
+		if ( '' !== $fine ) {
+			update_post_meta( $contenuto, conformita_core_chiave_fine_pubblicazione(), $fine );
+		}
+
+		return array( $contenuto, $this->allegato( $contenuto ) );
+	}
+
+	/**
+	 * Porta un contenuto in uno stato, senza passare dai controlli di WordPress
+	 * sul cambio di stato: interessa lo stato, non il modo.
+	 *
+	 * @param int    $contenuto Contenuto.
+	 * @param string $stato     Stato.
+	 */
+	private function metti_in_stato( $contenuto, $stato ) {
+		global $wpdb;
+
+		$wpdb->update( $wpdb->posts, array( 'post_status' => $stato ), array( 'ID' => $contenuto ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: interessa lo stato, non il modo in cui ci si arriva.
+		clean_post_cache( $contenuto );
+	}
+
+	/**
+	 * C-297: chi redige senza consultare non apre dall'amministrazione i file
+	 * dei propri contenuti scaduti.
+	 */
+	public function test_c297_chi_redige_non_apre_gli_scaduti() {
+		$redattore = $this->redattore();
+		$rifiuto   = $this->chiedi( 999999, 999998 );
+
+		foreach ( array( 'publish', 'trash', 'private' ) as $stato ) {
+			list( $contenuto, $allegato ) = $this->contenuto_di( $redattore );
+
+			wp_set_current_user( $redattore );
+
+			$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'], $stato . ': precondizione, il proprio contenuto valido si apre.' );
+
+			update_post_meta( $contenuto, conformita_core_chiave_fine_pubblicazione(), gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+			$this->metti_in_stato( $contenuto, $stato );
+
+			$this->assertTrue( conformita_core_scaduto( $contenuto ), $stato . ': precondizione, il contenuto e\' scaduto.' );
+			$this->assertTrue( current_user_can( 'read_post', $contenuto ), $stato . ': precondizione, chi redige ha ancora il permesso sul contenuto.' );
+
+			$risposta = $this->chiedi_da_amministrazione( $contenuto, $allegato );
+
+			$this->assertSame( 404, $risposta['stato'], $stato . ': chi redige senza consultare non apre il file dello scaduto.' );
+			$this->assertSame( $rifiuto['corpo'], $risposta['corpo'] );
+			$this->assertSame( $rifiuto['intestazioni'], $risposta['intestazioni'] );
+
+			( new WP_User( $redattore ) )->add_cap( conformita_core_capacita_consultazione_scaduti( self::TIPO ) );
+			wp_set_current_user( 0 );
+			wp_set_current_user( $redattore );
+
+			$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'], $stato . ': con il permesso di consultazione si riapre.' );
+
+			( new WP_User( $redattore ) )->remove_cap( conformita_core_capacita_consultazione_scaduti( self::TIPO ) );
+			wp_set_current_user( 0 );
+		}
+	}
+
+	/**
+	 * C-298: il permesso si guarda sul singolo contenuto.
+	 */
+	public function test_c298_permesso_sul_singolo_contenuto() {
+		$redattore = $this->redattore();
+		$altro     = $this->redattore();
+
+		list( $proprio, $file_proprio ) = $this->contenuto_di( $redattore, 'draft' );
+		list( $altrui, $file_altrui )   = $this->contenuto_di( $altro, 'draft' );
+
+		wp_set_current_user( $redattore );
+
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'La propria bozza si apre.' );
+		$this->assertFalse( current_user_can( 'read_post', $altrui ), 'Precondizione: la bozza altrui non e\' sua.' );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $altrui, $file_altrui )['stato'], 'La bozza di un altro non si apre.' );
+
+		wp_set_current_user( $this->utente_del_tipo() );
+
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $altrui, $file_altrui )['stato'], 'Chi modifica anche i contenuti altrui la apre.' );
+
+		// Il tipo scritto in maiuscolo direttamente nella banca dati: WordPress non sa derivare il permesso.
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, array( 'post_type' => strtoupper( self::TIPO ) ), array( 'ID' => $proprio ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- prova: una scrittura diretta del tipo, come da un'importazione.
+		clean_post_cache( $proprio );
+
+		$this->assertSame( 200, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'Chi ha tutti i permessi del tipo la apre.' );
+
+		wp_set_current_user( $redattore );
+
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $proprio, $file_proprio )['stato'], 'Con il tipo in un\'altra forma chi non modifica i contenuti altrui non la apre.' );
+	}
+
+	/**
+	 * C-299: un contenuto in preparazione non e' uno scaduto, anche se la data dice di si'.
+	 */
+	public function test_c299_la_preparazione_non_e_scaduta() {
+		$redattore = $this->redattore();
+
+		$casi = array(
+			'bozza senza data'             => array( 'draft', '' ),
+			'bozza con data passata'       => array( 'draft', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) ),
+			'in attesa senza data'         => array( 'pending', '' ),
+			'programmato con data passata' => array( 'future', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) ),
+		);
+
+		foreach ( $casi as $caso => $dati ) {
+			list( $contenuto, $allegato ) = $this->contenuto_di( $redattore, 'draft', $dati[1] );
+			$this->metti_in_stato( $contenuto, $dati[0] );
+
+			wp_set_current_user( $redattore );
+
+			$this->assertTrue( conformita_core_scaduto( $contenuto ), $caso . ': precondizione, per la data il contenuto e\' scaduto.' );
+			$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'], $caso . ': chi lo prepara ne apre il file.' );
+		}
+	}
+
+	/**
+	 * C-300: chi gestisce e consulta apre gli scaduti come prima; interfaccia 1.11.0.
+	 */
+	public function test_c300_chi_gestisce_e_consulta() {
+		$gestore = $this->utente_del_tipo_che_consulta();
+
+		foreach ( array( 'publish', 'trash', 'private' ) as $stato ) {
+			list( $contenuto, $allegato ) = $this->contenuto_di( self::factory()->user->create(), 'publish', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+			$this->metti_in_stato( $contenuto, $stato );
+
+			wp_set_current_user( $gestore );
+
+			$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'], $stato );
+		}
+
+		$this->assertSame( '1.11.0', conformita_core_versione_api() );
 	}
 }
