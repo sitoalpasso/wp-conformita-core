@@ -194,10 +194,16 @@ class Conformita_Core_Collegamenti_Periodico_Test extends WP_UnitTestCase {
 		wp_clear_scheduled_hook( Conformita_Core_Collegamenti::COMPITO );
 
 		Conformita_Core_Collegamenti::pianifica();
-		Conformita_Core_Collegamenti::pianifica();
 
 		$this->assertNotFalse( wp_next_scheduled( Conformita_Core_Collegamenti::COMPITO ) );
 		$this->assertSame( 'hourly', wp_get_schedule( Conformita_Core_Collegamenti::COMPITO ) );
+
+		// Gia programmato a un'altra ora: un secondo avvio non ne aggiunge un altro.
+		$fra_un_ora = time() + HOUR_IN_SECONDS;
+		wp_clear_scheduled_hook( Conformita_Core_Collegamenti::COMPITO );
+		wp_schedule_event( $fra_un_ora, 'hourly', Conformita_Core_Collegamenti::COMPITO );
+		Conformita_Core_Collegamenti::pianifica();
+		$this->assertSame( $fra_un_ora, wp_next_scheduled( Conformita_Core_Collegamenti::COMPITO ) );
 
 		$programmati = 0;
 
@@ -278,9 +284,12 @@ class Conformita_Core_Collegamenti_Periodico_Test extends WP_UnitTestCase {
 				return 0 === strpos( ltrim( (string) $sql ), 'UPDATE' ) && false !== strpos( (string) $sql, "'non_scrivibile'" ) ? 'UPDATE `' . $tabella . '_inesistente` SET id = 1' : $sql;
 			}
 		);
-		Conformita_Core_Collegamenti::lotto();
+		$controllati = Conformita_Core_Collegamenti::lotto();
 		remove_all_filters( 'query' );
 		$wpdb->suppress_errors( false );
+
+		// Conta solo i collegamenti con l'esito scritto.
+		$this->assertSame( 2, $controllati );
 
 		$this->assertCount( 3, $this->chiesti );
 		$this->assertSame( 'raggiungibile', conformita_core_collegamento( self::SEZIONE, 'uno' )['esito'] );
