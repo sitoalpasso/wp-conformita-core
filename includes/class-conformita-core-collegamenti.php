@@ -70,6 +70,21 @@ final class Conformita_Core_Collegamenti {
 	const LUNGHEZZA_MOTIVO    = 255;
 
 	/**
+	 * Nome del compito pianificato del controllo periodico.
+	 */
+	const COMPITO = 'conformita_core_collegamenti_orario';
+
+	/**
+	 * Collegamenti controllati al massimo a ogni giro del compito.
+	 */
+	const LOTTO = 5;
+
+	/**
+	 * Giorni di tolleranza oltre l'intervallo prima che un collegamento risulti in ritardo.
+	 */
+	const TOLLERANZA = 1;
+
+	/**
 	 * Nome completo della tabella, con il prefisso del sito.
 	 *
 	 * @return string
@@ -368,6 +383,84 @@ KEY verificato (verificato)
 	}
 
 	/**
+	 * Controlla un lotto di collegamenti da controllare.
+	 *
+	 * Prima quelli mai controllati, poi quelli controllati da piu tempo il cui
+	 * intervallo e passato; solo delle sezioni registrate in questa richiesta.
+	 * Il guasto di un collegamento non ferma gli altri.
+	 *
+	 * @return int|WP_Error Collegamenti controllati con l'esito scritto, errore se il lotto non si e potuto leggere.
+	 */
+	public static function lotto() {
+		global $wpdb;
+
+		$sezioni = Conformita_Core_Sezioni::identificativi();
+
+		if ( array() === $sezioni ) {
+			return 0;
+		}
+
+		$tabella    = self::tabella();
+		$segnaposti = implode( ', ', array_fill( 0, count( $sezioni ), '%s' ) );
+		$sql        = 'SELECT sezione, chiave FROM `' . $tabella . '` WHERE sezione IN (' . $segnaposti . ') AND ( verificato IS NULL OR verificato <= DATE_SUB( %s, INTERVAL intervallo DAY ) ) ORDER BY verificato IS NOT NULL, verificato, id LIMIT %d';
+		$valori     = array_merge( $sezioni, array( self::adesso(), self::LOTTO ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Tabella propria; i valori passano da prepare.
+		$righe = $wpdb->get_results( $wpdb->prepare( $sql, $valori ), ARRAY_A );
+
+		if ( '' !== $wpdb->last_error || ! is_array( $righe ) ) {
+			return self::errore( 'conformita_core_collegamenti_lotto', __( 'Collegamenti: il lotto da controllare non si è potuto leggere dalla banca dati.', 'conformita-core' ) );
+		}
+
+		$controllati = 0;
+
+		foreach ( $righe as $riga ) {
+			if ( ! is_wp_error( self::verifica( (string) $riga['sezione'], (string) $riga['chiave'] ) ) ) {
+				++$controllati;
+			}
+		}
+
+		return $controllati;
+	}
+
+	/**
+	 * Programma il compito orario, se non e gia programmato.
+	 */
+	public static function pianifica() {
+		if ( false === wp_next_scheduled( self::COMPITO ) ) {
+			wp_schedule_event( time(), 'hourly', self::COMPITO );
+		}
+	}
+
+	/**
+	 * Toglie il compito orario.
+	 */
+	public static function togli_compito() {
+		wp_clear_scheduled_hook( self::COMPITO );
+	}
+
+	/**
+	 * Il collegamento e in ritardo: l'ultimo controllo, o la registrazione se
+	 * non e mai stato controllato, e piu vecchio dell'intervallo piu la
+	 * tolleranza. Si calcola sul dato letto, senza contare sul compito.
+	 *
+	 * @param string $verificato Ultimo controllo in UTC, vuoto se mai.
+	 * @param string $registrato Registrazione in UTC.
+	 * @param int    $intervallo Intervallo in giorni.
+	 * @return bool
+	 */
+	private static function in_ritardo( $verificato, $registrato, $intervallo ) {
+		$riferimento = '' !== $verificato ? $verificato : $registrato;
+		$istante     = strtotime( $riferimento . ' UTC' );
+
+		if ( false === $istante ) {
+			return true;
+		}
+
+		return $istante + ( $intervallo + self::TOLLERANZA ) * DAY_IN_SECONDS < time();
+	}
+
+	/**
 	 * La riga dalla banca dati, nella sua forma.
 	 *
 	 * @param string $sezione Sezione.
@@ -399,6 +492,7 @@ KEY verificato (verificato)
 			'motivo'     => (string) $riga['motivo'],
 			'verificato' => (string) $riga['verificato'],
 			'registrato' => (string) $riga['registrato'],
+			'in_ritardo' => self::in_ritardo( (string) $riga['verificato'], (string) $riga['registrato'], (int) $riga['intervallo'] ),
 		);
 	}
 

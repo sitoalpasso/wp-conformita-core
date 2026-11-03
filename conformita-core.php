@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.12.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.13.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -113,3 +113,12 @@ Conformita_Core_Collegamenti::assicura_tabella();
 register_activation_hook( __FILE__, array( 'Conformita_Core_Allegati', 'verifica' ) );
 register_activation_hook( __FILE__, array( 'Conformita_Core_Registro', 'installa' ) );
 register_activation_hook( __FILE__, array( 'Conformita_Core_Collegamenti', 'installa' ) );
+
+/*
+ * Il controllo periodico dei collegamenti: il compito orario si programma
+ * all'avvio se manca e si toglie alla disattivazione. La conformita non
+ * dipende dal compito: il ritardo si legge sul dato.
+ */
+add_action( 'init', array( 'Conformita_Core_Collegamenti', 'pianifica' ) );
+add_action( Conformita_Core_Collegamenti::COMPITO, array( 'Conformita_Core_Collegamenti', 'lotto' ) );
+register_deactivation_hook( __FILE__, array( 'Conformita_Core_Collegamenti', 'togli_compito' ) );
