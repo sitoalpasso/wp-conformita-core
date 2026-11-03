@@ -169,9 +169,9 @@ Una regola alla volta rotta nel codice, con le prove di `collegamenti-test.php`.
 
 ## 11. Che cosa deve fare la trasparenza
 
-Chiedere l'interfaccia `1.12.0`, registrare ogni rinvio dichiarato con la voce come chiave e il
-proprio intervallo, toglierlo quando l'ente lo toglie, e mostrare l'esito. Il controllo periodico
-arriva con la seconda parte.
+Chiedere l'interfaccia `1.13.0`, registrare ogni rinvio dichiarato con la voce come chiave e il
+proprio intervallo, toglierlo quando l'ente lo toglie, e mostrare l'esito e il ritardo
+(`in_ritardo`). Il controllo periodico lo fa il core: la trasparenza non programma compiti propri.
 
 ## 12. Seconda parte: il controllo periodico e il ritardo letto sul dato
 
@@ -198,7 +198,22 @@ ferma, i collegamenti risultano in ritardo da soli, senza che nessuno debba acco
 
 | Riga | Stato | Cosa verifica |
 |---|---|---|
-| C-307 | da fare | Il lotto: con sette collegamenti (due mai controllati, tre scaduti da tempi diversi, due controllati da poco) ne controlla cinque, i mai controllati per primi e poi dal più vecchio; al giro dopo gli ultimi da controllare; quelli controllati da poco mai; un collegamento di una sezione non registrata saltato |
-| C-308 | da fare | Il compito orario si programma all'avvio se manca, una volta sola, e chiama il lotto; alla disattivazione si toglie |
-| C-309 | da fare | In ritardo, senza che il compito sia mai girato: mai controllato e registrato da più dell'intervallo più un giorno; controllato da più dell'intervallo più un giorno; non in ritardo un attimo prima del limite, né quello controllato da poco; interfaccia `1.13.0` |
-| C-310 | da fare | [guasto] lettura del lotto fallita: errore e nessuna richiesta; un collegamento del lotto che non si può scrivere non ferma gli altri |
+| C-307 | fatto | Il lotto: con sette collegamenti (due mai controllati, tre scaduti da tempi diversi, due controllati da poco) ne controlla cinque, i mai controllati per primi e poi dal più vecchio; al giro dopo gli ultimi da controllare; quelli controllati da poco mai; un collegamento di una sezione non registrata saltato |
+| C-308 | fatto | Il compito orario si programma all'avvio se manca, una volta sola, e chiama il lotto; alla disattivazione si toglie |
+| C-309 | fatto | In ritardo, senza che il compito sia mai girato: mai controllato e registrato da più dell'intervallo più un giorno; controllato da più dell'intervallo più un giorno; non in ritardo un attimo prima del limite, né quello controllato da poco; interfaccia `1.13.0` |
+| C-310 | fatto | [guasto] lettura del lotto fallita: errore e nessuna richiesta; un collegamento del lotto che non si può scrivere non ferma gli altri |
+
+**Limite dichiarato.** Un collegamento il cui esito non si riesce mai a scrivere resta in testa
+alla coda e occupa uno dei cinque posti a ogni giro: gli altri proseguono, più lentamente. Il
+guasto si vede comunque, perché quel collegamento risulta in ritardo.
+
+**Rotture volute della seconda parte.** 21 rotture, tutte rosse tranne una equivalenza
+dichiarata:
+
+- togliere `verificato IS NOT NULL` dall'ordinamento lascia le prove verdi, perché MariaDB e
+  MySQL mettono già i valori nulli per primi in ordine crescente. La clausola resta scritta per
+  rendere esplicita la regola "prima i mai controllati".
+
+Tre rotture all'inizio verdi hanno portato prove nuove: programmare il compito a ogni avvio
+(il compito già programmato a un'altra ora non deve raddoppiare), contare nel lotto anche i
+controlli il cui esito non si è scritto, e togliere il filtro sulle sezioni registrate.
