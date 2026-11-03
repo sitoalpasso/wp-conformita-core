@@ -9,7 +9,7 @@ collegamenti rotti.
 il meccanismo è la trasparenza, per i rinvii alle banche dati nazionali (art. 9-bis del d.lgs.
 33/2013): un rinvio rotto è un obbligo non assolto, e a occhio non si vede.
 
-**Stato: in costruzione.**
+**Stato: prima parte costruita, righe C-301..C-306 verdi in locale.** Le sezioni dicono quello che il codice fa.
 
 ---
 
@@ -65,8 +65,10 @@ massimo. Per la trasparenza è la parte "verifica automatica periodica" di TRASP
 - `$chiave`: lettere minuscole, cifre, trattino e trattino basso, da 1 a 100 caratteri. La
   sceglie il componente, per esempio l'identificativo della voce.
 - `$indirizzo`: `http` o `https`, al più 2048 caratteri, senza spazi né caratteri di
-  controllo, uguale a se stesso dopo `esc_url_raw()`, verso un indirizzo che
-  `wp_http_validate_url()` accetta (niente indirizzi interni).
+  controllo, uguale a se stesso dopo `esc_url_raw()`, senza un host della rete interna scritto
+  come tale (`localhost`, indirizzi privati o riservati). La registrazione non chiede al servizio
+  dei nomi: un dominio che non esiste si registra e risulta rotto alla verifica, che con la
+  richiesta sicura di WordPress ferma anche un nome che porta alla rete interna.
 - `$intervallo`: ogni quanti giorni ricontrollare, intero da 1 a 90. **È la politica e non ha
   un valore predefinito**: senza, la registrazione si rifiuta.
 
@@ -125,9 +127,48 @@ controllato i propri permessi. La schermata della seconda parte avrà una capabi
 
 | Riga | Stato | Cosa verifica |
 |---|---|---|
-| C-301 | da fare | Registrazione: il collegamento compare con esito `mai`, senza data di verifica, con l'istante di registrazione; [attacco] sezione non registrata, chiave vuota, maiuscola, troppo lunga o non testo, indirizzo senza schema, `ftp`, `javascript`, con spazi o a capo, troppo lungo, verso `127.0.0.1`, intervallo mancante, zero, 91, testo: errore e niente scritto |
-| C-302 | da fare | Verifica di un collegamento che risponde: esito `raggiungibile`, codice 200, istante di verifica di adesso; la richiesta è un GET con tempo massimo 10 secondi, al più 5 rinvii, 64 KiB letti e indirizzi interni rifiutati |
-| C-303 | da fare | Collegamento rotto: pagina inesistente (404), errore del server (500), rinvii esauriti (301 finale), tempo scaduto, dominio inesistente: esito `rotto` con codice o motivo e istante di verifica |
-| C-304 | da fare | Registrare di nuovo: stesso indirizzo, esito che resta; indirizzo diverso, esito `mai`; solo intervallo diverso, esito che resta e intervallo nuovo; due sezioni con la stessa chiave restano distinte; togliere, anche un collegamento che non c'è; verificare un collegamento non registrato: errore |
-| C-305 | da fare | [guasto] lettura fallita: errore e non `null`, e la verifica non chiede niente all'altro sito; scrittura fallita: errore; indirizzo cambiato durante il controllo: l'esito si butta |
-| C-306 | da fare | La tabella si crea con la chiave unica su sezione e chiave; l'interfaccia è `1.12.0` |
+| C-301 | fatto | Registrazione: il collegamento compare con esito `mai`, senza data di verifica, con l'istante di registrazione; [attacco] sezione non registrata, chiave vuota, maiuscola, troppo lunga o non testo, indirizzo senza schema, `ftp`, `javascript`, con spazi, a capo, virgolette o parentesi angolari, troppo lungo, verso `127.0.0.1`, intervallo mancante, zero, 91, testo: errore e niente scritto |
+| C-302 | fatto | Verifica di un collegamento che risponde: esito `raggiungibile`, codice 200, istante di verifica di adesso; la richiesta è un GET con tempo massimo 10 secondi, al più 5 rinvii, 64 KiB letti e indirizzi interni rifiutati |
+| C-303 | fatto | Collegamento rotto: pagina inesistente (404), vietata (403), errore del server (500), rinvii esauriti (301 finale o errore), tempo scaduto, dominio inesistente: esito `rotto` con codice o motivo e istante di verifica; un motivo di 400 caratteri si taglia a 255 anche con la banca dati in modo rigoroso; tornato raggiungibile, il motivo si svuota |
+| C-304 | fatto | Registrare di nuovo: stesso indirizzo, esito che resta; indirizzo diverso, esito `mai`; solo intervallo diverso, esito che resta e intervallo nuovo; due sezioni con la stessa chiave restano distinte; togliere, anche un collegamento che non c'è; verificare un collegamento non registrato: errore |
+| C-305 | fatto | [guasto] lettura fallita: errore e non `null`, e la verifica non chiede niente all'altro sito; scrittura fallita: errore; indirizzo cambiato durante il controllo: l'esito si butta |
+| C-306 | fatto | La tabella si crea con la chiave unica su sezione e chiave, e la versione dello schema si scrive; un doppione scritto direttamente si rifiuta; l'interfaccia è `1.12.0` |
+
+## 10. Rotture volute
+
+Una regola alla volta rotta nel codice, con le prove di `collegamenti-test.php`.
+
+| Rottura | Riga rossa |
+|---|---|
+| Sezione non controllata | C-301 |
+| Chiave senza forma, o un carattere più lunga | C-301 |
+| Indirizzo lungo, `esc_url_raw()` non confrontato, host interno ammesso | C-301 |
+| Intervallo non intero, a zero o a 91 | C-301 |
+| Tempo massimo, rinvii, quantità letta diversi; richiesta non sicura | C-302 |
+| Solo il 200 raggiungibile; anche i 3xx raggiungibili | C-302, C-303 |
+| Motivo non tagliato | C-303 |
+| Esito scritto anche se l'indirizzo è cambiato | C-305 |
+| Indirizzo nuovo che tiene l'esito vecchio; stesso indirizzo che lo azzera; intervallo non aggiornato | C-304 |
+| Riga riletta non guardata dopo la scrittura | C-305 |
+| Lettura fallita trattata come collegamento assente | C-305 |
+| Rimozione o scrittura dell'esito fallite che rispondono riuscito | C-305 |
+| Chiave unica tolta, o solo sulla chiave | C-306, su una banca dati di prova nuova |
+| Versione dell'interfaccia | C-306 |
+
+**Due cose da sapere.**
+
+- La chiave unica si prova su una banca dati di prova appena creata, come in CI: le prove di
+  WordPress trasformano `CREATE TABLE` e `DROP TABLE` in tabelle temporanee, e su una banca dati
+  che ha già la tabella vera `dbDelta()` non toglie un indice. Le due rotture sono rosse con la
+  banca dati nuova.
+- Una rottura resta verde, per equivalenza dichiarata: togliere il controllo della forma
+  `http(s)://` senza spazi. `esc_url_raw()` con i soli protocolli `http` e `https` cambia ogni
+  indirizzo che quel controllo rifiuta (senza schema, `ftp`, `javascript`, spazi, a capo), e il
+  confronto con l'originale lo rifiuta lo stesso. Il controllo resta perché dice la regola in
+  chiaro.
+
+## 11. Che cosa deve fare la trasparenza
+
+Chiedere l'interfaccia `1.12.0`, registrare ogni rinvio dichiarato con la voce come chiave e il
+proprio intervallo, toglierlo quando l'ente lo toglie, e mostrare l'esito. Il controllo periodico
+arriva con la seconda parte.
