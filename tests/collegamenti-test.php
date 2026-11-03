@@ -48,7 +48,7 @@ class Conformita_Core_Collegamenti_Test extends WP_UnitTestCase {
 				conformita_core_registra_sezione(
 					$sezione,
 					array(
-						'indicizzazione' => 'obbligatoria',
+						'indicizzazione' => 'consentita',
 						'scadenza'       => 'irraggiungibile',
 					)
 				)
@@ -196,6 +196,8 @@ class Conformita_Core_Collegamenti_Test extends WP_UnitTestCase {
 			'javascript'             => array( 2, 'javascript:alert(1)' ),
 			'con spazi'              => array( 2, 'https://banca-dati.example.org/ente dati' ),
 			'a capo'                 => array( 2, "https://banca-dati.example.org/ente\n" ),
+			'con virgolette'         => array( 2, 'https://banca-dati.example.org/ente"dati' ),
+			'con parentesi angolari' => array( 2, 'https://banca-dati.example.org/<ente>' ),
 			'lungo'                  => array( 2, 'https://banca-dati.example.org/' . str_repeat( 'a', 2048 ) ),
 			'interno'                => array( 2, 'http://127.0.0.1/ente' ),
 			'indirizzo non testo'    => array( 2, array( self::INDIRIZZO ) ),
@@ -279,9 +281,19 @@ class Conformita_Core_Collegamenti_Test extends WP_UnitTestCase {
 			$this->assertSame( $messaggio, $letto['motivo'], $nome );
 		}
 
-		// Un motivo lunghissimo si taglia.
-		$this->risposta = new WP_Error( 'http_request_failed', str_repeat( 'x', 400 ) );
-		$this->assertSame( 255, mb_strlen( conformita_core_verifica_collegamento( self::SEZIONE, 'voce_uno' )['motivo'] ) );
+		/*
+		 * Un motivo lunghissimo si taglia, anche con la banca dati in modo
+		 * rigoroso, dove un testo troppo lungo non si scrive affatto.
+		 */
+		global $wpdb;
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery -- la prova cambia il modo della sessione e lo rimette.
+		$modo = (string) $wpdb->get_var( 'SELECT @@SESSION.sql_mode' );
+		$wpdb->query( "SET SESSION sql_mode = 'STRICT_ALL_TABLES'" );
+		$this->risposta = new WP_Error( 'http_request_failed', str_repeat( 'è', 400 ) );
+		$letto          = conformita_core_verifica_collegamento( self::SEZIONE, 'voce_uno' );
+		$wpdb->query( $wpdb->prepare( 'SET SESSION sql_mode = %s', $modo ) );
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery
+		$this->assertSame( str_repeat( 'è', 255 ), $letto['motivo'] );
 
 		// E torna raggiungibile, senza motivo.
 		$this->risposta = self::risposta( 200 );
@@ -330,6 +342,7 @@ class Conformita_Core_Collegamenti_Test extends WP_UnitTestCase {
 		$this->assertNotNull( conformita_core_collegamento( self::SEZIONE_ALTRA, 'voce_uno' ) );
 
 		// Verificare o leggere con parametri non validi, o un collegamento che non c'e.
+		$this->richieste = array();
 		$this->assertWPError( conformita_core_verifica_collegamento( self::SEZIONE, 'voce_uno' ) );
 		$this->assertWPError( conformita_core_collegamento( 'sezione_inesistente', 'voce_uno' ) );
 		$this->assertWPError( conformita_core_togli_collegamento( self::SEZIONE, 'Voce' ) );
@@ -395,6 +408,13 @@ class Conformita_Core_Collegamenti_Test extends WP_UnitTestCase {
 		global $wpdb;
 
 		$tabella = Conformita_Core_Collegamenti::tabella();
+
+		// La tabella nasce da zero, non da quella di una prova precedente.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.SchemaChange -- Prova di installazione.
+		$wpdb->query( "DROP TABLE IF EXISTS `{$tabella}`" );
+		delete_option( Conformita_Core_Collegamenti::OPZIONE_SCHEMA );
+		$this->assertTrue( Conformita_Core_Collegamenti::installa() );
+		$this->assertSame( Conformita_Core_Collegamenti::VERSIONE_SCHEMA, get_option( Conformita_Core_Collegamenti::OPZIONE_SCHEMA ) );
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Verifica di struttura.
 		$indici = $wpdb->get_results( "SHOW INDEX FROM `{$tabella}` WHERE Key_name = 'collegamento'", ARRAY_A );
