@@ -2363,6 +2363,7 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			$this->assertSame( 200, $this->chiedi_da_amministrazione( $contenuto, $allegato )['stato'], $stato );
 		}
 
-		$this->assertSame( '1.11.0', conformita_core_versione_api() );
+		// 1.11.0 quando la riga e' nata; le versioni successive compatibili la mantengono.
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.11.0', '>=' ) );
 	}
 }
