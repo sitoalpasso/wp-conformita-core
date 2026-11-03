@@ -533,3 +533,65 @@ if ( ! function_exists( 'conformita_core_capacita_registro' ) ) {
 		return Conformita_Core_Registro::CAPACITA;
 	}
 }
+
+if ( ! function_exists( 'conformita_core_registra_collegamento' ) ) {
+	/**
+	 * Registra un collegamento perché il verificatore ne controlli la risposta.
+	 *
+	 * L'intervallo è la politica del componente e non ha un valore
+	 * predefinito: senza, la registrazione si rifiuta. Registrare di nuovo lo
+	 * stesso indirizzo lascia l'esito; un indirizzo diverso lo riporta a "mai".
+	 *
+	 * @param string $sezione    Sezione registrata.
+	 * @param string $chiave     Chiave scelta dal componente: minuscole, cifre, trattino e trattino basso.
+	 * @param string $indirizzo  Indirizzo http o https.
+	 * @param int    $intervallo Ogni quanti giorni ricontrollare, da 1 a 90.
+	 * @return true|WP_Error
+	 */
+	function conformita_core_registra_collegamento( $sezione, $chiave, $indirizzo, $intervallo ) {
+		return Conformita_Core_Collegamenti::registra( $sezione, $chiave, $indirizzo, $intervallo );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_togli_collegamento' ) ) {
+	/**
+	 * Toglie un collegamento dal verificatore; vero anche se non c'era.
+	 *
+	 * @param string $sezione Sezione registrata.
+	 * @param string $chiave  Chiave.
+	 * @return true|WP_Error
+	 */
+	function conformita_core_togli_collegamento( $sezione, $chiave ) {
+		return Conformita_Core_Collegamenti::togli( $sezione, $chiave );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_collegamento' ) ) {
+	/**
+	 * Un collegamento con l'esito dell'ultima verifica.
+	 *
+	 * Chiavi: `indirizzo`, `intervallo`, `esito` (`mai`, `raggiungibile`,
+	 * `rotto`), `codice` (intero o nullo), `motivo`, `verificato` e
+	 * `registrato` (istanti UTC `Y-m-d H:i:s`, `verificato` vuoto se mai).
+	 *
+	 * @param string $sezione Sezione registrata.
+	 * @param string $chiave  Chiave.
+	 * @return array<string, mixed>|null|WP_Error Nullo se non c'è; errore se la lettura fallisce.
+	 */
+	function conformita_core_collegamento( $sezione, $chiave ) {
+		return Conformita_Core_Collegamenti::collegamento( $sezione, $chiave );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_verifica_collegamento' ) ) {
+	/**
+	 * Controlla adesso un collegamento, con tempo massimo e rinvii limitati, e ne scrive l'esito.
+	 *
+	 * @param string $sezione Sezione registrata.
+	 * @param string $chiave  Chiave.
+	 * @return array<string, mixed>|WP_Error Il collegamento con l'esito nuovo.
+	 */
+	function conformita_core_verifica_collegamento( $sezione, $chiave ) {
+		return Conformita_Core_Collegamenti::verifica( $sezione, $chiave );
+	}
+}

@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.11.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.12.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -54,6 +54,7 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-automatico.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-schermata.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-dipendenza.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-collegamenti.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/funzioni-api.php';
 
 /*
@@ -98,6 +99,12 @@ Conformita_Core_Registro_Automatico::avvia();
 Conformita_Core_Registro_Schermata::avvia();
 
 /*
+ * La tabella del verificatore dei collegamenti si verifica a ogni caricamento,
+ * come quella del registro e per la stessa ragione.
+ */
+Conformita_Core_Collegamenti::assicura_tabella();
+
+/*
  * All'attivazione la cartella protetta si crea, i file di regole si scrivono e
  * la protezione si verifica: cosi' l'esito e' gia' disponibile prima del primo
  * deposito invece che al primo deposito. E' l'unico momento in cui questo
@@ -105,3 +112,4 @@ Conformita_Core_Registro_Schermata::avvia();
  */
 register_activation_hook( __FILE__, array( 'Conformita_Core_Allegati', 'verifica' ) );
 register_activation_hook( __FILE__, array( 'Conformita_Core_Registro', 'installa' ) );
+register_activation_hook( __FILE__, array( 'Conformita_Core_Collegamenti', 'installa' ) );
