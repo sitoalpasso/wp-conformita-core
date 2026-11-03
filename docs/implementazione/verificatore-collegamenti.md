@@ -172,3 +172,33 @@ Una regola alla volta rotta nel codice, con le prove di `collegamenti-test.php`.
 Chiedere l'interfaccia `1.12.0`, registrare ogni rinvio dichiarato con la voce come chiave e il
 proprio intervallo, toglierlo quando l'ente lo toglie, e mostrare l'esito. Il controllo periodico
 arriva con la seconda parte.
+
+## 12. Seconda parte: il controllo periodico e il ritardo letto sul dato
+
+Righe C-307..C-310. Versione dell'interfaccia da `1.12.0` a `1.13.0`.
+
+**In parole semplici.** Una volta all'ora il sito ricontrolla da solo, a piccoli gruppi, i
+collegamenti che ne hanno bisogno: prima quelli mai controllati, poi quelli controllati da più
+tempo dell'intervallo scelto dal componente. Il controllo periodico fa il lavoro, ma non è lui a
+dire la verità: ogni collegamento letto porta anche l'indicazione "in ritardo" quando l'ultimo
+controllo è più vecchio di quanto il componente aveva chiesto. Se il controllo periodico si
+ferma, i collegamenti risultano in ritardo da soli, senza che nessuno debba accorgersene.
+
+| Domanda | Scelta | Perché |
+|---|---|---|
+| Quando | un compito pianificato ogni ora, programmato all'avvio se manca, tolto alla disattivazione | l'intervallo minimo è un giorno: un'ora basta e lascia spazio al lotto |
+| Quanti per volta | al più 5 | con 10 secondi ciascuno, un giro dura al più un minuto circa |
+| Quali | quelli mai controllati, poi quelli con l'ultimo controllo più vecchio dell'intervallo, dal più vecchio | chi aspetta da più tempo passa prima |
+| Collegamento di una sezione non registrata in questa richiesta | saltato, resta com'è | il componente che l'ha registrato non è attivo: non si controlla per conto di nessuno |
+| Un controllo che fallisce | gli altri del lotto proseguono | un guasto su un collegamento non ferma gli altri |
+| Lettura del lotto fallita | nessun controllo, errore | non vale come "niente da controllare" |
+| In ritardo | l'ultimo controllo, o la registrazione se non c'è mai stato, è più vecchio dell'intervallo più un giorno | il giorno in più assorbe l'attesa del compito orario e dei lotti; si calcola a ogni lettura, quindi non dipende dal compito pianificato |
+
+**Il collegamento letto** ha una chiave in più: `in_ritardo`, vero o falso.
+
+| Riga | Stato | Cosa verifica |
+|---|---|---|
+| C-307 | da fare | Il lotto: con sette collegamenti (due mai controllati, tre scaduti da tempi diversi, due controllati da poco) ne controlla cinque, i mai controllati per primi e poi dal più vecchio; al giro dopo gli ultimi da controllare; quelli controllati da poco mai; un collegamento di una sezione non registrata saltato |
+| C-308 | da fare | Il compito orario si programma all'avvio se manca, una volta sola, e chiama il lotto; alla disattivazione si toglie |
+| C-309 | da fare | In ritardo, senza che il compito sia mai girato: mai controllato e registrato da più dell'intervallo più un giorno; controllato da più dell'intervallo più un giorno; non in ritardo un attimo prima del limite, né quello controllato da poco; interfaccia `1.13.0` |
+| C-310 | da fare | [guasto] lettura del lotto fallita: errore e nessuna richiesta; un collegamento del lotto che non si può scrivere non ferma gli altri |
