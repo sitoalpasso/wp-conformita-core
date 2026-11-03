@@ -169,6 +169,55 @@ Una regola alla volta rotta nel codice, con le prove di `collegamenti-test.php`.
 
 ## 11. Che cosa deve fare la trasparenza
 
-Chiedere l'interfaccia `1.12.0`, registrare ogni rinvio dichiarato con la voce come chiave e il
-proprio intervallo, toglierlo quando l'ente lo toglie, e mostrare l'esito. Il controllo periodico
-arriva con la seconda parte.
+Chiedere l'interfaccia `1.13.0`, registrare ogni rinvio dichiarato con la voce come chiave e il
+proprio intervallo, toglierlo quando l'ente lo toglie, e mostrare l'esito e il ritardo
+(`in_ritardo`). Il controllo periodico lo fa il core: la trasparenza non programma compiti propri.
+
+## 12. Seconda parte: il controllo periodico e il ritardo letto sul dato
+
+Righe C-307..C-310. Versione dell'interfaccia da `1.12.0` a `1.13.0`.
+
+**In parole semplici.** Una volta all'ora il sito ricontrolla da solo, a piccoli gruppi, i
+collegamenti che ne hanno bisogno: prima quelli mai controllati, poi quelli controllati da più
+tempo dell'intervallo scelto dal componente. Il controllo periodico fa il lavoro, ma non è lui a
+dire la verità: ogni collegamento letto porta anche l'indicazione "in ritardo" quando l'ultimo
+controllo è più vecchio di quanto il componente aveva chiesto. Se il controllo periodico si
+ferma, i collegamenti risultano in ritardo da soli, senza che nessuno debba accorgersene.
+
+| Domanda | Scelta | Perché |
+|---|---|---|
+| Quando | un compito pianificato ogni ora, programmato all'avvio se manca, tolto alla disattivazione | l'intervallo minimo è un giorno: un'ora basta e lascia spazio al lotto |
+| Quanti per volta | al più 5 | con 10 secondi ciascuno, un giro dura al più un minuto circa |
+| Quali | quelli mai controllati, poi quelli con l'ultimo controllo più vecchio dell'intervallo, dal più vecchio | chi aspetta da più tempo passa prima |
+| Collegamento di una sezione non registrata in questa richiesta | saltato, resta com'è | il componente che l'ha registrato non è attivo: non si controlla per conto di nessuno |
+| Un controllo che fallisce | gli altri del lotto proseguono | un guasto su un collegamento non ferma gli altri |
+| Lettura del lotto fallita | nessun controllo, errore | non vale come "niente da controllare" |
+| In ritardo | l'ultimo controllo, o la registrazione se non c'è mai stato, è più vecchio dell'intervallo più un giorno; con un indirizzo nuovo la registrazione riparte dal cambio | il giorno in più assorbe l'attesa del compito orario e dei lotti; si calcola a ogni lettura, quindi non dipende dal compito pianificato |
+
+**Il collegamento letto** ha una chiave in più: `in_ritardo`, vero o falso.
+
+| Riga | Stato | Cosa verifica |
+|---|---|---|
+| C-307 | fatto | Il lotto: con sette collegamenti (due mai controllati, tre scaduti da tempi diversi, due controllati da poco) ne controlla cinque, i mai controllati per primi e poi dal più vecchio; al giro dopo gli ultimi da controllare; quelli controllati da poco mai; un collegamento di una sezione non registrata saltato |
+| C-308 | fatto | Il compito orario si programma all'avvio se manca, una volta sola, e chiama il lotto; alla disattivazione si toglie |
+| C-309 | fatto | In ritardo, senza che il compito sia mai girato: mai controllato e registrato da più dell'intervallo più un giorno; controllato da più dell'intervallo più un giorno; non in ritardo un attimo prima del limite, né quello controllato da poco; collegamento vecchio con l'indirizzo cambiato: non in ritardo subito, in ritardo passati l'intervallo più un giorno dal cambio, e registrarlo di nuovo uguale non sposta il riferimento; interfaccia `1.13.0` |
+| C-310 | fatto | [guasto] lettura del lotto fallita: errore e nessuna richiesta; un collegamento del lotto che non si può scrivere non ferma gli altri |
+
+**Intervallo accorciato.** Se il componente accorcia l'intervallo di un collegamento già
+controllato, il collegamento può risultare subito in ritardo secondo la regola nuova: è il
+ritardo vero rispetto alla politica in vigore, e il lotto lo riprende al giro successivo.
+
+**Limite dichiarato.** Un collegamento il cui esito non si riesce mai a scrivere resta in testa
+alla coda e occupa uno dei cinque posti a ogni giro: gli altri proseguono, più lentamente. Il
+guasto si vede comunque, perché quel collegamento risulta in ritardo.
+
+**Rotture volute della seconda parte.** 22 rotture, tutte rosse tranne una equivalenza
+dichiarata:
+
+- togliere `verificato IS NOT NULL` dall'ordinamento lascia le prove verdi, perché MariaDB e
+  MySQL mettono già i valori nulli per primi in ordine crescente. La clausola resta scritta per
+  rendere esplicita la regola "prima i mai controllati".
+
+Tre rotture all'inizio verdi hanno portato prove nuove: programmare il compito a ogni avvio
+(il compito già programmato a un'altra ora non deve raddoppiare), contare nel lotto anche i
+controlli il cui esito non si è scritto, e togliere il filtro sulle sezioni registrate.

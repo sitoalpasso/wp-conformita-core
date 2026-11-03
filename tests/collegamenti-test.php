@@ -440,6 +440,6 @@ class Conformita_Core_Collegamenti_Test extends WP_UnitTestCase {
 		$wpdb->suppress_errors( false );
 		$this->assertFalse( $doppione );
 
-		$this->assertSame( '1.12.0', conformita_core_versione_api() );
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.12.0', '>=' ) );
 	}
 }

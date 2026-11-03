@@ -25,8 +25,10 @@ supportato.
   dedicata.
 - **Verificatore dei collegamenti** per le voci che rinviano ad altre pagine o ad altri
   siti: un componente registra l'indirizzo con il proprio intervallo di verifica, e il
-  controllo ha un tempo massimo e un limite ai rinvii. Il controllo periodico e la
-  schermata dei collegamenti rotti sono in costruzione.
+  controllo ha un tempo massimo e un limite ai rinvii. Un compito orario li ricontrolla
+  a piccoli gruppi, e ogni collegamento letto dice se l'ultimo controllo è in ritardo,
+  anche quando il compito non è girato. La schermata dei collegamenti rotti è in
+  costruzione.
 - **Scheletro dei tipi di contenuto**, con capability dedicate ed esposizione REST
   dichiarata esplicitamente per ogni tipo registrato.
 
