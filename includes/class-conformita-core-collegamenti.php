@@ -241,8 +241,13 @@ KEY verificato (verificato)
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Tabella propria.
 			$scritto = $wpdb->update( $tabella, array( 'intervallo' => $intervallo ), array( 'id' => $esistente['id'] ), array( '%d' ), array( '%d' ) );
 		} else {
+			/*
+			 * Un indirizzo nuovo e un collegamento nuovo: l'esito torna mai e
+			 * l'istante di registrazione riparte, cosi il ritardo si conta dal
+			 * cambio e non dalla prima registrazione.
+			 */
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Tabella propria; i valori passano da prepare.
-			$scritto = $wpdb->query( $wpdb->prepare( "UPDATE `{$tabella}` SET indirizzo = %s, intervallo = %d, esito = 'mai', codice = NULL, motivo = NULL, verificato = NULL WHERE id = %d", $indirizzo, $intervallo, $esistente['id'] ) );
+			$scritto = $wpdb->query( $wpdb->prepare( "UPDATE `{$tabella}` SET indirizzo = %s, intervallo = %d, esito = 'mai', codice = NULL, motivo = NULL, verificato = NULL, registrato = %s WHERE id = %d", $indirizzo, $intervallo, self::adesso(), $esistente['id'] ) );
 		}
 
 		$riletto = self::leggi( $sezione, $chiave );

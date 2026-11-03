@@ -572,7 +572,8 @@ if ( ! function_exists( 'conformita_core_collegamento' ) ) {
 	 *
 	 * Chiavi: `indirizzo`, `intervallo`, `esito` (`mai`, `raggiungibile`,
 	 * `rotto`), `codice` (intero o nullo), `motivo`, `verificato` e
-	 * `registrato` (istanti UTC `Y-m-d H:i:s`, `verificato` vuoto se mai),
+	 * `registrato` (istanti UTC `Y-m-d H:i:s`, `verificato` vuoto se mai;
+	 * dalla 1.13.0 `registrato` riparte quando cambia l'indirizzo),
 	 * `in_ritardo` (dalla 1.13.0: vero se l'ultimo controllo, o la
 	 * registrazione se mai controllato, e piu vecchio dell'intervallo piu un
 	 * giorno; calcolato in lettura).

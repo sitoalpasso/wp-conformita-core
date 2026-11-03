@@ -192,7 +192,7 @@ ferma, i collegamenti risultano in ritardo da soli, senza che nessuno debba acco
 | Collegamento di una sezione non registrata in questa richiesta | saltato, resta com'è | il componente che l'ha registrato non è attivo: non si controlla per conto di nessuno |
 | Un controllo che fallisce | gli altri del lotto proseguono | un guasto su un collegamento non ferma gli altri |
 | Lettura del lotto fallita | nessun controllo, errore | non vale come "niente da controllare" |
-| In ritardo | l'ultimo controllo, o la registrazione se non c'è mai stato, è più vecchio dell'intervallo più un giorno | il giorno in più assorbe l'attesa del compito orario e dei lotti; si calcola a ogni lettura, quindi non dipende dal compito pianificato |
+| In ritardo | l'ultimo controllo, o la registrazione se non c'è mai stato, è più vecchio dell'intervallo più un giorno; con un indirizzo nuovo la registrazione riparte dal cambio | il giorno in più assorbe l'attesa del compito orario e dei lotti; si calcola a ogni lettura, quindi non dipende dal compito pianificato |
 
 **Il collegamento letto** ha una chiave in più: `in_ritardo`, vero o falso.
 
@@ -200,14 +200,18 @@ ferma, i collegamenti risultano in ritardo da soli, senza che nessuno debba acco
 |---|---|---|
 | C-307 | fatto | Il lotto: con sette collegamenti (due mai controllati, tre scaduti da tempi diversi, due controllati da poco) ne controlla cinque, i mai controllati per primi e poi dal più vecchio; al giro dopo gli ultimi da controllare; quelli controllati da poco mai; un collegamento di una sezione non registrata saltato |
 | C-308 | fatto | Il compito orario si programma all'avvio se manca, una volta sola, e chiama il lotto; alla disattivazione si toglie |
-| C-309 | fatto | In ritardo, senza che il compito sia mai girato: mai controllato e registrato da più dell'intervallo più un giorno; controllato da più dell'intervallo più un giorno; non in ritardo un attimo prima del limite, né quello controllato da poco; interfaccia `1.13.0` |
+| C-309 | fatto | In ritardo, senza che il compito sia mai girato: mai controllato e registrato da più dell'intervallo più un giorno; controllato da più dell'intervallo più un giorno; non in ritardo un attimo prima del limite, né quello controllato da poco; collegamento vecchio con l'indirizzo cambiato: non in ritardo subito, in ritardo passati l'intervallo più un giorno dal cambio, e registrarlo di nuovo uguale non sposta il riferimento; interfaccia `1.13.0` |
 | C-310 | fatto | [guasto] lettura del lotto fallita: errore e nessuna richiesta; un collegamento del lotto che non si può scrivere non ferma gli altri |
+
+**Intervallo accorciato.** Se il componente accorcia l'intervallo di un collegamento già
+controllato, il collegamento può risultare subito in ritardo secondo la regola nuova: è il
+ritardo vero rispetto alla politica in vigore, e il lotto lo riprende al giro successivo.
 
 **Limite dichiarato.** Un collegamento il cui esito non si riesce mai a scrivere resta in testa
 alla coda e occupa uno dei cinque posti a ogni giro: gli altri proseguono, più lentamente. Il
 guasto si vede comunque, perché quel collegamento risulta in ritardo.
 
-**Rotture volute della seconda parte.** 21 rotture, tutte rosse tranne una equivalenza
+**Rotture volute della seconda parte.** 22 rotture, tutte rosse tranne una equivalenza
 dichiarata:
 
 - togliere `verificato IS NOT NULL` dall'ordinamento lascia le prove verdi, perché MariaDB e
