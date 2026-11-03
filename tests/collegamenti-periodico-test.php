@@ -249,8 +249,44 @@ class Conformita_Core_Collegamenti_Periodico_Test extends WP_UnitTestCase {
 			$this->assertSame( $atteso, conformita_core_collegamento( self::SEZIONE, $chiave )['in_ritardo'], $chiave );
 		}
 
+		// Indirizzo cambiato su un collegamento vecchio: il ritardo riparte dal cambio.
+		$this->collegamento( 'cambiato', 7, 100 * $giorno, 200 * $giorno );
+		$this->assertTrue( conformita_core_collegamento( self::SEZIONE, 'cambiato' )['in_ritardo'] );
+		$this->assertTrue( conformita_core_registra_collegamento( self::SEZIONE, 'cambiato', self::indirizzo( 'cambiato_nuovo' ), 7 ) );
+		$letto = conformita_core_collegamento( self::SEZIONE, 'cambiato' );
+		$this->assertFalse( $letto['in_ritardo'] );
+		$this->assertEqualsWithDelta( time(), strtotime( $letto['registrato'] . ' UTC' ), 60 );
+
+		// Passati l'intervallo piu un giorno dal cambio, senza controllo, e in ritardo.
+		$this->sposta_registrato( 'cambiato', 8 * $giorno + 60 );
+		$this->assertTrue( conformita_core_collegamento( self::SEZIONE, 'cambiato' )['in_ritardo'] );
+
+		// Stesso indirizzo registrato di nuovo: il riferimento non si sposta.
+		$this->assertTrue( conformita_core_registra_collegamento( self::SEZIONE, 'cambiato', self::indirizzo( 'cambiato_nuovo' ), 7 ) );
+		$this->assertTrue( conformita_core_collegamento( self::SEZIONE, 'cambiato' )['in_ritardo'] );
+
 		$this->assertSame( array(), $this->chiesti );
 		$this->assertSame( '1.13.0', conformita_core_versione_api() );
+	}
+
+	/**
+	 * Porta indietro l'istante di registrazione di un collegamento.
+	 *
+	 * @param string $chiave Chiave.
+	 * @param int    $fa     Secondi fa.
+	 */
+	private function sposta_registrato( $chiave, $fa ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- La prova fissa gli istanti.
+		$wpdb->update(
+			Conformita_Core_Collegamenti::tabella(),
+			array( 'registrato' => gmdate( 'Y-m-d H:i:s', time() - $fa ) ),
+			array(
+				'sezione' => self::SEZIONE,
+				'chiave'  => $chiave,
+			)
+		);
 	}
 
 	/**
