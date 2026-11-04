@@ -718,3 +718,56 @@ if ( ! function_exists( 'conformita_core_versione_a_lucchetto_unico' ) ) {
 		return Conformita_Core_Lucchetti::versione_a_lucchetto_unico( (string) $versione );
 	}
 }
+
+if ( ! function_exists( 'conformita_core_registra_azione_alla_scadenza' ) ) {
+	/**
+	 * Registra che cosa fare sui contenuti scaduti di una sezione.
+	 *
+	 * Dalla 1.15.0. Il compito alla scadenza, a ogni esecuzione, prende i
+	 * contenuti dei tipi della sezione che sono in uno degli stati dati e la
+	 * cui data di fine e' passata, e chiama l'azione su ciascuno. L'azione e'
+	 * del componente: riceve l'identificativo e restituisce vero se ha fatto,
+	 * un errore altrimenti; dopo, il contenuto non deve piu' essere in uno
+	 * degli stati, o il compito lo riprende. Senza registrazione il compito non
+	 * tocca niente; gli stati non hanno un valore predefinito.
+	 *
+	 * @param string   $sezione Sezione registrata.
+	 * @param array    $stati   Gli stati da cui prendere i contenuti scaduti.
+	 * @param callable $azione  L'azione su ciascun contenuto.
+	 * @return true|WP_Error
+	 */
+	function conformita_core_registra_azione_alla_scadenza( $sezione, $stati, $azione ) {
+		return Conformita_Core_Compito_Scadenza::registra( $sezione, $stati, $azione );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_esegui_compito_scadenza' ) ) {
+	/**
+	 * Esegue adesso il compito alla scadenza.
+	 *
+	 * Dalla 1.15.0. Di norma lo esegue WordPress, ogni ora, quando il cron di
+	 * sistema chiama `wp-cron.php`. Una seconda esecuzione mentre gira la prima
+	 * rinuncia con un errore.
+	 *
+	 * @return array{contenuti: int, falliti: int, completo: bool}|WP_Error
+	 */
+	function conformita_core_esegui_compito_scadenza() {
+		return Conformita_Core_Compito_Scadenza::esegui();
+	}
+}
+
+if ( ! function_exists( 'conformita_core_battito_compito_scadenza' ) ) {
+	/**
+	 * L'ultima esecuzione del compito arrivata in fondo, o nulla se non ce n'e' stata.
+	 *
+	 * Dalla 1.15.0. Chiavi: `istante` (UTC, `Y-m-d H:i:s`), `contenuti`
+	 * (azioni riuscite), `falliti`, `completo` (falso se l'esecuzione si e'
+	 * fermata al massimo di contenuti e ne restano altri). Nessun dato dei
+	 * contenuti.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	function conformita_core_battito_compito_scadenza() {
+		return Conformita_Core_Compito_Scadenza::battito();
+	}
+}

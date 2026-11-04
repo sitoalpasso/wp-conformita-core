@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.14.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.15.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -51,6 +51,7 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-allegati
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-consegna.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-contatore.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-lucchetti.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-compito-scadenza.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-automatico.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-schermata.php';
@@ -123,3 +124,6 @@ register_activation_hook( __FILE__, array( 'Conformita_Core_Collegamenti', 'inst
 add_action( 'init', array( 'Conformita_Core_Collegamenti', 'pianifica' ) );
 add_action( Conformita_Core_Collegamenti::COMPITO, array( 'Conformita_Core_Collegamenti', 'lotto' ) );
 register_deactivation_hook( __FILE__, array( 'Conformita_Core_Collegamenti', 'togli_compito' ) );
+add_action( 'init', array( 'Conformita_Core_Compito_Scadenza', 'pianifica' ) );
+add_action( Conformita_Core_Compito_Scadenza::COMPITO, array( 'Conformita_Core_Compito_Scadenza', 'da_compito' ) );
+register_deactivation_hook( __FILE__, array( 'Conformita_Core_Compito_Scadenza', 'togli_compito' ) );
