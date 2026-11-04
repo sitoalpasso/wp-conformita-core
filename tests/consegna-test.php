@@ -1513,8 +1513,23 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		unset( $risposta['amministrazione'], $rifiuto['amministrazione'] );
 		$this->assertSame( $rifiuto, $risposta, 'Uno stato non dichiarato resta chiuso, con il rifiuto di sempre.' );
 
-		// Dal punto pubblico il concluso resta chiuso a tutti.
-		$this->assertSame( 404, $this->chiedi( $concluso, $allegato_concluso )['stato'] );
+		// Dal punto pubblico il concluso resta chiuso a tutti, anche con la fine nel futuro.
+		$in_corso          = $this->atto();
+		$allegato_in_corso = $this->allegato( $in_corso );
+
+		$this->assertSame( 200, $this->chiedi( $in_corso, $allegato_in_corso )['stato'], 'Pubblicato e valido si apre: senza, la prova sotto non misurerebbe niente.' );
+
+		$this->assertSame(
+			$in_corso,
+			wp_update_post(
+				array(
+					'ID'          => $in_corso,
+					'post_status' => 'prova_concluso',
+				)
+			)
+		);
+		$this->assertSame( 'prova_concluso', get_post_status( $in_corso ) );
+		$this->assertSame( 404, $this->chiedi( $in_corso, $allegato_in_corso )['stato'], 'Lo stesso contenuto, concluso, dal punto pubblico resta chiuso.' );
 	}
 
 	/**

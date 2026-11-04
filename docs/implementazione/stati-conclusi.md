@@ -78,7 +78,7 @@ punto pubblico non cambia niente: lì conta solo lo stato pubblicato.
 | Riga | Stato | Cosa verifica |
 |---|---|---|
 | C-327 | fatto | Rifiutati il tipo sconosciuto, l'elenco vuoto o non elenco, lo stato non testo, pubblicato, bozza, cestinato, lo stato non registrato, lo stato pubblico, quello privato, l'elenco con uno buono e uno no; dopo i rifiuti niente risulta dichiarato. Accettato lo stato registrato non pubblico; la seconda dichiarazione è rifiutata e non si aggiunge |
-| C-328 | fatto | Chi consulta: senza dichiarazione lo stato concluso è chiuso; dichiarato da un altro tipo resta chiuso; dichiarato dal suo tipo si apre, con il file giusto; uno stato non dichiarato resta chiuso con il rifiuto di sempre; dal punto pubblico il concluso è chiuso |
+| C-328 | fatto | Chi consulta: senza dichiarazione lo stato concluso è chiuso; dichiarato da un altro tipo resta chiuso; dichiarato dal suo tipo si apre, con il file giusto; uno stato non dichiarato resta chiuso con il rifiuto di sempre; dal punto pubblico un contenuto con la fine nel futuro si apre da pubblicato e resta chiuso appena passa allo stato concluso |
 | C-329 | fatto | Interfaccia `1.16.0`, compatibile con chi chiedeva `1.15.0` |
 
 ## 8. Cosa non implementa
@@ -105,3 +105,5 @@ aprire dalla schermata degli atti scaduti il documento di un atto concluso. Deve
 | Seconda dichiarazione che sovrascrive | C-327 |
 | Stato concluso per qualunque tipo | C-328 |
 | Interfaccia non alzata | C-329 |
+| Punto pubblico aperto agli stati conclusi, nei suoi due controlli dello stato | C-328 |
+| Lo stesso, in uno solo dei due controlli | nessuna, ed è equivalente: l'altro controllo chiude lo stesso |
