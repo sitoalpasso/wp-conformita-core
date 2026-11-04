@@ -21,8 +21,9 @@
  *
  * **Una alla volta.** Un'esecuzione tiene un lucchetto comune; una seconda,
  * nello stesso momento, rinuncia subito. Ogni esecuzione lavora a lotti e si
- * ferma a un massimo di contenuti: quello che resta lo prende la successiva.
- * Un contenuto la cui azione fallisce non ferma gli altri.
+ * ferma a un massimo di contenuti per sezione: la successiva riparte da dove
+ * si era fermata, cosi' contenuti che non si risolvono mai non tengono fermi
+ * quelli dopo. Un contenuto la cui azione fallisce non ferma gli altri.
  *
  * **Il battito.** Ogni esecuzione arrivata in fondo scrive l'istante in cui e'
  * finita e quanti contenuti ha toccato: e' la traccia che dice se il compito
@@ -49,6 +50,11 @@ final class Conformita_Core_Compito_Scadenza {
 	const BATTITO = 'conformita_core_battito_scadenza';
 
 	/**
+	 * L'opzione con il punto da cui riparte ogni sezione.
+	 */
+	const SEGNAPOSTO = 'conformita_core_compito_scadenza_segnaposto';
+
+	/**
 	 * Il lucchetto dell'esecuzione, distinto per sito.
 	 */
 	const LUCCHETTO = 'conformita_compito_scadenza';
@@ -59,7 +65,7 @@ final class Conformita_Core_Compito_Scadenza {
 	const LOTTO = 50;
 
 	/**
-	 * Contenuti al massimo in un'esecuzione.
+	 * Contenuti al massimo per sezione in un'esecuzione.
 	 */
 	const MASSIMO = 500;
 
@@ -123,56 +129,85 @@ final class Conformita_Core_Compito_Scadenza {
 		}
 
 		try {
-			$fatti   = 0;
-			$falliti = 0;
-			$provati = 0;
+			$fatti      = 0;
+			$falliti    = 0;
+			$completo   = true;
+			$segnaposti = get_option( self::SEGNAPOSTO, array() );
+			$segnaposti = is_array( $segnaposti ) ? $segnaposti : array();
 
 			foreach ( self::$azioni as $sezione => $azione ) {
-				$tentati = array();
+				/*
+				 * Ogni sezione ha il suo massimo, e riparte da dove si era
+				 * fermata: dopo l'ultimo contenuto provato fino in fondo, poi da
+				 * capo fino a li'. Cosi' contenuti che non si risolvono mai non
+				 * tengono fermi quelli dopo, ne' una sezione le altre.
+				 */
+				$partenza = isset( $segnaposti[ $sezione ] ) ? max( 0, (int) $segnaposti[ $sezione ] ) : 0;
+				$giri     = array( array( $partenza, null ) );
+				$provati  = 0;
+				$ultimo   = 0;
 
-				while ( $provati < self::MASSIMO ) {
-					$candidati = self::candidati( $sezione, $azione['stati'], $tentati );
+				if ( $partenza > 0 ) {
+					$giri[] = array( 0, $partenza );
+				}
 
-					if ( is_wp_error( $candidati ) ) {
-						return $candidati;
-					}
+				foreach ( $giri as $giro ) {
+					$dopo = $giro[0];
 
-					if ( array() === $candidati ) {
-						break;
-					}
+					while ( $provati < self::MASSIMO ) {
+						$candidati = self::candidati( $sezione, $azione['stati'], $dopo, $giro[1] );
 
-					foreach ( $candidati as $id ) {
-						if ( $provati >= self::MASSIMO ) {
+						if ( is_wp_error( $candidati ) ) {
+							return $candidati;
+						}
+
+						if ( array() === $candidati ) {
 							break;
 						}
 
-						$tentati[] = $id;
-						++$provati;
+						foreach ( $candidati as $id ) {
+							if ( $provati >= self::MASSIMO ) {
+								break;
+							}
 
-						if ( ! self::da_toccare( $id, $azione['stati'] ) ) {
-							continue;
-						}
+							$dopo   = $id;
+							$ultimo = $id;
+							++$provati;
 
-						try {
-							$esito = call_user_func( $azione['azione'], $id );
-						} catch ( Throwable $guasto ) {
-							// Il guasto di un'azione non ferma gli altri contenuti.
-							$esito = false;
-						}
+							if ( ! self::da_toccare( $id, $azione['stati'] ) ) {
+								continue;
+							}
 
-						if ( true === $esito ) {
-							++$fatti;
-						} else {
-							++$falliti;
+							try {
+								$esito = call_user_func( $azione['azione'], $id );
+							} catch ( Throwable $guasto ) {
+								// Il guasto di un'azione non ferma gli altri contenuti.
+								$esito = false;
+							}
+
+							if ( true === $esito ) {
+								++$fatti;
+							} else {
+								++$falliti;
+							}
 						}
 					}
 				}
+
+				if ( $provati >= self::MASSIMO ) {
+					$completo               = false;
+					$segnaposti[ $sezione ] = $ultimo;
+				} else {
+					unset( $segnaposti[ $sezione ] );
+				}
 			}
+
+			update_option( self::SEGNAPOSTO, $segnaposti, false );
 
 			$esito = array(
 				'contenuti' => $fatti,
 				'falliti'   => $falliti,
-				'completo'  => $provati < self::MASSIMO,
+				'completo'  => $completo,
 			);
 
 			update_option(
@@ -249,14 +284,15 @@ final class Conformita_Core_Compito_Scadenza {
 	}
 
 	/**
-	 * I prossimi contenuti scaduti di una sezione, dalla data di fine piu' vecchia.
+	 * I prossimi contenuti scaduti di una sezione, in ordine di identificativo.
 	 *
 	 * @param string            $sezione Sezione.
 	 * @param array<int,string> $stati   Stati.
-	 * @param array<int,int>    $tentati Contenuti gia' provati in questa esecuzione.
+	 * @param int               $dopo    Solo identificativi maggiori di questo.
+	 * @param int|null          $fino    Solo identificativi fino a questo compreso, o nessun limite.
 	 * @return array<int, int>|WP_Error
 	 */
-	private static function candidati( $sezione, array $stati, array $tentati ) {
+	private static function candidati( $sezione, array $stati, $dopo, $fino ) {
 		global $wpdb;
 
 		$tipi = array();
@@ -276,9 +312,12 @@ final class Conformita_Core_Compito_Scadenza {
 			. ' AND p.post_status IN (' . implode( ', ', array_fill( 0, count( $stati ), '%s' ) ) . ')';
 		$valori = array_merge( array( Conformita_Core_Scadenza::chiave(), Conformita_Core_Scadenza::giorno_corrente() ), $tipi, $stati );
 
-		if ( array() !== $tentati ) {
-			$sql   .= ' AND p.ID NOT IN (' . implode( ', ', array_fill( 0, count( $tentati ), '%d' ) ) . ')';
-			$valori = array_merge( $valori, $tentati );
+		$sql     .= ' AND p.ID > %d';
+		$valori[] = (int) $dopo;
+
+		if ( null !== $fino ) {
+			$sql     .= ' AND p.ID <= %d';
+			$valori[] = (int) $fino;
 		}
 
 		$sql     .= ' ORDER BY p.ID LIMIT %d';

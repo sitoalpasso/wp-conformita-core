@@ -1,11 +1,11 @@
 # Compito alla scadenza e battito: scheda di lavorazione
 
 **Repository: `wp-conformita-core`.** Unità S6 del piano, righe di collaudo C-40..C-42 e
-C-44 del catalogo, dettagliate in C-318..C-323. Versione dell'interfaccia da `1.14.0` a
+C-44 del catalogo, dettagliate in C-318..C-324. Versione dell'interfaccia da `1.14.0` a
 `1.15.0`. L'avviso al responsabile quando il battito invecchia (C-43) è una lavorazione
 successiva.
 
-**Stato: costruita, righe C-318..C-323 verdi in locale.** Le sezioni dicono quello che il
+**Stato: costruita, righe C-318..C-324 verdi in locale, corretta dopo il primo giro di revisione.** Le sezioni dicono quello che il
 codice fa.
 
 ---
@@ -41,7 +41,7 @@ sono nella tabella in fondo.
 - `includes/funzioni-api.php`: tre funzioni pubbliche.
 - `conformita-core.php`: il compito programmato all'avvio e tolto alla disattivazione,
   interfaccia `1.15.0`.
-- `tests/compito-scadenza-test.php`: C-318..C-323.
+- `tests/compito-scadenza-test.php`: C-318..C-324.
 
 ## 2. Requisito servito
 
@@ -65,15 +65,23 @@ questo lavoro: resta del filtro di lettura (ALBO-18).
 | Data assente o rotta | non si tocca | il filtro la tratta come scaduta per prudenza; un passaggio di stato su un dato rotto non lo decide nessuno |
 | Conferma prima dell'azione | si rilegge lo stato dalla banca dati e la data | fra la lettura del gruppo e l'azione un altro può aver cambiato il contenuto |
 | Concorrenza | lucchetto comune, attesa zero | la seconda esecuzione non aspetta: la prossima ora c'è un'altra esecuzione |
-| Quanti | gruppi da 50, al più 500 per esecuzione | un'esecuzione resta breve; `completo` falso dice che potrebbero restarne |
+| Quanti | gruppi da 50, al più 500 per sezione in un'esecuzione | un'esecuzione resta breve; `completo` falso dice che potrebbero restarne; una sezione non toglie il turno all'altra |
+| Da dove riparte | ogni sezione ricorda l'ultimo contenuto provato quando si è fermata al massimo; l'esecuzione dopo riparte da lì e poi torna da capo fino a quel punto; a giro finito si riparte da capo | contenuti che non si risolvono mai, se sono tanti, non tolgono il turno a quelli dopo: in un numero finito di esecuzioni ogni scaduto viene provato |
 | Azione che fallisce o si guasta | contata in `falliti`, si passa al contenuto dopo; la riprova l'esecuzione successiva | un contenuto difettoso non ferma gli altri |
 | Voce nel registro | la scrive il registro automatico, sul cambio di stato fatto dall'azione con WordPress | non serve una seconda voce, che direbbe la stessa cosa |
 | Battito | scritto solo da un'esecuzione arrivata in fondo, anche con azioni fallite | dice che il compito gira; i `falliti` dicono se qualcosa non va |
 | Da fuori | compito di WordPress ogni ora; sul server lo chiama il cron di sistema su `wp-cron.php` | funziona anche dove non c'è WP-CLI, e il cron interno spento non lo ferma |
 
+**Quando arriva il compito.** La data di fine è un giorno intero e l'atto scade alla
+mezzanotte che lo segue, nel fuso del sito: non c'è una scadenza a metà giornata. La lettura
+del gruppo confronta le date come testo (`fine < oggi`), ed è la stessa condizione. L'atto che
+scade stanotte lo prende la prima esecuzione dopo la mezzanotte; fino ad allora, e comunque
+dalla mezzanotte, il pubblico non lo vede già per il filtro di lettura.
+
 ## 5. Dati e permessi
 
-Un'opzione nuova, `conformita_core_battito_scadenza`, non caricata a ogni richiesta. Nessun
+Due opzioni nuove, `conformita_core_battito_scadenza` e
+`conformita_core_compito_scadenza_segnaposto`, non caricate a ogni richiesta. Nessun
 permesso nuovo: il compito non ha superfici registrate.
 
 ## 6. Modi di guasto previsti
@@ -83,6 +91,7 @@ permesso nuovo: il compito non ha superfici registrate.
 - Doppia esecuzione o concorrente: C-320.
 - Un contenuto difettoso che blocca gli altri: C-321.
 - Un contenuto cambiato mentre il compito lavora: C-321.
+- Contenuti che non si risolvono mai e tengono fermi quelli dopo, o una sezione che tiene ferma l'altra: C-324.
 - Battito scritto da un'esecuzione fallita: C-322.
 - Compito non programmato, o non agganciato: C-323.
 
@@ -96,6 +105,7 @@ permesso nuovo: il compito non ha superfici registrate.
 | C-321 | fatto | Un'azione che restituisce errore e una che lancia un'eccezione: gli altri sessanta (più di un gruppo) passano, i due contano come falliti e l'esecuzione dopo riprova solo loro. Un contenuto riportato in bozza mentre si lavora su un altro non riceve l'azione. Con 501 scaduti un'esecuzione ne fa 500 e dice di non aver finito, la successiva prende l'ultimo |
 | C-322 | fatto | Prima di ogni esecuzione nessun battito; dopo, l'istante dell'orologio e i conteggi. Con la lettura guasta: errore, e il battito resta quello di prima |
 | C-323 | fatto | Programmato ogni ora all'avvio, una volta sola; il compito di WordPress, chiamato come lo chiama `wp-cron.php`, fa il lavoro; alla disattivazione si toglie. Interfaccia `1.15.0`, compatibile con chi chiedeva `1.14.0` |
+| C-324 | fatto | Una data rotta che come testo viene prima di oggi e 499 contenuti la cui azione fallisce sempre riempiono il massimo; un contenuto buono dopo di loro e uno di un'altra sezione. La prima esecuzione fa quello dell'altra sezione e dice di non aver finito; la seconda riparte da dove si era fermata e fa il buono, poi torna da capo |
 
 ## 8. Cosa non implementa
 
@@ -138,6 +148,10 @@ porta l'ora della chiamata.
 | Compito non agganciato | C-323 |
 | Compito non programmato | C-323 |
 | Compito ogni giorno invece che ogni ora | C-323 |
+| Nessun segnaposto: ogni esecuzione riparte da capo | C-324 |
+| Massimo condiviso fra le sezioni | C-324 |
+| Nessun ritorno da capo dopo il segnaposto | C-324 |
+| Segnaposto non azzerato a giro finito | nessuna, ed è equivalente: l'esecuzione dopo riparte da quel punto e torna da capo, quindi prova comunque tutti |
 
 Il massimo tolto del tutto non si prova come guasto: con il gruppo pieno e nessun contenuto
 nuovo il ciclo non finirebbe, e la prova non tornerebbe. Lo vede comunque C-321 attraverso

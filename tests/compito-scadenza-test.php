@@ -1,6 +1,6 @@
 <?php
 /**
- * Compito alla scadenza e battito, righe C-318..C-323 del catalogo.
+ * Compito alla scadenza e battito, righe C-318..C-324 del catalogo.
  *
  * Scheda: `docs/implementazione/compito-alla-scadenza.md`.
  *
@@ -37,6 +37,7 @@ class Conformita_Core_Compito_Scadenza_Test extends WP_UnitTestCase {
 		Conformita_Core_Tipi::azzera();
 		Conformita_Core_Compito_Scadenza::azzera();
 		delete_option( Conformita_Core_Compito_Scadenza::BATTITO );
+		delete_option( Conformita_Core_Compito_Scadenza::SEGNAPOSTO );
 
 		foreach ( array(
 			self::SEZIONE       => self::TIPO,
@@ -445,6 +446,60 @@ class Conformita_Core_Compito_Scadenza_Test extends WP_UnitTestCase {
 
 		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.15.0', '>=' ) );
 		$this->assertTrue( conformita_core_api_compatibile( '1.14.0', conformita_core_versione_api() ) );
+	}
+
+	/**
+	 * C-324: contenuti che non si risolvono mai non tolgono il turno a quelli
+	 * dopo. Cinquecento la cui azione fallisce sempre, e prima di loro uno con
+	 * la data rotta in un modo che la lettura del gruppo non vede; poi uno buono
+	 * con l'identificativo piu' alto. L'esecuzione dopo riparte da dove si era
+	 * fermata, e poi torna da capo. Una sezione non toglie il turno all'altra.
+	 */
+	public function test_c324_nessuno_resta_indietro() {
+		$rotta = $this->contenuto( self::TIPO, 'publish', '' );
+
+		// Come stringa viene prima di oggi, ma non e' una data.
+		add_post_meta( $rotta, Conformita_Core_Scadenza::chiave(), '2026-02-31' );
+
+		$cattivi = array();
+
+		for ( $i = 1; $i < Conformita_Core_Compito_Scadenza::MASSIMO; ++$i ) {
+			$cattivi[] = $this->contenuto( self::TIPO, 'publish', '2026-10-01' );
+		}
+
+		$buono = $this->contenuto( self::TIPO, 'publish', '2026-10-01' );
+		$altra = $this->contenuto( self::TIPO_ALTRO, 'publish', '2026-10-01' );
+
+		$prova = function ( $id ) use ( $buono, $altra ) {
+			if ( $buono === $id || $altra === $id ) {
+				return $this->azione_privata( $id );
+			}
+
+			return new WP_Error( 'prova', 'non si risolve mai' );
+		};
+
+		$this->assertTrue( conformita_core_registra_azione_alla_scadenza( self::SEZIONE, array( 'publish' ), $prova ) );
+		$this->assertTrue( conformita_core_registra_azione_alla_scadenza( self::SEZIONE_ALTRA, array( 'publish' ), $prova ) );
+
+		$prima = conformita_core_esegui_compito_scadenza();
+
+		$this->assertSame(
+			array(
+				'contenuti' => 1,
+				'falliti'   => count( $cattivi ),
+				'completo'  => false,
+			),
+			$prima,
+			'Il massimo della prima sezione non toglie il turno all\'altra.'
+		);
+		$this->assertSame( 'private', get_post_status( $altra ) );
+		$this->assertSame( 'publish', get_post_status( $buono ), 'Precondizione: il buono e\' oltre il massimo.' );
+
+		$dopo = conformita_core_esegui_compito_scadenza();
+
+		$this->assertSame( 'private', get_post_status( $buono ), 'L\'esecuzione dopo riparte da dove si era fermata.' );
+		$this->assertSame( 1, $dopo['contenuti'] );
+		$this->assertFalse( $dopo['completo'], 'Poi torna da capo, e i cattivi riempiono di nuovo il massimo.' );
 	}
 
 	/**
