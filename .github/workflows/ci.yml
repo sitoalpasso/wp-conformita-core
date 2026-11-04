@@ -101,6 +101,10 @@ jobs:
     # Una banca dati che tiene un solo lucchetto per connessione e non conosce
     # RELEASE_ALL_LOCKS: WordPress la ammette ancora. L'ambiente di wp-env non
     # la offre, quindi qui la suite gira su un servizio a parte.
+    # La cartella si chiama come lo slug: c'e' una prova che lo verifica.
+    defaults:
+      run:
+        working-directory: conformita-core
     services:
       mysql:
         image: mariadb:5.5
@@ -116,6 +120,8 @@ jobs:
           --health-retries=5
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: conformita-core
 
       - name: Prepara PHP
         uses: shivammathur/setup-php@v2
@@ -127,6 +133,8 @@ jobs:
 
       - name: Installa le dipendenze PHP
         uses: ramsey/composer-install@v3
+        with:
+          working-directory: conformita-core
 
       - name: Installa subversion
         run: sudo apt-get update && sudo apt-get install -y subversion
