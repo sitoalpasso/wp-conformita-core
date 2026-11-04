@@ -637,6 +637,78 @@ final class Conformita_Core_Tipi {
 	}
 
 	/**
+	 * Gli stati di WordPress che non possono valere come fine della pubblicazione.
+	 *
+	 * Sono gli stati di lavoro e di servizio: un contenuto in uno di questi
+	 * non e' arrivato alla fine, e chi consulta gli scaduti non deve aprirne i
+	 * file.
+	 *
+	 * @var array<int, string>
+	 */
+	const STATI_NON_CONCLUSI = array( 'publish', 'future', 'draft', 'pending', 'private', 'trash', 'auto-draft', 'inherit', 'request-pending', 'request-confirmed', 'request-failed', 'request-completed' );
+
+	/**
+	 * Dichiara gli stati in cui un contenuto del tipo arriva quando la sua
+	 * pubblicazione e' finita regolarmente.
+	 *
+	 * Chi ha il solo permesso di consultare gli scaduti apre i file dei
+	 * contenuti in questi stati come quelli dei pubblicati. Gli stati sono
+	 * del componente e vanno gia' registrati in WordPress, non pubblici: uno
+	 * stato pubblico renderebbe il contenuto visibile a tutti, e la scadenza
+	 * non lo coprirebbe. Una dichiarazione per tipo, che non si sovrascrive.
+	 *
+	 * @param string $tipo  Identificativo del tipo.
+	 * @param mixed  $stati Elenco non vuoto di stati.
+	 * @return true|WP_Error
+	 */
+	public static function dichiara_stati_conclusi( $tipo, $stati ) {
+		$voce = self::voce( $tipo );
+
+		if ( is_wp_error( $voce ) ) {
+			return $voce;
+		}
+
+		$canonico = self::canonico( $tipo );
+
+		if ( isset( self::$tipi[ $canonico ]['conclusi'] ) ) {
+			return new WP_Error( 'conformita_core_conclusi_duplicato', __( 'Stati conclusi: il tipo li ha già dichiarati, e la dichiarazione non si sovrascrive.', 'conformita-core' ) );
+		}
+
+		if ( ! is_array( $stati ) || array() === $stati ) {
+			return new WP_Error( 'conformita_core_conclusi_stati', __( 'Stati conclusi: serve almeno uno stato. Non c\'è un elenco predefinito.', 'conformita-core' ) );
+		}
+
+		foreach ( $stati as $stato ) {
+			if ( ! is_string( $stato ) || 1 !== preg_match( '/^[a-z0-9_-]{1,20}$/', $stato ) || in_array( $stato, self::STATI_NON_CONCLUSI, true ) ) {
+				return new WP_Error( 'conformita_core_conclusi_stati', __( 'Stati conclusi: uno stato non è valido, oppure è uno stato di lavoro di WordPress.', 'conformita-core' ) );
+			}
+
+			$oggetto = get_post_status_object( $stato );
+
+			if ( ! $oggetto instanceof stdClass || ! empty( $oggetto->public ) || ! empty( $oggetto->private ) ) {
+				return new WP_Error( 'conformita_core_conclusi_stati', __( 'Stati conclusi: uno stato non è registrato in WordPress, oppure è pubblico o privato. Serve uno stato registrato e non pubblico.', 'conformita-core' ) );
+			}
+		}
+
+		self::$tipi[ $canonico ]['conclusi'] = array_values( array_unique( $stati ) );
+
+		return true;
+	}
+
+	/**
+	 * Se lo stato e' fra quelli dichiarati conclusi per il tipo.
+	 *
+	 * @param string $tipo  Identificativo del tipo.
+	 * @param string $stato Stato.
+	 * @return bool
+	 */
+	public static function stato_concluso( $tipo, $stato ) {
+		$canonico = self::canonico( $tipo );
+
+		return null !== $canonico && isset( self::$tipi[ $canonico ]['conclusi'] ) && in_array( $stato, self::$tipi[ $canonico ]['conclusi'], true );
+	}
+
+	/**
 	 * Identificativi dei tipi registrati, nell'ordine di registrazione.
 	 *
 	 * @return array<int, string>

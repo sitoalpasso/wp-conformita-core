@@ -164,7 +164,8 @@ if ( ! function_exists( 'conformita_core_capacita_consultazione_scaduti' ) ) {
 	 * Il permesso di consultare gli scaduti di un tipo registrato.
 	 *
 	 * Apre, dal punto amministrativo di consegna e in sola lettura, i file dei
-	 * contenuti pubblicati del tipo, scaduti compresi. Non dà nessun permesso
+	 * contenuti pubblicati del tipo, scaduti compresi, e dalla 1.16.0 quelli
+	 * negli stati dichiarati conclusi. Non dà nessun permesso
 	 * di gestione e non riapre il punto pubblico. Uno per tipo, non compreso
 	 * in conformita_core_capacita_tipo(). Core non lo assegna a nessun ruolo:
 	 * lo assegna il componente.
@@ -174,6 +175,26 @@ if ( ! function_exists( 'conformita_core_capacita_consultazione_scaduti' ) ) {
 	 */
 	function conformita_core_capacita_consultazione_scaduti( $tipo ) {
 		return Conformita_Core_Tipi::capacita_consultazione_scaduti( $tipo );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_dichiara_stati_conclusi' ) ) {
+	/**
+	 * Dichiara gli stati in cui un contenuto del tipo arriva quando la sua
+	 * pubblicazione e' finita regolarmente.
+	 *
+	 * Dalla 1.16.0. Chi ha il solo permesso di consultare gli scaduti apre i
+	 * file dei contenuti in questi stati come quelli dei pubblicati. Gli stati
+	 * vanno gia' registrati in WordPress e non sono pubblici ne' privati; gli
+	 * stati di lavoro di WordPress sono rifiutati. Una dichiarazione per tipo,
+	 * che non si sovrascrive.
+	 *
+	 * @param string $tipo  Identificativo del tipo.
+	 * @param array  $stati Elenco non vuoto di stati.
+	 * @return true|WP_Error
+	 */
+	function conformita_core_dichiara_stati_conclusi( $tipo, $stati ) {
+		return Conformita_Core_Tipi::dichiara_stati_conclusi( $tipo, $stati );
 	}
 }
 

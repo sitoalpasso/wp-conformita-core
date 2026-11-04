@@ -348,7 +348,8 @@ final class Conformita_Core_Consegna {
 
 		/*
 		 * Chi ha soltanto il permesso di consultare gli scaduti apre i file dei
-		 * contenuti pubblicati, scaduti compresi, e niente altro: bozze,
+		 * contenuti pubblicati, scaduti compresi, e di quelli negli stati che il
+		 * tipo ha dichiarato conclusi (C-328), e niente altro: bozze,
 		 * contenuti cestinati e allegati cestinati restano a chi gestisce il
 		 * tipo. Il controllo dello stato sta prima della catena e non dentro,
 		 * perché la catena non sa chi chiede. Righe C-278..C-280.
@@ -357,7 +358,7 @@ final class Conformita_Core_Consegna {
 
 		if (
 			$consulta
-			&& 'publish' === $contenuto->post_status
+			&& ( 'publish' === $contenuto->post_status || Conformita_Core_Tipi::stato_concluso( $contenuto->post_type, $contenuto->post_status ) )
 			&& $allegato_post instanceof WP_Post
 			&& 'inherit' === $allegato_post->post_status
 		) {
