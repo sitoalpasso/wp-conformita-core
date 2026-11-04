@@ -102,6 +102,19 @@ final class Conformita_Core_Lucchetti {
 		}
 
 		if ( $stato['unico'] && $stato['prese'] > 0 ) {
+			/*
+			 * La presa annidata non chiede il lucchetto, ma controlla che sia
+			 * ancora di questa connessione. Se la connessione e' caduta e
+			 * WordPress l'ha riaperta, la banca dati l'ha gia' lasciato e
+			 * un'altra richiesta puo' averlo preso: l'operazione di fuori
+			 * lavora gia' senza protezione, e quella di dentro non parte.
+			 */
+			$mio = $wpdb->get_var( $wpdb->prepare( 'SELECT IS_USED_LOCK( %s ) = CONNECTION_ID()', self::nome( $nome ) ) );
+
+			if ( '1' !== (string) $mio ) {
+				return false;
+			}
+
 			self::scrivi( array( 'prese' => $stato['prese'] + 1 ) + $stato );
 
 			return true;

@@ -168,6 +168,38 @@ class Conformita_Core_Lucchetti_Test extends WP_UnitTestCase {
 	}
 
 	/**
+	 * C-317: se la banca dati ha lasciato il lucchetto unico mentre la
+	 * richiesta lo contava come preso, per esempio con la connessione caduta e
+	 * riaperta, la presa annidata si rifiuta.
+	 */
+	public function test_c317_lucchetto_perso_sotto_una_presa() {
+		global $wpdb;
+
+		Conformita_Core_Lucchetto_Unico::attiva();
+
+		$this->assertTrue( conformita_core_prendi_lucchetto( self::PRIMO, 0 ) );
+
+		// La banca dati lascia il lucchetto, come alla caduta della connessione, e un'altra richiesta lo prende.
+		$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', conformita_core_nome_lucchetto( self::PRIMO ) ) );
+		$this->assertTrue( $this->da_un_altra_richiesta( static fn() => conformita_core_prendi_lucchetto( self::PRIMO, 0 ) ) );
+
+		$this->assertFalse( conformita_core_prendi_lucchetto( self::SECONDO, 0 ), 'La presa annidata non conta su un lucchetto che non c\'e\' piu\'.' );
+
+		// Lasciata la presa di fuori, la richiesta torna a chiedere il lucchetto alla banca dati, che e' occupato.
+		conformita_core_lascia_lucchetto( self::PRIMO );
+
+		$this->assertFalse( conformita_core_prendi_lucchetto( self::PRIMO, 0 ) );
+
+		// L'altra richiesta lascia: il lucchetto si riprende.
+		$this->da_un_altra_richiesta( static fn() => conformita_core_lascia_lucchetto( self::PRIMO ) );
+
+		$this->assertTrue( conformita_core_prendi_lucchetto( self::PRIMO, 0 ) );
+		$this->assertTrue( conformita_core_prendi_lucchetto( self::SECONDO, 0 ), 'Con il lucchetto di nuovo suo, la presa annidata riesce.' );
+		conformita_core_lascia_lucchetto( self::SECONDO );
+		conformita_core_lascia_lucchetto( self::PRIMO );
+	}
+
+	/**
 	 * C-313: il tipo di banca dati si legge dalla versione, e nel dubbio vale il lucchetto unico.
 	 */
 	public function test_c313_tipo_dalla_versione() {

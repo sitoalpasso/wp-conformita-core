@@ -1,9 +1,9 @@
 # Lucchetti della banca dati comuni ai componenti: scheda di lavorazione
 
-**Repository: `wp-conformita-core`.** Righe di collaudo C-311..C-316. Versione
+**Repository: `wp-conformita-core`.** Righe di collaudo C-311..C-317. Versione
 dell'interfaccia da `1.13.0` a `1.14.0`.
 
-**Stato: costruita, righe C-311..C-316 verdi in locale.** Le sezioni dicono quello che il
+**Stato: costruita, righe C-311..C-317 verdi in locale e su MariaDB 5.5 nella CI.** Le sezioni dicono quello che il
 codice fa.
 
 ---
@@ -45,7 +45,7 @@ guasti introdotti a mano sono nella tabella in fondo.
 - `includes/funzioni-api.php`: le funzioni pubbliche.
 - `conformita-core.php`: interfaccia `1.14.0`.
 - `tests/class-conformita-core-lucchetto-unico.php`: l'imitazione della banca dati vecchia.
-- `tests/lucchetti-test.php`: C-311..C-316.
+- `tests/lucchetti-test.php`: C-311..C-317.
 - `.github/workflows/ci.yml` e `bin/installa-suite-test.sh`: la suite anche su MariaDB 5.5.
 
 ## 2. Requisito servito
@@ -72,6 +72,16 @@ Il nome comune è il prefisso delle tabelle del sito, al più 40 caratteri, segu
 dato da un componente deve già essere distinto per sito: il componente comune non lo cambia
 dove i lucchetti sono distinti.
 
+**Lucchetto perso sotto una presa.** Se la connessione cade a metà operazione, WordPress la
+riapre, ma la banca dati ha già lasciato il lucchetto. Il conto delle prese, che è legato alla
+connessione di WordPress e non a quella della banca dati, direbbe ancora "preso". Per questo
+ogni presa annidata, sul lucchetto unico, chiede alla banca dati se il lucchetto è ancora di
+questa connessione (`IS_USED_LOCK( nome ) = CONNECTION_ID()`, una domanda leggera): se non lo
+è, la presa si rifiuta, come per un lucchetto occupato. L'operazione di fuori resta comunque
+senza protezione dal momento della caduta: questo vale per qualunque lucchetto della banca
+dati e non lo risolve nessun conto. Il controllo evita che la perdita si estenda alle
+operazioni annidate.
+
 ## 4. Dati letti e scritti
 
 Nessuno. Si legge la versione della banca dati, una volta per connessione.
@@ -87,6 +97,7 @@ Nessuno: sono funzioni interne, senza superfici registrate.
 - Presa trattenuta liberata da un'operazione successiva: C-312.
 - Versione non letta scambiata per una risposta: C-314.
 - Soglie delle versioni sbagliate: C-313.
+- Lucchetto perso mentre la richiesta lo conta come preso: C-317.
 
 ## 7. Prove
 
@@ -98,6 +109,7 @@ Nessuno: sono funzioni interne, senza superfici registrate.
 | C-314 | fatto | [guasto] Versione che non si legge: nessuna presa e nessun lucchetto chiesto, la domanda si ripete a ogni chiamata, anche per una presa chiusa o trattenuta; quando la banca dati risponde la presa riesce e la versione non si chiede più |
 | C-315 | fatto | Sulla banca dati vera, senza imitazione: la presa annidata non apre quella di fuori; dove i lucchetti sono distinti il nome resta quello del componente e un altro lucchetto è libero per le altre richieste; lasciato tutto, il lucchetto si riprende |
 | C-316 | fatto | Interfaccia `1.14.0`, compatibile con chi chiedeva `1.13.0` |
+| C-317 | fatto | [guasto] Con l'imitazione: la banca dati lascia il lucchetto unico sotto una presa aperta, come alla caduta della connessione, e un'altra richiesta lo prende; la presa annidata si rifiuta; lasciata quella di fuori, la presa successiva chiede alla banca dati e trova occupato; liberato, la presa e quella annidata riescono |
 
 ## 8. Cosa non implementa
 
@@ -135,3 +147,5 @@ con il messaggio dell'operazione in corso. Vale dopo il passaggio dell'albo a qu
 | Nome comune diverso a ogni presa | C-311, C-312 |
 | Nome comune senza il prefisso del sito | C-312 |
 | Interfaccia non alzata | C-316 |
+| La presa annidata non controlla che il lucchetto sia ancora suo | C-317 |
+| Il controllo accetta un lucchetto tenuto da chiunque | C-317 |
