@@ -32,7 +32,7 @@ defined( 'ABSPATH' ) || exit;
  * rompe la compatibilità. Serve perché l'intestazione `Requires Plugins` di
  * WordPress 6.5 accetta slug e non vincoli di versione.
  */
-defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.13.0' );
+defined( 'CONFORMITA_CORE_VERSIONE_API' ) || define( 'CONFORMITA_CORE_VERSIONE_API', '1.14.0' );
 
 /**
  * Percorso della cartella del plugin, con la barra finale.
@@ -50,6 +50,7 @@ require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-deposito
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-allegati.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-consegna.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-contatore.php';
+require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-lucchetti.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-automatico.php';
 require_once CONFORMITA_CORE_PERCORSO . 'includes/class-conformita-core-registro-schermata.php';

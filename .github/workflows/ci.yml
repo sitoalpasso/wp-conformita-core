@@ -95,6 +95,50 @@ jobs:
         if: always()
         run: npx wp-env stop
 
+  banca-dati-vecchia:
+    name: PHPUnit su MariaDB 5.5 (un solo lucchetto per connessione)
+    runs-on: ubuntu-latest
+    # Una banca dati che tiene un solo lucchetto per connessione e non conosce
+    # RELEASE_ALL_LOCKS: WordPress la ammette ancora. L'ambiente di wp-env non
+    # la offre, quindi qui la suite gira su un servizio a parte.
+    services:
+      mysql:
+        image: mariadb:5.5
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepara PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli
+          coverage: none
+          tools: composer
+
+      - name: Installa le dipendenze PHP
+        uses: ramsey/composer-install@v3
+
+      - name: Installa subversion
+        run: sudo apt-get update && sudo apt-get install -y subversion
+
+      - name: Prepara la suite di test di WordPress
+        run: bin/installa-suite-test.sh wordpress_test root root 127.0.0.1:3306 latest
+
+      - name: Esegui PHPUnit
+        env:
+          WP_TESTS_DIR: /tmp/wordpress-tests-lib
+        run: vendor/bin/phpunit
+
   descrittore:
     name: Validazione publiccode.yml
     runs-on: ubuntu-latest

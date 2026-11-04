@@ -599,3 +599,122 @@ if ( ! function_exists( 'conformita_core_verifica_collegamento' ) ) {
 		return Conformita_Core_Collegamenti::verifica( $sezione, $chiave );
 	}
 }
+
+if ( ! function_exists( 'conformita_core_prendi_lucchetto' ) ) {
+	/**
+	 * Prende un lucchetto della banca dati, attendendo al massimo i secondi indicati.
+	 *
+	 * Dalla 1.14.0. Dove la banca dati tiene un solo lucchetto per connessione,
+	 * tutti i lucchetti di tutti i componenti diventano lo stesso, contato qui:
+	 * una presa dentro un'altra della stessa connessione riesce subito, e il
+	 * lucchetto torna libero quando si lascia l'ultima. Senza una risposta
+	 * sulla versione della banca dati la presa si rifiuta, come un lucchetto
+	 * occupato.
+	 *
+	 * @param string $nome   Nome del lucchetto, gia' distinto per sito dal componente.
+	 * @param int    $attesa Secondi di attesa.
+	 * @return bool Vero se preso.
+	 */
+	function conformita_core_prendi_lucchetto( $nome, $attesa ) {
+		return Conformita_Core_Lucchetti::prendi( (string) $nome, (int) $attesa );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_lascia_lucchetto' ) ) {
+	/**
+	 * Lascia un lucchetto preso con `conformita_core_prendi_lucchetto()`.
+	 *
+	 * Dalla 1.14.0.
+	 *
+	 * @param string $nome Nome del lucchetto.
+	 */
+	function conformita_core_lascia_lucchetto( $nome ) {
+		Conformita_Core_Lucchetti::lascia( (string) $nome );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_trattieni_lucchetto' ) ) {
+	/**
+	 * Chiude una presa senza lasciare il lucchetto: lo lascia la banca dati alla
+	 * fine della connessione.
+	 *
+	 * Dalla 1.14.0. Serve dentro una transazione aperta da altri, dove le
+	 * scritture diventano definitive solo quando quella si chiude.
+	 *
+	 * @param string $nome Nome del lucchetto.
+	 */
+	function conformita_core_trattieni_lucchetto( $nome ) {
+		Conformita_Core_Lucchetti::trattieni( (string) $nome );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_lucchetto_chiuso_senza_rilascio' ) ) {
+	/**
+	 * Chiude una presa senza chiedere niente alla banca dati, per chi ha
+	 * lasciato il lucchetto con un'istruzione propria.
+	 *
+	 * Dalla 1.14.0.
+	 */
+	function conformita_core_lucchetto_chiuso_senza_rilascio() {
+		Conformita_Core_Lucchetti::presa_chiusa();
+	}
+}
+
+if ( ! function_exists( 'conformita_core_lucchetto_tenuto_qui' ) ) {
+	/**
+	 * Se il lucchetto unico e' gia' tenuto da un'altra presa di questa
+	 * connessione: un'operazione annidata, anche di un altro componente, o una
+	 * presa trattenuta. Dove i lucchetti sono distinti, sempre falso.
+	 *
+	 * Dalla 1.14.0.
+	 *
+	 * @param int $mie Le prese aperte che sono di chi chiede: zero prima di prendere, una prima di lasciare.
+	 * @return bool
+	 */
+	function conformita_core_lucchetto_tenuto_qui( $mie = 0 ) {
+		return Conformita_Core_Lucchetti::tenuto_da_altri_qui( (int) $mie );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_nome_lucchetto' ) ) {
+	/**
+	 * Il nome con cui un lucchetto arriva alla banca dati: quello dato, o quello
+	 * comune dove la banca dati ne tiene uno solo.
+	 *
+	 * Dalla 1.14.0. Per chi scrive istruzioni proprie sui lucchetti.
+	 *
+	 * @param string $nome Nome del lucchetto.
+	 * @return string
+	 */
+	function conformita_core_nome_lucchetto( $nome ) {
+		return Conformita_Core_Lucchetti::nome( (string) $nome );
+	}
+}
+
+if ( ! function_exists( 'conformita_core_lucchetto_unico' ) ) {
+	/**
+	 * Se la connessione tiene un solo lucchetto alla volta.
+	 *
+	 * Dalla 1.14.0.
+	 *
+	 * @return bool
+	 */
+	function conformita_core_lucchetto_unico() {
+		return Conformita_Core_Lucchetti::unico();
+	}
+}
+
+if ( ! function_exists( 'conformita_core_versione_a_lucchetto_unico' ) ) {
+	/**
+	 * Se una versione della banca dati, come la dice `VERSION()`, tiene un solo
+	 * lucchetto per connessione. Nel dubbio, si'.
+	 *
+	 * Dalla 1.14.0.
+	 *
+	 * @param string $versione La risposta di `VERSION()`.
+	 * @return bool
+	 */
+	function conformita_core_versione_a_lucchetto_unico( $versione ) {
+		return Conformita_Core_Lucchetti::versione_a_lucchetto_unico( (string) $versione );
+	}
+}
