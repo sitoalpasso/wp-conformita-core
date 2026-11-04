@@ -591,7 +591,15 @@ class Conformita_Core_Indicizzazione_Test extends WP_UnitTestCase {
 			'vietato'    => self::factory()->attachment->create_object( 'vietato.pdf', $vietato, array( 'post_mime_type' => 'application/pdf' ) ),
 			'consentito' => self::factory()->attachment->create_object( 'consentito.pdf', $consentito, array( 'post_mime_type' => 'application/pdf' ) ),
 			'articolo'   => self::factory()->attachment->create_object( 'articolo.pdf', $articolo, array( 'post_mime_type' => 'application/pdf' ) ),
-			'orfano'     => self::factory()->attachment->create_object( 'orfano.pdf', 0, array( 'post_mime_type' => 'application/pdf' ) ),
+			// Un nome che non e' un numero: con un identificativo di quattro cifre il nome predefinito si leggerebbe come un anno.
+			'orfano'     => self::factory()->attachment->create_object(
+				'orfano.pdf',
+				0,
+				array(
+					'post_mime_type' => 'application/pdf',
+					'post_name'      => 'allegato-orfano',
+				)
+			),
 		);
 
 		foreach ( $allegati as $nome => $allegato ) {
