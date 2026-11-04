@@ -39,3 +39,4 @@ tests_add_filter( 'muplugins_loaded', 'conformita_core_carica_plugin' );
 require $conformita_core_tests_dir . '/includes/bootstrap.php';
 
 require_once __DIR__ . '/class-conformita-core-risposta-registrata.php';
+require_once __DIR__ . '/class-conformita-core-lucchetto-unico.php';

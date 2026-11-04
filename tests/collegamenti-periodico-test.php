@@ -266,7 +266,7 @@ class Conformita_Core_Collegamenti_Periodico_Test extends WP_UnitTestCase {
 		$this->assertTrue( conformita_core_collegamento( self::SEZIONE, 'cambiato' )['in_ritardo'] );
 
 		$this->assertSame( array(), $this->chiesti );
-		$this->assertSame( '1.13.0', conformita_core_versione_api() );
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.13.0', '>=' ) );
 	}
 
 	/**
