@@ -344,6 +344,8 @@ final class Conformita_Core_Compito_Scadenza {
 	 * Il contenuto e' davvero scaduto, con una data valida, e ancora in uno
 	 * degli stati: la lettura per lotti puo' essere vecchia di qualche istante.
 	 *
+	 * Un contenuto che nel frattempo non c'e' piu' si salta.
+	 *
 	 * Una data assente o rotta il filtro la tratta come scaduta, per
 	 * prudenza; il compito no: un passaggio di stato su un dato rotto non lo
 	 * decide nessuno, e il contenuto si salta. Una lettura che la banca dati
@@ -358,7 +360,11 @@ final class Conformita_Core_Compito_Scadenza {
 
 		clean_post_cache( $id );
 
-		$stato = get_post_status( $id );
+		// Lo stato si legge dalla tabella, non con get_post_status(): quella
+		// passa per un filtro, e un'estensione che lo cambia farebbe saltare
+		// un contenuto scaduto senza che l'esecuzione se ne accorga.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- lettura fresca voluta, la cache e' stata appena pulita.
+		$stato = $wpdb->get_var( $wpdb->prepare( "SELECT post_status FROM {$wpdb->posts} WHERE ID = %d LIMIT 1", $id ) );
 
 		if ( '' !== (string) $wpdb->last_error ) {
 			return self::errore( 'conformita_core_compito_lettura', __( 'Compito alla scadenza: lo stato di un contenuto non si è potuto leggere dalla banca dati.', 'conformita-core' ) );

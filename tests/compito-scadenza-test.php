@@ -1,6 +1,6 @@
 <?php
 /**
- * Compito alla scadenza e battito, righe C-318..C-325 del catalogo.
+ * Compito alla scadenza e battito, righe C-318..C-326 del catalogo.
  *
  * Scheda: `docs/implementazione/compito-alla-scadenza.md`.
  *
@@ -525,7 +525,7 @@ class Conformita_Core_Compito_Scadenza_Test extends WP_UnitTestCase {
 
 		$casi = array(
 			'data'  => "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = {$primo} ",
-			'stato' => "SELECT * FROM {$wpdb->posts} WHERE ID = {$primo} ",
+			'stato' => "SELECT post_status FROM {$wpdb->posts} WHERE ID = {$primo} LIMIT",
 		);
 
 		foreach ( $casi as $caso => $inizio ) {
@@ -553,6 +553,67 @@ class Conformita_Core_Compito_Scadenza_Test extends WP_UnitTestCase {
 		// Controllo positivo: con la banca dati che risponde, tutti e due.
 		$this->assertSame( 2, conformita_core_esegui_compito_scadenza()['contenuti'] );
 		$this->assertSame( array( $primo, $secondo ), $this->chiamati );
+	}
+
+	/**
+	 * C-326: lo stato si legge dalla banca dati, non dal filtro di WordPress:
+	 * un'estensione che fa vedere un altro stato non fa saltare uno scaduto;
+	 * un contenuto cancellato nel frattempo si salta senza errore.
+	 */
+	public function test_c326_stato_letto_dalla_banca_dati() {
+		$scaduto = $this->contenuto( self::TIPO, 'publish', '2026-10-01' );
+		$sparito = $this->contenuto( self::TIPO, 'publish', '2026-10-01' );
+
+		$this->assertTrue(
+			conformita_core_registra_azione_alla_scadenza(
+				self::SEZIONE,
+				array( 'publish' ),
+				function ( $id ) use ( $sparito ) {
+					if ( $sparito === $id ) {
+						return true;
+					}
+
+					return $this->azione_privata( $id );
+				}
+			)
+		);
+
+		$finto = static function ( $stato, $post ) use ( $scaduto ) {
+			return $post instanceof WP_Post && $scaduto === $post->ID ? 'private' : $stato;
+		};
+
+		// Il contenuto sparito si cancella fra la scelta dei candidati e il controllo.
+		$cancella = static function ( $istruzione ) use ( $sparito ) {
+			global $wpdb;
+
+			if ( is_string( $istruzione ) && 0 === strpos( $istruzione, "SELECT post_status FROM {$wpdb->posts} WHERE ID = {$sparito} LIMIT" ) ) {
+				$wpdb->delete( $wpdb->posts, array( 'ID' => $sparito ) );
+			}
+
+			return $istruzione;
+		};
+
+		add_filter( 'get_post_status', $finto, 10, 2 );
+		add_filter( 'query', $cancella );
+
+		try {
+			$this->assertSame( 'private', get_post_status( $scaduto ), 'Il filtro e\' attivo.' );
+			$esito = conformita_core_esegui_compito_scadenza();
+		} finally {
+			remove_filter( 'get_post_status', $finto, 10 );
+			remove_filter( 'query', $cancella );
+		}
+
+		$this->assertSame(
+			array(
+				'contenuti' => 1,
+				'falliti'   => 0,
+				'completo'  => true,
+			),
+			$esito
+		);
+		$this->assertSame( array( $scaduto ), $this->chiamati, 'Lo scaduto riceve l\'azione, il cancellato no.' );
+		$this->assertNull( get_post( $sparito ) );
 	}
 
 	/**

@@ -1,11 +1,11 @@
 # Compito alla scadenza e battito: scheda di lavorazione
 
 **Repository: `wp-conformita-core`.** Unità S6 del piano, righe di collaudo C-40..C-42 e
-C-44 del catalogo, dettagliate in C-318..C-325. Versione dell'interfaccia da `1.14.0` a
+C-44 del catalogo, dettagliate in C-318..C-326. Versione dell'interfaccia da `1.14.0` a
 `1.15.0`. L'avviso al responsabile quando il battito invecchia (C-43) è una lavorazione
 successiva.
 
-**Stato: costruita, righe C-318..C-325 verdi in locale, corretta dopo il primo e il secondo giro di revisione.** Le sezioni dicono quello che il
+**Stato: costruita, righe C-318..C-326 verdi in locale, corretta dopo il primo, il secondo e il terzo giro di revisione.** Le sezioni dicono quello che il
 codice fa.
 
 ---
@@ -41,7 +41,7 @@ sono nella tabella in fondo.
 - `includes/funzioni-api.php`: tre funzioni pubbliche.
 - `conformita-core.php`: il compito programmato all'avvio e tolto alla disattivazione,
   interfaccia `1.15.0`.
-- `tests/compito-scadenza-test.php`: C-318..C-325.
+- `tests/compito-scadenza-test.php`: C-318..C-326.
 
 ## 2. Requisito servito
 
@@ -65,6 +65,7 @@ questo lavoro: resta del filtro di lettura (ALBO-18).
 | Data assente o rotta | non si tocca | il filtro la tratta come scaduta per prudenza; un passaggio di stato su un dato rotto non lo decide nessuno |
 | Stato o data che la banca dati non legge | l'esecuzione si ferma con un errore, senza battito e senza spostare il segnaposto | una lettura fallita non dice niente del contenuto: saltarlo farebbe passare per riuscito un giro con la banca dati guasta |
 | Conferma prima dell'azione | si rilegge lo stato dalla banca dati e la data | fra la lettura del gruppo e l'azione un altro può aver cambiato il contenuto |
+| Lettura dello stato nella conferma | dalla tabella, non con `get_post_status()` | quella passa per un filtro: un'estensione che fa vedere un altro stato farebbe saltare uno scaduto, e l'esecuzione direbbe lo stesso di aver finito senza errori |
 | Concorrenza | lucchetto comune, attesa zero | la seconda esecuzione non aspetta: la prossima ora c'è un'altra esecuzione |
 | Quanti | gruppi da 50, al più 500 per sezione in un'esecuzione | un'esecuzione resta breve; `completo` falso dice che potrebbero restarne; una sezione non toglie il turno all'altra |
 | Da dove riparte | ogni sezione ricorda l'ultimo contenuto provato quando si è fermata al massimo; l'esecuzione dopo riparte da lì e poi torna da capo fino a quel punto; a giro finito si riparte da capo | contenuti che non si risolvono mai, se sono tanti, non tolgono il turno a quelli dopo: in un numero finito di esecuzioni ogni scaduto viene provato |
@@ -95,6 +96,7 @@ permesso nuovo: il compito non ha superfici registrate.
 - Contenuti che non si risolvono mai e tengono fermi quelli dopo, o una sezione che tiene ferma l'altra: C-324.
 - Battito scritto da un'esecuzione fallita: C-322, C-325.
 - Compito non programmato, o non agganciato: C-323.
+- Stato cambiato da un filtro di un'altra estensione, contenuto cancellato fra la lettura del gruppo e la conferma: C-326.
 
 ## 7. Prove
 
@@ -108,6 +110,7 @@ permesso nuovo: il compito non ha superfici registrate.
 | C-323 | fatto | Programmato ogni ora all'avvio, una volta sola; il compito di WordPress, chiamato come lo chiama `wp-cron.php`, fa il lavoro; alla disattivazione si toglie. Interfaccia `1.15.0`, compatibile con chi chiedeva `1.14.0` |
 | C-324 | fatto | Una data rotta che come testo viene prima di oggi e 499 contenuti la cui azione fallisce sempre riempiono il massimo; un contenuto buono dopo di loro e uno di un'altra sezione. La prima esecuzione fa quello dell'altra sezione e dice di non aver finito; la seconda riparte da dove si era fermata e fa il buono, poi torna da capo |
 | C-325 | fatto | [guasto] La lettura della data, poi quella dello stato, del primo di due scaduti fallisce mentre la lettura del gruppo riesce: errore, nessuna azione nemmeno sul secondo, battito e segnaposto come prima. Con la banca dati che risponde, tutti e due |
+| C-326 | fatto | Un filtro di un'altra estensione fa vedere privato uno scaduto pubblicato: l'azione arriva lo stesso. Un secondo scaduto si cancella fra la lettura del gruppo e la conferma: si salta, senza errore e senza contarlo fra i falliti |
 
 ## 8. Cosa non implementa
 
@@ -157,6 +160,8 @@ porta l'ora della chiamata.
 | Stato non letto preso per stato diverso, e saltato | C-325 |
 | Errore di lettura saltato nell'esecuzione | C-325 |
 | Segnaposto non azzerato a giro finito | nessuna, ed è equivalente: l'esecuzione dopo riparte da quel punto e torna da capo, quindi prova comunque tutti |
+| Stato letto con `get_post_status()`, che passa per il filtro | C-325, C-326 |
+| Riga assente non saltata nella conferma | nessuna, ed è equivalente: la lettura della data trova il contenuto senza tipo e lo salta |
 
 Il massimo tolto del tutto non si prova come guasto: con il gruppo pieno e nessun contenuto
 nuovo il ciclo non finirebbe, e la prova non tornerebbe. Lo vede comunque C-321 attraverso
