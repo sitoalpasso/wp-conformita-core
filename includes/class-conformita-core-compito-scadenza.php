@@ -174,7 +174,14 @@ final class Conformita_Core_Compito_Scadenza {
 							$ultimo = $id;
 							++$provati;
 
-							if ( ! self::da_toccare( $id, $azione['stati'] ) ) {
+							$da_toccare = self::da_toccare( $id, $azione['stati'] );
+
+							// Una lettura fallita non e' un dato da saltare: l'esecuzione si ferma senza battito, e la prossima riparte dallo stesso punto.
+							if ( is_wp_error( $da_toccare ) ) {
+								return $da_toccare;
+							}
+
+							if ( ! $da_toccare ) {
 								continue;
 							}
 
@@ -339,16 +346,23 @@ final class Conformita_Core_Compito_Scadenza {
 	 *
 	 * Una data assente o rotta il filtro la tratta come scaduta, per
 	 * prudenza; il compito no: un passaggio di stato su un dato rotto non lo
-	 * decide nessuno.
+	 * decide nessuno, e il contenuto si salta. Una lettura che la banca dati
+	 * non porta a termine invece non dice niente del contenuto: e' un errore.
 	 *
 	 * @param int               $id    Contenuto.
 	 * @param array<int,string> $stati Stati.
-	 * @return bool
+	 * @return bool|WP_Error
 	 */
 	private static function da_toccare( $id, array $stati ) {
+		global $wpdb;
+
 		clean_post_cache( $id );
 
 		$stato = get_post_status( $id );
+
+		if ( '' !== (string) $wpdb->last_error ) {
+			return self::errore( 'conformita_core_compito_lettura', __( 'Compito alla scadenza: lo stato di un contenuto non si è potuto leggere dalla banca dati.', 'conformita-core' ) );
+		}
 
 		if ( ! is_string( $stato ) || ! in_array( $stato, $stati, true ) ) {
 			return false;
@@ -356,7 +370,15 @@ final class Conformita_Core_Compito_Scadenza {
 
 		$istante = Conformita_Core_Scadenza::istante( $id );
 
-		return ! is_wp_error( $istante ) && Conformita_Core_Scadenza::ora() >= $istante;
+		if ( is_wp_error( $istante ) ) {
+			if ( 'conformita_core_lettura_fallita' === $istante->get_error_code() ) {
+				return self::errore( 'conformita_core_compito_lettura', __( 'Compito alla scadenza: la data di fine di un contenuto non si è potuta leggere dalla banca dati.', 'conformita-core' ) );
+			}
+
+			return false;
+		}
+
+		return Conformita_Core_Scadenza::ora() >= $istante;
 	}
 
 	/**

@@ -1,11 +1,11 @@
 # Compito alla scadenza e battito: scheda di lavorazione
 
 **Repository: `wp-conformita-core`.** Unità S6 del piano, righe di collaudo C-40..C-42 e
-C-44 del catalogo, dettagliate in C-318..C-324. Versione dell'interfaccia da `1.14.0` a
+C-44 del catalogo, dettagliate in C-318..C-325. Versione dell'interfaccia da `1.14.0` a
 `1.15.0`. L'avviso al responsabile quando il battito invecchia (C-43) è una lavorazione
 successiva.
 
-**Stato: costruita, righe C-318..C-324 verdi in locale, corretta dopo il primo giro di revisione.** Le sezioni dicono quello che il
+**Stato: costruita, righe C-318..C-325 verdi in locale, corretta dopo il primo e il secondo giro di revisione.** Le sezioni dicono quello che il
 codice fa.
 
 ---
@@ -41,7 +41,7 @@ sono nella tabella in fondo.
 - `includes/funzioni-api.php`: tre funzioni pubbliche.
 - `conformita-core.php`: il compito programmato all'avvio e tolto alla disattivazione,
   interfaccia `1.15.0`.
-- `tests/compito-scadenza-test.php`: C-318..C-324.
+- `tests/compito-scadenza-test.php`: C-318..C-325.
 
 ## 2. Requisito servito
 
@@ -63,6 +63,7 @@ questo lavoro: resta del filtro di lettura (ALBO-18).
 |---|---|---|
 | Quali contenuti | dei tipi della sezione, in uno degli stati dichiarati, con data di fine anteriore al giorno corrente nel fuso del sito | è la stessa condizione del filtro di lettura: un contenuto è scaduto il giorno dopo la data di fine |
 | Data assente o rotta | non si tocca | il filtro la tratta come scaduta per prudenza; un passaggio di stato su un dato rotto non lo decide nessuno |
+| Stato o data che la banca dati non legge | l'esecuzione si ferma con un errore, senza battito e senza spostare il segnaposto | una lettura fallita non dice niente del contenuto: saltarlo farebbe passare per riuscito un giro con la banca dati guasta |
 | Conferma prima dell'azione | si rilegge lo stato dalla banca dati e la data | fra la lettura del gruppo e l'azione un altro può aver cambiato il contenuto |
 | Concorrenza | lucchetto comune, attesa zero | la seconda esecuzione non aspetta: la prossima ora c'è un'altra esecuzione |
 | Quanti | gruppi da 50, al più 500 per sezione in un'esecuzione | un'esecuzione resta breve; `completo` falso dice che potrebbero restarne; una sezione non toglie il turno all'altra |
@@ -92,7 +93,7 @@ permesso nuovo: il compito non ha superfici registrate.
 - Un contenuto difettoso che blocca gli altri: C-321.
 - Un contenuto cambiato mentre il compito lavora: C-321.
 - Contenuti che non si risolvono mai e tengono fermi quelli dopo, o una sezione che tiene ferma l'altra: C-324.
-- Battito scritto da un'esecuzione fallita: C-322.
+- Battito scritto da un'esecuzione fallita: C-322, C-325.
 - Compito non programmato, o non agganciato: C-323.
 
 ## 7. Prove
@@ -106,6 +107,7 @@ permesso nuovo: il compito non ha superfici registrate.
 | C-322 | fatto | Prima di ogni esecuzione nessun battito; dopo, l'istante dell'orologio e i conteggi. Con la lettura guasta: errore, e il battito resta quello di prima |
 | C-323 | fatto | Programmato ogni ora all'avvio, una volta sola; il compito di WordPress, chiamato come lo chiama `wp-cron.php`, fa il lavoro; alla disattivazione si toglie. Interfaccia `1.15.0`, compatibile con chi chiedeva `1.14.0` |
 | C-324 | fatto | Una data rotta che come testo viene prima di oggi e 499 contenuti la cui azione fallisce sempre riempiono il massimo; un contenuto buono dopo di loro e uno di un'altra sezione. La prima esecuzione fa quello dell'altra sezione e dice di non aver finito; la seconda riparte da dove si era fermata e fa il buono, poi torna da capo |
+| C-325 | fatto | [guasto] La lettura della data, poi quella dello stato, del primo di due scaduti fallisce mentre la lettura del gruppo riesce: errore, nessuna azione nemmeno sul secondo, battito e segnaposto come prima. Con la banca dati che risponde, tutti e due |
 
 ## 8. Cosa non implementa
 
@@ -151,6 +153,9 @@ porta l'ora della chiamata.
 | Nessun segnaposto: ogni esecuzione riparte da capo | C-324 |
 | Massimo condiviso fra le sezioni | C-324 |
 | Nessun ritorno da capo dopo il segnaposto | C-324 |
+| Data non letta presa per data rotta, e saltata | C-325 |
+| Stato non letto preso per stato diverso, e saltato | C-325 |
+| Errore di lettura saltato nell'esecuzione | C-325 |
 | Segnaposto non azzerato a giro finito | nessuna, ed è equivalente: l'esecuzione dopo riparte da quel punto e torna da capo, quindi prova comunque tutti |
 
 Il massimo tolto del tutto non si prova come guasto: con il gruppo pieno e nessun contenuto

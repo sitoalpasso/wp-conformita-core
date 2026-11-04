@@ -1,6 +1,6 @@
 <?php
 /**
- * Compito alla scadenza e battito, righe C-318..C-324 del catalogo.
+ * Compito alla scadenza e battito, righe C-318..C-325 del catalogo.
  *
  * Scheda: `docs/implementazione/compito-alla-scadenza.md`.
  *
@@ -500,6 +500,59 @@ class Conformita_Core_Compito_Scadenza_Test extends WP_UnitTestCase {
 		$this->assertSame( 'private', get_post_status( $buono ), 'L\'esecuzione dopo riparte da dove si era fermata.' );
 		$this->assertSame( 1, $dopo['contenuti'] );
 		$this->assertFalse( $dopo['completo'], 'Poi torna da capo, e i cattivi riempiono di nuovo il massimo.' );
+	}
+
+	/**
+	 * C-325: una lettura che la banca dati non porta a termine, dello stato o
+	 * della data di un contenuto, ferma l'esecuzione con un errore: nessuna
+	 * azione, battito e segnaposto come prima. Non vale come dato da saltare.
+	 */
+	public function test_c325_lettura_fallita_di_un_contenuto() {
+		global $wpdb;
+
+		$this->assertTrue( conformita_core_registra_azione_alla_scadenza( self::SEZIONE, array( 'publish' ), array( $this, 'azione_privata' ) ) );
+
+		// Un battito di prima, da un'esecuzione senza niente da fare.
+		$this->assertSame( 0, conformita_core_esegui_compito_scadenza()['contenuti'] );
+		$battito = conformita_core_battito_compito_scadenza();
+
+		update_option( Conformita_Core_Compito_Scadenza::SEGNAPOSTO, array( self::SEZIONE => 1 ), false );
+
+		$primo   = $this->contenuto( self::TIPO, 'publish', '2026-10-01' );
+		$secondo = $this->contenuto( self::TIPO, 'publish', '2026-10-01' );
+
+		Conformita_Core_Scadenza::fissa_orologio( new DateTimeImmutable( '2026-10-11 07:00:00', new DateTimeZone( 'UTC' ) ) );
+
+		$casi = array(
+			'data'  => "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = {$primo} ",
+			'stato' => "SELECT * FROM {$wpdb->posts} WHERE ID = {$primo} ",
+		);
+
+		foreach ( $casi as $caso => $inizio ) {
+			$guasto = static function ( $istruzione ) use ( $inizio ) {
+				return is_string( $istruzione ) && 0 === strpos( $istruzione, $inizio ) ? 'SELECT * FROM tabella_che_non_esiste' : $istruzione;
+			};
+
+			add_filter( 'query', $guasto );
+			$wpdb->suppress_errors( true );
+
+			try {
+				$errore = conformita_core_esegui_compito_scadenza();
+			} finally {
+				remove_filter( 'query', $guasto );
+				$wpdb->suppress_errors( false );
+			}
+
+			$this->assertWPError( $errore, $caso );
+			$this->assertSame( 'conformita_core_compito_lettura', $errore->get_error_code(), $caso );
+			$this->assertSame( array(), $this->chiamati, $caso . ': nessuna azione, nemmeno sul contenuto dopo.' );
+			$this->assertSame( $battito, conformita_core_battito_compito_scadenza(), $caso . ': il battito resta quello di prima.' );
+			$this->assertSame( array( self::SEZIONE => 1 ), get_option( Conformita_Core_Compito_Scadenza::SEGNAPOSTO ), $caso . ': il segnaposto non si tocca.' );
+		}
+
+		// Controllo positivo: con la banca dati che risponde, tutti e due.
+		$this->assertSame( 2, conformita_core_esegui_compito_scadenza()['contenuti'] );
+		$this->assertSame( array( $primo, $secondo ), $this->chiamati );
 	}
 
 	/**
