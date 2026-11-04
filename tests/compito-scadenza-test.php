@@ -207,11 +207,16 @@ class Conformita_Core_Compito_Scadenza_Test extends WP_UnitTestCase {
 			$this->assertSame( array(), $this->chiamati, 'Nessuna azione.' );
 			$this->assertNull( conformita_core_battito_compito_scadenza(), 'Nessun battito.' );
 		} finally {
-			$altra->query( 'SELECT RELEASE_ALL_LOCKS()' );
+			// RELEASE_ALL_LOCKS() non c'e' su MariaDB 5.5, e la chiusura libera il
+			// lucchetto in modo asincrono: si lascia per nome, prima di chiudere.
+			$altra->query( $altra->prepare( 'SELECT RELEASE_LOCK( %s )', conformita_core_nome_lucchetto( Conformita_Core_Compito_Scadenza::nome_lucchetto() ) ) );
 			$altra->close();
 		}
 
-		$this->assertSame( 1, conformita_core_esegui_compito_scadenza()['contenuti'] );
+		$esito = conformita_core_esegui_compito_scadenza();
+
+		$this->assertNotWPError( $esito );
+		$this->assertSame( 1, $esito['contenuti'] );
 
 		$voci = count( conformita_core_voci_registro( array( 'contenuto' => $scaduto ) ) );
 
@@ -231,7 +236,7 @@ class Conformita_Core_Compito_Scadenza_Test extends WP_UnitTestCase {
 		$dopo = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 
 		$this->assertSame( '1', (string) $dopo->get_var( $dopo->prepare( 'SELECT GET_LOCK( %s, 0 )', conformita_core_nome_lucchetto( Conformita_Core_Compito_Scadenza::nome_lucchetto() ) ) ), 'Il lucchetto e\' lasciato.' );
-		$dopo->query( 'SELECT RELEASE_ALL_LOCKS()' );
+		$dopo->query( $dopo->prepare( 'SELECT RELEASE_LOCK( %s )', conformita_core_nome_lucchetto( Conformita_Core_Compito_Scadenza::nome_lucchetto() ) ) );
 		$dopo->close();
 	}
 
