@@ -1,9 +1,9 @@
 name: CI
 
+# Per risparmiare i minuti gratuiti di GitHub Actions nei repository privati,
+# il giro di prova parte solo sulle pull request e a mano, non a ogni push sui
+# rami.
 on:
-  push:
-    branches:
-      - '**'
   pull_request:
   workflow_dispatch:
 
@@ -40,11 +40,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Solo le versioni minime dichiarate: l'ultima versione di WordPress con
+        # PHP 8.3 la copre il giro su MariaDB 5.5 qui sotto.
         include:
           - php: '8.1'
             wordpress: '6.5'
-          - php: '8.3'
-            wordpress: 'latest'
     steps:
       - uses: actions/checkout@v4
 
