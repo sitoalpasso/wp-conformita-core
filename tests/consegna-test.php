@@ -126,6 +126,12 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 		Conformita_Core_Allegati::azzera();
 
 		unset( $_SERVER['HTTP_RANGE'] );
+
+		global $wp_post_statuses;
+
+		foreach ( array( 'prova_concluso', 'prova_tolto', 'prova_aperto', 'prova_riservato' ) as $stato ) {
+			unset( $wp_post_statuses[ $stato ] );
+		}
 		unset( $_COOKIE[ 'wp-postpass_' . COOKIEHASH ] );
 		$_GET     = array();
 		$_REQUEST = array();
@@ -1405,6 +1411,134 @@ class Conformita_Core_Consegna_Test extends WP_UnitTestCase {
 			unset( $risposta['amministrazione'], $rifiuto['amministrazione'] );
 			$this->assertSame( $rifiuto, $risposta, 'Chi consulta riceve il rifiuto di sempre: ' . $caso . '.' );
 		}
+	}
+
+	/**
+	 * Registra gli stati delle prove sugli stati conclusi.
+	 */
+	private function stati_di_prova() {
+		register_post_status(
+			'prova_concluso',
+			array(
+				'public'    => false,
+				'internal'  => false,
+				'protected' => true,
+			)
+		);
+		register_post_status(
+			'prova_tolto',
+			array(
+				'public'    => false,
+				'protected' => true,
+			)
+		);
+		register_post_status( 'prova_aperto', array( 'public' => true ) );
+		register_post_status( 'prova_riservato', array( 'private' => true ) );
+	}
+
+	/**
+	 * C-327: la dichiarazione degli stati conclusi accetta solo stati del
+	 * componente, registrati e non pubblici, una volta per tipo.
+	 */
+	public function test_c327_dichiarazione_degli_stati_conclusi() {
+		$this->stati_di_prova();
+
+		$rifiuti = array(
+			'tipo sconosciuto'   => array( 'tipo_che_non_esiste', array( 'prova_concluso' ), 'conformita_core_tipo_sconosciuto' ),
+			'nessuno stato'      => array( self::TIPO, array(), 'conformita_core_conclusi_stati' ),
+			'non un elenco'      => array( self::TIPO, 'prova_concluso', 'conformita_core_conclusi_stati' ),
+			'non un testo'       => array( self::TIPO, array( 7 ), 'conformita_core_conclusi_stati' ),
+			'pubblicato'         => array( self::TIPO, array( 'publish' ), 'conformita_core_conclusi_stati' ),
+			'bozza'              => array( self::TIPO, array( 'draft' ), 'conformita_core_conclusi_stati' ),
+			'cestinato'          => array( self::TIPO, array( 'trash' ), 'conformita_core_conclusi_stati' ),
+			'non registrato'     => array( self::TIPO, array( 'prova_mai_vista' ), 'conformita_core_conclusi_stati' ),
+			'pubblico'           => array( self::TIPO, array( 'prova_aperto' ), 'conformita_core_conclusi_stati' ),
+			'privato'            => array( self::TIPO, array( 'prova_riservato' ), 'conformita_core_conclusi_stati' ),
+			'uno buono e uno no' => array( self::TIPO, array( 'prova_concluso', 'prova_aperto' ), 'conformita_core_conclusi_stati' ),
+		);
+
+		foreach ( $rifiuti as $caso => $prova ) {
+			$esito = conformita_core_dichiara_stati_conclusi( $prova[0], $prova[1] );
+
+			$this->assertWPError( $esito, $caso );
+			$this->assertSame( $prova[2], $esito->get_error_code(), $caso );
+			$this->assertFalse( Conformita_Core_Tipi::stato_concluso( self::TIPO, 'prova_concluso' ), $caso . ': niente e\' stato dichiarato.' );
+		}
+
+		$this->assertTrue( conformita_core_dichiara_stati_conclusi( self::TIPO, array( 'prova_concluso' ) ) );
+		$this->assertTrue( Conformita_Core_Tipi::stato_concluso( self::TIPO, 'prova_concluso' ) );
+		$this->assertFalse( Conformita_Core_Tipi::stato_concluso( self::TIPO, 'prova_tolto' ) );
+
+		$doppia = conformita_core_dichiara_stati_conclusi( self::TIPO, array( 'prova_tolto' ) );
+
+		$this->assertWPError( $doppia );
+		$this->assertSame( 'conformita_core_conclusi_duplicato', $doppia->get_error_code() );
+		$this->assertFalse( Conformita_Core_Tipi::stato_concluso( self::TIPO, 'prova_tolto' ), 'La seconda dichiarazione non si aggiunge alla prima.' );
+	}
+
+	/**
+	 * C-328: chi consulta apre i file di un contenuto in uno stato concluso
+	 * del suo tipo, e non quelli di uno stato non dichiarato o dichiarato da
+	 * un altro tipo.
+	 */
+	public function test_c328_chi_consulta_apre_i_file_dei_conclusi() {
+		$this->stati_di_prova();
+
+		$altro = $this->altro_tipo();
+
+		$concluso          = $this->atto( 'prova_concluso', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+		$allegato_concluso = $this->allegato( $concluso );
+		$tolto             = $this->atto( 'prova_tolto', gmdate( 'Y-m-d', strtotime( '-1 day' ) ) );
+		$allegato_tolto    = $this->allegato( $tolto );
+
+		wp_set_current_user( 0 );
+		$rifiuto = $this->chiedi_da_amministrazione( $concluso, $allegato_concluso );
+		$this->assertSame( 404, $rifiuto['stato'] );
+
+		// Prima della dichiarazione lo stato concluso e' chiuso come ogni stato non pubblicato.
+		wp_set_current_user( $this->utente_che_consulta() );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $concluso, $allegato_concluso )['stato'], 'Senza dichiarazione resta chiuso: senza, la prova sotto non misurerebbe niente.' );
+
+		// Lo dichiara l'altro tipo: per questo tipo non cambia niente.
+		$this->assertTrue( conformita_core_dichiara_stati_conclusi( $altro, array( 'prova_concluso' ) ) );
+		$this->assertSame( 404, $this->chiedi_da_amministrazione( $concluso, $allegato_concluso )['stato'], 'La dichiarazione vale per il suo tipo.' );
+
+		$this->assertTrue( conformita_core_dichiara_stati_conclusi( self::TIPO, array( 'prova_concluso' ) ) );
+
+		$risposta = $this->chiedi_da_amministrazione( $concluso, $allegato_concluso );
+		$this->assertSame( 200, $risposta['stato'] );
+		$this->assertSame( realpath( get_attached_file( $allegato_concluso ) ), $risposta['percorso'] );
+
+		$risposta = $this->chiedi_da_amministrazione( $tolto, $allegato_tolto );
+		unset( $risposta['amministrazione'], $rifiuto['amministrazione'] );
+		$this->assertSame( $rifiuto, $risposta, 'Uno stato non dichiarato resta chiuso, con il rifiuto di sempre.' );
+
+		// Dal punto pubblico il concluso resta chiuso a tutti, anche con la fine nel futuro.
+		$in_corso          = $this->atto();
+		$allegato_in_corso = $this->allegato( $in_corso );
+
+		$this->assertSame( 200, $this->chiedi( $in_corso, $allegato_in_corso )['stato'], 'Pubblicato e valido si apre: senza, la prova sotto non misurerebbe niente.' );
+
+		$this->assertSame(
+			$in_corso,
+			wp_update_post(
+				array(
+					'ID'          => $in_corso,
+					'post_status' => 'prova_concluso',
+				)
+			)
+		);
+		$this->assertSame( 'prova_concluso', get_post_status( $in_corso ) );
+		$this->assertSame( 404, $this->chiedi( $in_corso, $allegato_in_corso )['stato'], 'Lo stesso contenuto, concluso, dal punto pubblico resta chiuso.' );
+	}
+
+	/**
+	 * C-329: l'interfaccia che porta gli stati conclusi e' la 1.16.0.
+	 */
+	public function test_c329_interfaccia() {
+		$this->assertTrue( version_compare( conformita_core_versione_api(), '1.16.0', '>=' ) );
+		$this->assertTrue( conformita_core_api_compatibile( '1.15.0', conformita_core_versione_api() ) );
+		$this->assertTrue( function_exists( 'conformita_core_dichiara_stati_conclusi' ) );
 	}
 
 	/**
